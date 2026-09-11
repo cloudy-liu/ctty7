@@ -82,8 +82,15 @@ impl CLIAgent {
             // kimi-cli install a `kimi` — same vendor, same brand, so one
             // detection covers them. Only the standalone one has hooks.
             CLIAgent::Kimi => &["kimi", "kimi-code"],
-            // `qoder` launches the IDE; CLI wrappers can use a custom rule.
-            CLIAgent::QoderCLI => &["qodercli"],
+            // The npm package installs two binaries and `qoder` is the one the
+            // documentation tells people to run: it dispatches to the CLI for a
+            // bare invocation, a flag, or a prompt, and only hands off to the
+            // IDE for `ide`/`chat`/`serve-web`/`tunnel` or a path that exists.
+            // Detecting only `qodercli` would miss every session started the
+            // documented way, since the dispatcher is what the pty sees. An IDE
+            // launch is the cost: it wears the CLI's avatar for as long as the
+            // launcher takes to exit.
+            CLIAgent::QoderCLI => &["qoder", "qodercli"],
         }
     }
 
@@ -629,12 +636,12 @@ impl CLIAgent {
                 "--worktree-ref",
                 "--ref",
             ],
-            // `--resume`/`-r` resumes a past session and `--continue`/`-c` the
-            // most recent one, both of which clash with the `--resume {id}`
-            // this command appends; `--session-id` names a *new* session and is
-            // rejected next to `--resume`, and `--fork-session` is the flag the
-            // fork variant appends itself. `--worktree` would create or switch
-            // trees again; Qoder's `-w` means `--cwd` and must survive.
+            // `--resume`/`-r` restores a past session and `--continue`/`-c` the
+            // most recent one; `--session-id` is a third spelling of the same
+            // thing. All three clash with the `--resume {id}` this command
+            // appends, and `--fork-session` is the flag the fork variant
+            // appends itself. `--worktree` would create or switch trees again;
+            // Qoder's `-w` means `--cwd` and must survive.
             CLIAgent::QoderCLI => &[
                 "--resume",
                 "-r",
@@ -1337,6 +1344,32 @@ mod tests {
             ])),
             Some(CLIAgent::Claude)
         );
+    }
+
+    /// The npm package installs `qoder` and `qodercli`, and the documentation
+    /// tells people to run the first one. Both are `#!/usr/bin/env node`
+    /// scripts, so what the pty carries is node plus the path to the shim —
+    /// the dispatcher's own child, which is where the name `qodercli` appears
+    /// on that path, is not the process group leader and is never read.
+    #[test]
+    fn qoder_is_detected_through_either_of_its_binaries() {
+        for launcher in [
+            "qoder",
+            "qodercli",
+            "/opt/homebrew/bin/qoder",
+            "/opt/homebrew/bin/qodercli",
+        ] {
+            assert_eq!(
+                CLIAgent::detect_from_argv(&argv(&["node", launcher])),
+                Some(CLIAgent::QoderCLI),
+                "on {launcher}"
+            );
+            assert_eq!(
+                CLIAgent::detect_from_argv(&argv(&[launcher])),
+                Some(CLIAgent::QoderCLI),
+                "on {launcher}"
+            );
+        }
     }
 
     #[test]

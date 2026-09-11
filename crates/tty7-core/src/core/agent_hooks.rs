@@ -1805,12 +1805,20 @@ mod tests {
             r#"{"session_id":"q-1","prompt":"Look up my tickets"}"#,
         );
         assert_eq!(state.status, AgentStatus::Working);
-        apply_hook(
-            &mut state,
-            "Notification",
-            r#"{"notification_type":"auth_success","message":"Signed in"}"#,
+        // Qoder says outright when it is blocked — `PermissionRequest` and
+        // `Elicitation` — so it must not also carry `Notification`, which
+        // fires for non-blocking alerts and would strand the pane on
+        // "waiting". Asserting the map has no seat for it is the check; a
+        // `Notification` payload put through `apply_hook` would be dropped
+        // for want of one and prove nothing.
+        assert!(
+            !HookAgent::QoderCLI
+                .hook_map_events()
+                .unwrap()
+                .iter()
+                .any(|(hook, _)| *hook == "Notification"),
+            "an unblocking alert must not read as a question"
         );
-        assert_eq!(state.status, AgentStatus::Working);
 
         // The MCP tool is already authorized, so no PermissionRequest precedes
         // its request for more information from the user.
