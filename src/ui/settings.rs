@@ -660,6 +660,11 @@ fn settings_search_entries() -> &'static [SearchEntry] {
             keywords: SettingsSearchQoderCLIKeywords,
         },
         SearchEntry {
+            section: Agents,
+            title: SettingsAgentCodeBuddy,
+            keywords: SettingsSearchCodeBuddyKeywords,
+        },
+        SearchEntry {
             section: WindowTabs,
             title: SettingsStartupWindow,
             keywords: SettingsSearchStartupWindowKeywords,
