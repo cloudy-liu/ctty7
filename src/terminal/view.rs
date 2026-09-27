@@ -1575,9 +1575,9 @@ impl TerminalView {
     }
 
     /// What the agent in this pane is doing: the hooks' report and the screen's
-    /// reading, reconciled the way herdr reconciles them. Everything that shows
-    /// a status reads it here rather than from [`Self::agent_session`], which
-    /// only knows what the hooks said.
+    /// reading, reconciled by [`crate::terminal::screen_status::merge`].
+    /// Everything that shows a status reads it here rather than from
+    /// [`Self::agent_session`], which only knows what the hooks said.
     pub fn agent_status(&self) -> Option<crate::core::cli_agent::AgentStatus> {
         let session = self.terminal.agent_session();
         match self.agent() {
@@ -3597,10 +3597,12 @@ impl TerminalView {
             .observe(agent, self.output_seq, title, || {
                 crate::terminal::screen_status::detection_text(&term.lock())
             });
-        let screen_read = self.screen_status.status().is_some();
 
+        // Notifications stay with agents whose hooks report, as before the
+        // screen was read. For the rest the screen only moves the badge, and
+        // they keep the one notice when the agent exits.
         let session = self.terminal.agent_session();
-        if session.as_ref().is_some_and(|s| s.rich) || screen_read {
+        if session.as_ref().is_some_and(|s| s.rich) {
             self.agent_was_rich = true;
         }
         if agent.is_none() && session.is_none() {
@@ -3641,8 +3643,7 @@ impl TerminalView {
             }
         }
 
-        // A status read off the screen is as much a report as a hook's.
-        let rich = session.as_ref().is_some_and(|s| s.rich) || screen_read;
+        let rich = session.as_ref().is_some_and(|s| s.rich);
         let agent_name = self
             .terminal
             .foreground_agent()

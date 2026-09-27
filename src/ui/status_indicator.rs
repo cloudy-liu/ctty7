@@ -1,4 +1,4 @@
-//! The mark an agent avatar wears in its corner.
+//! The mark a tab avatar wears in its corner while an agent runs in the pane.
 //!
 //! Herdr's five states and its "distinct symbols" style, drawn the way herdr
 //! draws them: blocked `×`, working `◐`, done `✓`, idle `○`, unknown `·`. The
@@ -85,15 +85,25 @@ impl StatusIndicator {
         }
     }
 
+    /// The colour to draw this state in over `surface`: herdr's dark palette
+    /// on a dark surface, its light one on a light surface.
+    pub fn color(self, surface: gpui::Hsla) -> gpui::Rgba {
+        gpui::rgb(self.rgb(crate::ui::presets::surface_is_dark(surface)))
+    }
+
+    /// Catppuccin Mocha's base, the surface herdr's dark colours are drawn
+    /// for, for a mark that has to bring its own.
+    pub const DARK_SURFACE: u32 = 0x1E1E2E;
+
     /// The word the sidebar writes ahead of a row's second line — herdr's own
-    /// English words in every locale, the way herdr writes them.
+    /// English words in every locale, the way herdr writes them. Herdr writes
+    /// "idle" for unknown too, and leaves the colour to tell them apart.
     pub fn word(self) -> &'static str {
         match self {
             StatusIndicator::Blocked => "blocked",
             StatusIndicator::Working => "working",
             StatusIndicator::Done => "done",
-            StatusIndicator::Idle => "idle",
-            StatusIndicator::Unknown => "unknown",
+            StatusIndicator::Idle | StatusIndicator::Unknown => "idle",
         }
     }
 
@@ -165,8 +175,11 @@ mod tests {
         let labels: std::collections::HashSet<&str> =
             StatusIndicator::ALL.iter().map(|s| s.label()).collect();
         assert_eq!(labels.len(), StatusIndicator::ALL.len());
-        let words: std::collections::HashSet<&str> =
-            StatusIndicator::ALL.iter().map(|s| s.word()).collect();
-        assert_eq!(words.len(), StatusIndicator::ALL.len());
+    }
+
+    #[test]
+    fn the_sidebar_words_are_herdrs() {
+        let words: Vec<&str> = StatusIndicator::ALL.iter().map(|s| s.word()).collect();
+        assert_eq!(words, ["blocked", "working", "done", "idle", "idle"]);
     }
 }

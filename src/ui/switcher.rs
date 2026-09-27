@@ -164,7 +164,6 @@ struct TabRow {
     named: bool,
     avatar: TabAvatar,
     indicator: Option<crate::ui::status_indicator::StatusIndicator>,
-    ssh: Option<crate::ui::status_indicator::StatusIndicator>,
     active: bool,
     /// Branch and diff counts, the same line the tab sidebar shows. Only this
     /// window's own tabs have it — the machine tree carries no git state.
@@ -935,7 +934,6 @@ impl Tty7App {
                             .unwrap_or_default(),
                         avatar: TabAvatar::choose(focused.agent, tab.foreground_app(None, cx)),
                         indicator: focused.indicator(),
-                        ssh: self.tab_ssh_indicator(tab, cx),
                         active: i == self.active,
                         git: tab.git_status(None, cx),
                     }
@@ -983,7 +981,6 @@ impl Tty7App {
                 indicator: v.focused_agent.map(|_| {
                     crate::ui::status_indicator::StatusIndicator::of_agent(v.focused_status, true)
                 }),
-                ssh: None,
                 active: Some(v.id) == active,
                 git: git(v.cwd.as_deref()),
                 index: i,
@@ -2858,7 +2855,6 @@ impl Tty7App {
                         ("switcher-avatar", index),
                         tab.avatar,
                         tab.indicator,
-                        tab.ssh,
                         ROW_AVATAR,
                         cx,
                     ))
@@ -3391,7 +3387,6 @@ mod tests {
             named: false,
             avatar: TabAvatar::Terminal,
             indicator: None,
-            ssh: None,
             active: false,
             git: None,
         }

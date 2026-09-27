@@ -6205,29 +6205,6 @@ impl Tty7App {
         self.settings.as_mut()
     }
 
-    /// The mark an SSH tab wears while its link needs watching. A healthy
-    /// connection wears none: its green dot was the same green as a finished
-    /// agent turn, and said nothing the tab's title did not.
-    pub(crate) fn tab_ssh_indicator(
-        &self,
-        tab: &Tab,
-        cx: &App,
-    ) -> Option<crate::ui::status_indicator::StatusIndicator> {
-        use crate::daemon::protocol::SshPhase;
-        use crate::ui::status_indicator::StatusIndicator;
-        let leaf = tab.pane.first_leaf()?;
-        let v = leaf.terminal()?.read(cx);
-        let phase = v.ssh_phase()?;
-        if v.ssh_disconnected() {
-            return Some(StatusIndicator::Blocked);
-        }
-        match phase {
-            SshPhase::Connecting | SshPhase::Authenticating => Some(StatusIndicator::Working),
-            SshPhase::Connected => None,
-            SshPhase::Failed { .. } => Some(StatusIndicator::Blocked),
-        }
-    }
-
     fn leaf_is_warn_ssh(&self, leaf: &Entity<TerminalView>, cx: &App) -> bool {
         use crate::daemon::protocol::SshPhase;
         let v = leaf.read(cx);

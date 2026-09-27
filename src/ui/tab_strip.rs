@@ -835,7 +835,7 @@ pub(crate) fn workspace_avatar(
                 .text_color(cx.theme().foreground.opacity(0.65))
                 .child(initial),
         )
-        .children(dot.map(|rgb| Tty7App::status_dot(rgb, size, cx.theme().popover)))
+        .children(dot.map(|rgb| Tty7App::liveness_dot(rgb, size, cx.theme().popover)))
 }
 
 pub(crate) fn select_workspace_action(index: usize) -> Option<Box<dyn gpui::Action>> {
@@ -1101,7 +1101,7 @@ impl Tty7App {
     }
 
     /// A workspace's liveness dot: a plain disc hung off the avatar's corner.
-    fn status_dot(rgb: u32, size: f32, ring: gpui::Hsla) -> gpui::AnyElement {
+    fn liveness_dot(rgb: u32, size: f32, ring: gpui::Hsla) -> gpui::AnyElement {
         let d = (size * 0.42).max(7.);
         // The halo was the surface itself, which is only a ring while the
         // surface is light — on a dark theme it went near-black and read as a
@@ -1133,7 +1133,6 @@ impl Tty7App {
         surface: gpui::Hsla,
     ) -> gpui::AnyElement {
         let d = (size * 0.5).max(9.);
-        let dark = crate::ui::presets::surface_is_dark(surface);
         div()
             .absolute()
             .right(px(-(d * 0.25)))
@@ -1148,7 +1147,7 @@ impl Tty7App {
                 gpui::svg()
                     .path(indicator.icon_path())
                     .size(px(d * 0.9))
-                    .text_color(gpui::rgb(indicator.rgb(dark))),
+                    .text_color(indicator.color(surface)),
             )
             .into_any_element()
     }
@@ -1158,7 +1157,6 @@ impl Tty7App {
         id: impl Into<gpui::ElementId>,
         avatar: TabAvatar,
         indicator: Option<crate::ui::status_indicator::StatusIndicator>,
-        ssh: Option<crate::ui::status_indicator::StatusIndicator>,
         size: f32,
         cx: &App,
     ) -> gpui::AnyElement {
@@ -1214,9 +1212,6 @@ impl Tty7App {
                         .size(px(size * 0.56))
                         .text_color(cx.theme().foreground.opacity(0.65)),
                 )
-                .when_some(ssh, |b, ssh| {
-                    b.child(Self::status_badge(ssh, size, surface))
-                })
                 .into_any_element(),
         }
     }
@@ -1608,7 +1603,6 @@ impl Tty7App {
             let is_active = i == active;
             let label = self.tab_label(tab, i, Some(window), cx);
             let full_title = self.tab_title_tooltip(tab, i, Some(window), cx);
-            let ssh_indicator = self.tab_ssh_indicator(tab, cx);
             let agent_badge = tab.focused_agent_badge(Some(window), cx);
             let agent = agent_badge.agent;
             let avatar = TabAvatar::choose(agent, tab.foreground_app(Some(window), cx));
@@ -1720,25 +1714,8 @@ impl Tty7App {
                         this.activate(i, window, cx);
                     }
                 }))
-                .when_some(ssh_indicator, |c, ssh| {
-                    let dark = crate::ui::presets::surface_is_dark(cx.theme().background);
-                    c.child(
-                        gpui::svg()
-                            .flex_shrink_0()
-                            .path(ssh.icon_path())
-                            .size(px(10.))
-                            .text_color(gpui::rgb(ssh.rgb(dark))),
-                    )
-                })
                 .when(avatar != TabAvatar::Terminal, |chip| {
-                    chip.child(self.tab_avatar(
-                        ("tab-avatar", i),
-                        avatar,
-                        agent_indicator,
-                        None,
-                        18.,
-                        cx,
-                    ))
+                    chip.child(self.tab_avatar(("tab-avatar", i), avatar, agent_indicator, 18., cx))
                 })
                 .child(label_region)
                 .when(show_badges && i < 9, |chip| {

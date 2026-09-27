@@ -93,9 +93,10 @@ pub(super) fn agent_avatar(
     );
 
     // The same symbol the tab avatars wear. A tray menu's background belongs to
-    // the OS, so the symbol brings its own surface: Catppuccin Mocha's base,
-    // the one herdr's dark colours are drawn for.
-    let indicator = crate::ui::status_indicator::StatusIndicator::of_status(status);
+    // the OS, so the symbol brings its own surface, the one herdr's dark
+    // colours are drawn for.
+    use crate::ui::status_indicator::StatusIndicator;
+    let indicator = StatusIndicator::of_status(status);
     let (cx, cy, r) = (s * 0.78, s * 0.78, s * 0.22);
     let circle = |radius: f32| {
         let mut pb = tiny_skia::PathBuilder::new();
@@ -114,7 +115,8 @@ pub(super) fn agent_avatar(
     }
     if let Some(disc) = circle(r) {
         paint.blend_mode = tiny_skia::BlendMode::SourceOver;
-        paint.set_color_rgba8(0x1E, 0x1E, 0x2E, 0xFF);
+        let [_, red, green, blue] = StatusIndicator::DARK_SURFACE.to_be_bytes();
+        paint.set_color_rgba8(red, green, blue, 0xFF);
         pixmap.fill_path(
             &disc,
             &paint,

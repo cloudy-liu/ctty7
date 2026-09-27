@@ -92,7 +92,7 @@ struct SidebarInfo {
     branch: Option<(SharedString, u32, u32)>,
     /// Full working directory, when the row's second line was elided.
     cwd: Option<SharedString>,
-    /// Remote host, when the avatar only shows a dot for it.
+    /// Remote host, which the row itself never names.
     host: Option<SharedString>,
 }
 
@@ -280,7 +280,6 @@ impl Tty7App {
                 let badge_pos = badge_pos[i];
                 let tab = &self.tabs[i];
                 let is_active = i == active;
-                let ssh_indicator = self.tab_ssh_indicator(tab, cx);
                 let agent_badge = tab.focused_agent_badge(Some(window), cx);
                 let agent = agent_badge.agent;
                 let avatar = TabAvatar::choose(agent, tab.foreground_app(Some(window), cx));
@@ -307,23 +306,21 @@ impl Tty7App {
                 // An agent row opens its second line with the status, in the
                 // badge's colour, the way herdr writes `idle · codex`. The
                 // word never elides; whatever follows it gives up the room.
-                let status_word = agent_indicator.map(|s| {
-                    let dark = crate::ui::presets::surface_is_dark(cx.theme().sidebar);
-                    (s.word(), gpui::rgb(s.rgb(dark)))
-                });
+                let status_word = agent_indicator.map(|s| (s.word(), s.color(cx.theme().sidebar)));
                 let status_w = status_word.map_or(0., |(word, _)| {
                     measure_text(&window.text_system(), &font, meta_size, word)
                         + measure_text(&window.text_system(), &font, meta_size, "·")
                         + 2. * row_metrics::META_GAP
                 });
-                let status_lead = || {
+                // The `·` only separates: with nothing after it, it goes.
+                let status_lead = |followed: bool| {
                     status_word.map(|(word, colour)| {
                         h_flex()
                             .flex_shrink_0()
                             .items_center()
                             .gap_1p5()
                             .child(div().text_color(colour).child(word))
-                            .child(div().child("·"))
+                            .when(followed, |lead| lead.child(div().child("·")))
                     })
                 };
                 // Title: elide the *full* label against the row budget, so a
@@ -383,7 +380,7 @@ impl Tty7App {
                         .gap_1p5()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .children(status_lead())
+                        .children(status_lead(true))
                         .child(
                             gpui::svg()
                                 .path("icons/git-branch.svg")
@@ -539,7 +536,7 @@ impl Tty7App {
                                 .gap_1p5()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground.opacity(0.8))
-                                .children(status_lead())
+                                .children(status_lead(cwd.is_some()))
                                 .children(
                                     cwd.map(|cwd| div().flex_1().min_w_0().truncate().child(cwd)),
                                 )
@@ -757,14 +754,7 @@ impl Tty7App {
                         cx.stop_propagation();
                         this.activate(i, window, cx);
                     }))
-                    .child(self.tab_avatar(
-                        ("sidebar-avatar", i),
-                        avatar,
-                        agent_indicator,
-                        ssh_indicator,
-                        22.,
-                        cx,
-                    ))
+                    .child(self.tab_avatar(("sidebar-avatar", i), avatar, agent_indicator, 22., cx))
                     .child(label_region)
                     .when(show_badges && badge_pos < 9, |row| {
                         row.child(
