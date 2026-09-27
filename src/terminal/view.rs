@@ -6307,13 +6307,14 @@ impl Render for TerminalView {
                 self.terminal.write(bytes);
             }
             self.typeahead.drain();
-        } else if self.input_active() {
+        } else if self.input_active() && self.terminal.zle_reading() {
+            // A Prompt report can wake this view before the following OSC 133
+            // output reports vi mode. Keep gap input held until the shell has
+            // reported its input mode, or a vi prompt would strand it in cmd.
             if let Some(net) = self.hold.engage() {
                 self.cmd.prepend_str(&net);
             }
-            if self.terminal.zle_reading() {
-                self.flush_typeahead();
-            }
+            self.flush_typeahead();
         }
         let entity = cx.entity();
         let search_bar = self
@@ -10503,8 +10504,7 @@ mod gpui_tests {
         );
     }
 
-    #[gpui::test]
-    fn shell_vi_mode_prompt_releases_gap_hold_without_stale_typeahead(cx: &mut TestAppContext) {
+    fn assert_vi_prompt_releases_gap_hold(cx: &mut TestAppContext, split_prompt_report: bool) {
         let (window, mut daemon) = harness(cx);
         DaemonMsg::Prompt {
             active: true,
@@ -10513,9 +10513,10 @@ mod gpui_tests {
         }
         .encode(&mut daemon)
         .unwrap();
+        let mut gap = false;
         for _ in 0..200 {
             cx.run_until_parked();
-            let gap = window
+            gap = window
                 .update(cx, |view, _, _| {
                     view.terminal.shell_active() && !view.terminal.at_prompt()
                 })
@@ -10525,6 +10526,7 @@ mod gpui_tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        assert!(gap, "command gap was not reported");
         window
             .update(cx, |view, _, cx| view.commit_text("ls", cx))
             .unwrap();
@@ -10536,12 +10538,55 @@ mod gpui_tests {
         }
         .encode(&mut daemon)
         .unwrap();
+        if split_prompt_report {
+            let mut saw_prompt_before_mode = false;
+            for _ in 0..200 {
+                cx.run_until_parked();
+                saw_prompt_before_mode = window
+                    .update(cx, |view, _, _| {
+                        view.terminal.at_prompt() && !view.terminal.zle_reading()
+                    })
+                    .unwrap();
+                if saw_prompt_before_mode {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(saw_prompt_before_mode, "prompt report was not processed");
+            window.update(cx, |_, _, cx| cx.notify()).unwrap();
+            cx.run_until_parked();
+            window
+                .update(cx, |view, _, _| {
+                    assert_eq!(
+                        view.cmd.text(),
+                        "",
+                        "gap text must stay held until the shell reports its input mode"
+                    );
+                })
+                .unwrap();
+        }
         DaemonMsg::Output(b"\x1b]133;V;1\x07\x1b]133;B\x07".to_vec())
             .encode(&mut daemon)
             .unwrap();
+        if !split_prompt_report {
+            let mut markers_before_render = false;
+            for _ in 0..200 {
+                markers_before_render = window
+                    .update(cx, |view, _, _| {
+                        view.terminal.shell_vi_mode() && view.terminal.zle_reading()
+                    })
+                    .unwrap();
+                if markers_before_render {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(markers_before_render, "mode marker was not processed");
+        }
+        let mut ready = false;
         for _ in 0..200 {
             cx.run_until_parked();
-            let ready = window
+            ready = window
                 .update(cx, |view, _, _| {
                     view.terminal.shell_vi_mode() && view.terminal.zle_reading()
                 })
@@ -10551,6 +10596,7 @@ mod gpui_tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        assert!(ready, "vi-mode prompt was not reported");
         cx.executor().advance_clock(HOLD_WINDOW * 2);
         cx.run_until_parked();
         assert_eq!(
@@ -10558,18 +10604,61 @@ mod gpui_tests {
             Some(b"ls".to_vec()),
             "gap text typed before a vi prompt must reach the shell"
         );
+        let vi_prompt_cycle = window
+            .update(cx, |view, _, _| view.terminal.prompt_cycle())
+            .unwrap();
 
+        DaemonMsg::Output(b"\x1b]133;C\x07".to_vec())
+            .encode(&mut daemon)
+            .unwrap();
+        DaemonMsg::Prompt {
+            active: true,
+            at_prompt: false,
+            last_exit: None,
+        }
+        .encode(&mut daemon)
+        .unwrap();
+        let mut left_prompt = false;
+        for _ in 0..200 {
+            cx.run_until_parked();
+            left_prompt = window
+                .update(cx, |view, _, _| !view.terminal.at_prompt())
+                .unwrap();
+            if left_prompt {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(left_prompt, "command start was not reported");
+
+        DaemonMsg::Prompt {
+            active: true,
+            at_prompt: true,
+            last_exit: Some(0),
+        }
+        .encode(&mut daemon)
+        .unwrap();
         DaemonMsg::Output(b"\x1b]133;V;0\x07\x1b]133;B\x07".to_vec())
             .encode(&mut daemon)
             .unwrap();
+        let mut active = false;
         for _ in 0..200 {
             cx.run_until_parked();
-            let active = window.update(cx, |view, _, _| view.input_active()).unwrap();
+            active = window
+                .update(cx, |view, _, _| {
+                    view.input_active()
+                        && view.terminal.zle_reading()
+                        && view.terminal.prompt_cycle() > vi_prompt_cycle
+                })
+                .unwrap();
             if active {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        assert!(active, "inline editor did not resume after vi mode");
+        window.update(cx, |_, _, cx| cx.notify()).unwrap();
+        cx.run_until_parked();
         window
             .update(cx, |view, _, _| {
                 assert!(view.input_active());
@@ -10585,6 +10674,16 @@ mod gpui_tests {
             None,
             "no stale ^U wipe once the vi prompt consumed the gap text"
         );
+    }
+
+    #[gpui::test]
+    fn shell_vi_mode_prompt_releases_gap_hold_without_stale_typeahead(cx: &mut TestAppContext) {
+        assert_vi_prompt_releases_gap_hold(cx, false);
+    }
+
+    #[gpui::test]
+    fn shell_vi_mode_prompt_releases_gap_hold_after_early_prompt_report(cx: &mut TestAppContext) {
+        assert_vi_prompt_releases_gap_hold(cx, true);
     }
 
     fn key(spec: &str) -> gpui::Keystroke {
