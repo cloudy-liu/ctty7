@@ -48,7 +48,6 @@ pub(crate) struct Reading {
 pub(crate) struct Input<'a> {
     pub(crate) screen: &'a str,
     pub(crate) osc_title: &'a str,
-    pub(crate) osc_progress: &'a str,
 }
 
 /// Classify a screen for `agent`. `None` when herdr has no manifest for it.
@@ -56,7 +55,7 @@ pub(crate) fn read(agent: CLIAgent, input: &Input) -> Option<Reading> {
     let manifest = compiled(agent)?;
     let mut best: Option<&CompiledRule> = None;
     for rule in &manifest.rules {
-        if !rule.gate.matches(region(input, &rule.region)) {
+        if !rule.gate.matches(rule.region.of(input)) {
             continue;
         }
         // Earlier rules win ties, as in herdr.
@@ -110,8 +109,8 @@ fn manifest_source(agent: CLIAgent) -> Option<&'static str> {
 
 /// The agents whose hooks herdr trusts over the screen once they report,
 /// because they cover the whole turn: permission answers and interrupts
-/// included. Every other agent's hooks can miss an Esc or an approval, so the
-/// screen gets the last word whenever it has evidence.
+/// included. Herdr's list also has Kilo and Mastra Code, which tty7 does not
+/// recognise.
 fn hooks_are_authority(agent: CLIAgent) -> bool {
     matches!(
         agent,
@@ -119,12 +118,33 @@ fn hooks_are_authority(agent: CLIAgent) -> bool {
     )
 }
 
+/// What the screen says about the agent, once readings have been turned into a
+/// turn's status.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ScreenStatus {
+    /// `None` is herdr's unknown: the screen is up, but nothing on it names a
+    /// state. Codex at its prompt reads this way, since its manifest has no
+    /// idle rule.
+    pub(crate) status: Option<AgentStatus>,
+    /// A rule backed the reading, rather than herdr's default for a screen
+    /// with nothing on it the manifest recognises.
+    pub(crate) evidenced: bool,
+}
+
 /// The status a pane shows, given what the hooks reported and what the screen
-/// says (`status`, and whether a rule backed it).
+/// says.
+///
+/// Herdr rarely has to choose. Its hooks for Claude, Codex, Cursor and
+/// Antigravity only name the session, so for those the screen alone says what
+/// the agent is doing; only the agents in [`hooks_are_authority`] report a
+/// state, and that state wins. tty7's hooks report a state for every agent
+/// they are installed for, and they can miss an Esc or an approval, so outside
+/// that list the screen keeps herdr's word whenever a rule backs it, and the
+/// hooks fill in where none does.
 pub(crate) fn merge(
     agent: CLIAgent,
     hook: Option<&AgentSessionState>,
-    screen: Option<(AgentStatus, bool)>,
+    screen: Option<ScreenStatus>,
 ) -> Option<AgentStatus> {
     let hooked = hook.filter(|s| s.rich).map(|s| s.status);
     if hooked.is_some() && hooks_are_authority(agent) {
@@ -133,16 +153,26 @@ pub(crate) fn merge(
     match screen {
         // A turn short enough to start and end between two looks at the
         // screen still ended, and the hooks saw it.
-        Some((AgentStatus::Idle, _)) if hooked == Some(AgentStatus::Done) => hooked,
-        Some((status, true)) => Some(status),
-        Some((status, false)) => hooked.or(Some(status)),
+        Some(ScreenStatus {
+            status: Some(AgentStatus::Idle),
+            ..
+        }) if hooked == Some(AgentStatus::Done) => hooked,
+        Some(ScreenStatus {
+            status,
+            evidenced: true,
+        }) => status,
+        Some(ScreenStatus {
+            status,
+            evidenced: false,
+        }) => hooked.or(status),
         None => hook.map(|s| s.status),
     }
 }
 
-/// How many polls in a row a drop from working to plain idle has to repeat
-/// before it counts. An agent's screen goes quiet between steps of one turn;
-/// herdr holds the same drop for about 700 ms.
+/// How many more looks a drop from working to a plain idle has to survive
+/// before it counts, because an agent's screen goes quiet between the steps of
+/// one turn. Herdr rechecks three times 100 ms apart; tty7 only looks every
+/// 300 ms, so two more looks hold the drop for about 600 ms.
 const IDLE_CONFIRMATIONS: u8 = 2;
 
 /// Screen readings for one pane, turned into a turn's status: a reading of
@@ -153,8 +183,7 @@ pub(crate) struct Tracker {
     /// What the last reading looked at, so an unchanged screen is not read
     /// again.
     seen: Option<(u64, String)>,
-    status: Option<AgentStatus>,
-    matched: bool,
+    status: Option<ScreenStatus>,
     held_idle: u8,
 }
 
@@ -190,7 +219,6 @@ impl Tracker {
         let input = Input {
             screen: &screen,
             osc_title: title,
-            osc_progress: "",
         };
         if let Some(reading) = read(agent, &input) {
             self.apply(reading);
@@ -201,48 +229,42 @@ impl Tracker {
         if reading.skip {
             return;
         }
-        // Nothing on screen says the agent is busy: either a plain idle, or a
-        // screen the manifest cannot place at all. Codex's idle prompt is the
-        // second kind, since its manifest has no idle rule, so treating
-        // "unknown" as "unchanged" kept a Codex that had finished booting on
-        // working forever.
-        let quiet = match reading.state {
-            ScreenState::Idle => !reading.visible_idle,
-            ScreenState::Unknown => true,
-            ScreenState::Working | ScreenState::Blocked => false,
-        };
-        if self.status == Some(AgentStatus::Working) && quiet && self.held_idle < IDLE_CONFIRMATIONS
+        let before = self.status.and_then(|s| s.status);
+        // Only a plain idle is held: a visible prompt needs no second look,
+        // and herdr shows an unknown screen at once.
+        let plain_idle = reading.state == ScreenState::Idle && !reading.visible_idle;
+        if before == Some(AgentStatus::Working) && plain_idle && self.held_idle < IDLE_CONFIRMATIONS
         {
             self.held_idle += 1;
             return;
         }
         self.held_idle = 0;
-        // A rule that says "unknown" (a model picker, a transcript viewer) is
-        // no evidence of anything, so it leaves the call to the hooks.
-        self.matched = reading.matched && reading.state != ScreenState::Unknown;
-        let finished = match self.status {
-            Some(AgentStatus::Working | AgentStatus::Waiting | AgentStatus::Done) => {
-                Some(AgentStatus::Done)
-            }
-            _ => Some(AgentStatus::Idle),
-        };
-        self.status = match reading.state {
+        let status = match reading.state {
             ScreenState::Working => Some(AgentStatus::Working),
             ScreenState::Blocked => Some(AgentStatus::Waiting),
-            ScreenState::Idle => finished,
-            // The busy states it could have left end the turn. A calm one it
-            // cannot confirm stays as it was.
-            ScreenState::Unknown => match self.status {
-                Some(AgentStatus::Working | AgentStatus::Waiting) => finished,
-                other => other,
-            },
+            ScreenState::Idle => Some(match before {
+                Some(AgentStatus::Working | AgentStatus::Waiting | AgentStatus::Done) => {
+                    AgentStatus::Done
+                }
+                _ => AgentStatus::Idle,
+            }),
+            // Not a finished turn: herdr counts only idle after work as one.
+            // Treating unknown as done had Codex, whose prompt reads unknown,
+            // finish a turn every time it booted.
+            ScreenState::Unknown => None,
         };
+        self.status = Some(ScreenStatus {
+            status,
+            // A rule that says "unknown" (a model picker, a transcript
+            // viewer) is no evidence of anything.
+            evidenced: reading.matched && reading.state != ScreenState::Unknown,
+        });
     }
 
-    /// The screen's status and whether a rule backed the last reading. `None`
-    /// until the screen has said anything, and for agents with no manifest.
-    pub(crate) fn status(&self) -> Option<(AgentStatus, bool)> {
-        self.status.map(|s| (s, self.matched))
+    /// `None` until the screen has said anything, and for agents with no
+    /// manifest.
+    pub(crate) fn status(&self) -> Option<ScreenStatus> {
+        self.status
     }
 }
 
@@ -353,10 +375,92 @@ struct CompiledManifest {
 struct CompiledRule {
     state: ScreenState,
     priority: i32,
-    region: String,
+    region: Region,
     visible_idle: bool,
     skip_state_update: bool,
     gate: CompiledGate,
+}
+
+/// Where a rule looks. Parsed when the manifest compiles, and an unknown name
+/// fails it there, as herdr's validation does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Region {
+    OscTitle,
+    /// The OSC 9;4 progress report. tty7 does not track it, so the rules that
+    /// look here never match.
+    OscProgress,
+    WholeRecent,
+    AfterLastPromptMarker,
+    BeforeCurrentPromptMarker,
+    WholeRecentWithoutCurrentPromptMarker,
+    CurrentPromptBlockMarker,
+    AfterCurrentPromptBlockMarker,
+    PromptBoxBody,
+    AbovePromptBox,
+    LastNonEmptyAbovePromptBox,
+    AfterLastHorizontalRule,
+    BottomLines(usize),
+    BottomNonEmptyLines(usize),
+    TopNonEmptyLines(usize),
+}
+
+impl Region {
+    fn parse(spec: &str) -> Option<Region> {
+        let spec = spec.trim();
+        Some(match spec {
+            "osc_title" => Region::OscTitle,
+            "osc_progress" => Region::OscProgress,
+            "whole_recent" => Region::WholeRecent,
+            "after_last_prompt_marker" => Region::AfterLastPromptMarker,
+            "before_current_prompt_marker" => Region::BeforeCurrentPromptMarker,
+            "whole_recent_without_current_prompt_marker" => {
+                Region::WholeRecentWithoutCurrentPromptMarker
+            }
+            "current_prompt_block_marker" => Region::CurrentPromptBlockMarker,
+            "after_current_prompt_block_marker" => Region::AfterCurrentPromptBlockMarker,
+            "prompt_box_body" => Region::PromptBoxBody,
+            "above_prompt_box" => Region::AbovePromptBox,
+            "last_non_empty_above_prompt_box" => Region::LastNonEmptyAbovePromptBox,
+            "after_last_horizontal_rule" => Region::AfterLastHorizontalRule,
+            _ => {
+                if let Some(n) = region_count(spec, "bottom_lines") {
+                    Region::BottomLines(n)
+                } else if let Some(n) = region_count(spec, "bottom_non_empty_lines") {
+                    Region::BottomNonEmptyLines(n)
+                } else {
+                    Region::TopNonEmptyLines(region_count(spec, "top_non_empty_lines")?)
+                }
+            }
+        })
+    }
+
+    fn of<'a>(self, input: &Input<'a>) -> &'a str {
+        let content = input.screen;
+        match self {
+            Region::OscTitle => input.osc_title,
+            Region::OscProgress => "",
+            Region::WholeRecent => content,
+            Region::AfterLastPromptMarker => after_last_prompt_marker(content),
+            Region::BeforeCurrentPromptMarker => before_current_prompt_marker(content),
+            Region::WholeRecentWithoutCurrentPromptMarker => {
+                match current_codex_prompt_index(&content.lines().collect::<Vec<_>>()) {
+                    Some(_) => "",
+                    None => content,
+                }
+            }
+            Region::CurrentPromptBlockMarker => current_prompt_block_marker(content).unwrap_or(""),
+            Region::AfterCurrentPromptBlockMarker => {
+                after_current_prompt_block_marker(content).unwrap_or("")
+            }
+            Region::PromptBoxBody => prompt_box_body(content).unwrap_or(""),
+            Region::AbovePromptBox => above_prompt_box(content),
+            Region::LastNonEmptyAbovePromptBox => last_non_empty_line(above_prompt_box(content)),
+            Region::AfterLastHorizontalRule => after_last_horizontal_rule(content),
+            Region::BottomLines(n) => bottom_lines(content, n),
+            Region::BottomNonEmptyLines(n) => bottom_non_empty_lines(content, n),
+            Region::TopNonEmptyLines(n) => top_non_empty_lines(content, n),
+        }
+    }
 }
 
 struct CompiledGate {
@@ -419,7 +523,8 @@ fn compile(source: &str) -> Result<CompiledManifest, String> {
             Ok(CompiledRule {
                 state: rule.state.unwrap_or(ScreenState::Unknown),
                 priority: rule.priority,
-                region: rule.region.trim().to_string(),
+                region: Region::parse(&rule.region)
+                    .ok_or_else(|| format!("unknown region {}", rule.region))?,
                 visible_idle: rule.visible_idle,
                 skip_state_update: rule.skip_state_update,
                 gate: CompiledGate::compile(&rule.gate).map_err(|e| e.to_string())?,
@@ -441,43 +546,6 @@ fn compiled(agent: CLIAgent) -> Option<&'static CompiledManifest> {
                 .ok()
         })
         .as_ref()
-}
-
-fn region<'a>(input: &Input<'a>, spec: &str) -> &'a str {
-    let content = input.screen;
-    match spec {
-        "osc_title" => input.osc_title,
-        "osc_progress" => input.osc_progress,
-        "whole_recent" => content,
-        "after_last_prompt_marker" => after_last_prompt_marker(content),
-        "before_current_prompt_marker" => before_current_prompt_marker(content),
-        "whole_recent_without_current_prompt_marker" => {
-            match current_codex_prompt_index(&content.lines().collect::<Vec<_>>()) {
-                Some(_) => "",
-                None => content,
-            }
-        }
-        "current_prompt_block_marker" => current_prompt_block_marker(content).unwrap_or(""),
-        "after_current_prompt_block_marker" => {
-            after_current_prompt_block_marker(content).unwrap_or("")
-        }
-        "prompt_box_body" => prompt_box_body(content).unwrap_or(""),
-        "above_prompt_box" => above_prompt_box(content),
-        "last_non_empty_above_prompt_box" => last_non_empty_line(above_prompt_box(content)),
-        "after_last_horizontal_rule" => after_last_horizontal_rule(content),
-        _ => {
-            if let Some(n) = region_count(spec, "bottom_lines") {
-                return bottom_lines(content, n);
-            }
-            if let Some(n) = region_count(spec, "bottom_non_empty_lines") {
-                return bottom_non_empty_lines(content, n);
-            }
-            if let Some(n) = region_count(spec, "top_non_empty_lines") {
-                return top_non_empty_lines(content, n);
-            }
-            ""
-        }
-    }
 }
 
 fn region_count(spec: &str, name: &str) -> Option<usize> {
@@ -662,7 +730,6 @@ mod tests {
             &Input {
                 screen: text,
                 osc_title: "",
-                osc_progress: "",
             },
         )
         .expect("the agent has a manifest")
@@ -675,32 +742,19 @@ mod tests {
                 let manifest =
                     compile(source).unwrap_or_else(|e| panic!("{}'s manifest: {e}", agent.slug()));
                 assert!(!manifest.rules.is_empty(), "{} has no rules", agent.slug());
-                for rule in &manifest.rules {
-                    let known = matches!(
-                        rule.region.as_str(),
-                        "osc_title"
-                            | "osc_progress"
-                            | "whole_recent"
-                            | "after_last_prompt_marker"
-                            | "before_current_prompt_marker"
-                            | "whole_recent_without_current_prompt_marker"
-                            | "current_prompt_block_marker"
-                            | "after_current_prompt_block_marker"
-                            | "prompt_box_body"
-                            | "above_prompt_box"
-                            | "last_non_empty_above_prompt_box"
-                            | "after_last_horizontal_rule"
-                    ) || [
-                        "bottom_lines",
-                        "bottom_non_empty_lines",
-                        "top_non_empty_lines",
-                    ]
-                    .iter()
-                    .any(|name| region_count(&rule.region, name).is_some());
-                    assert!(known, "{}: unknown region {}", agent.slug(), rule.region);
-                }
             }
         }
+    }
+
+    #[test]
+    fn a_rule_on_a_region_herdr_does_not_know_fails_the_manifest() {
+        let source = "[[rules]]\nstate = \"idle\"\nregion = \"bottom_half\"\ncontains = [\"x\"]\n";
+        assert!(compile(source).is_err());
+        assert_eq!(
+            Region::parse(" bottom_non_empty_lines(4) "),
+            Some(Region::BottomNonEmptyLines(4))
+        );
+        assert_eq!(Region::parse("bottom_lines(x)"), None);
     }
 
     #[test]
@@ -752,7 +806,6 @@ mod tests {
             &Input {
                 screen: "",
                 osc_title: "⠂ Fixing the build",
-                osc_progress: "",
             },
         )
         .unwrap();
@@ -762,7 +815,6 @@ mod tests {
             &Input {
                 screen: "",
                 osc_title: "✳ Fixing the build",
-                osc_progress: "",
             },
         )
         .unwrap();
@@ -789,24 +841,42 @@ mod tests {
         }
     }
 
+    /// Codex's prompt: no rule matches, and its fallback is unknown.
+    const CODEX_PROMPT: Reading = Reading {
+        state: ScreenState::Unknown,
+        matched: false,
+        visible_idle: false,
+        skip: false,
+    };
+
+    fn evidenced(status: AgentStatus) -> Option<ScreenStatus> {
+        Some(ScreenStatus {
+            status: Some(status),
+            evidenced: true,
+        })
+    }
+
+    fn unbacked(status: Option<AgentStatus>) -> Option<ScreenStatus> {
+        Some(ScreenStatus {
+            status,
+            evidenced: false,
+        })
+    }
+
     #[test]
     fn idle_after_work_is_a_finished_turn() {
         let mut t = Tracker::default();
         t.apply(reading(ScreenState::Idle, false));
-        assert_eq!(
-            t.status(),
-            Some((AgentStatus::Idle, true)),
-            "nothing ran yet"
-        );
+        assert_eq!(t.status(), evidenced(AgentStatus::Idle), "nothing ran yet");
         t.apply(reading(ScreenState::Working, false));
         t.apply(reading(ScreenState::Blocked, false));
-        assert_eq!(t.status(), Some((AgentStatus::Waiting, true)));
+        assert_eq!(t.status(), evidenced(AgentStatus::Waiting));
         t.apply(reading(ScreenState::Idle, true));
-        assert_eq!(t.status(), Some((AgentStatus::Done, true)));
+        assert_eq!(t.status(), evidenced(AgentStatus::Done));
         t.apply(reading(ScreenState::Idle, true));
         assert_eq!(
             t.status(),
-            Some((AgentStatus::Done, true)),
+            evidenced(AgentStatus::Done),
             "done until the next turn"
         );
     }
@@ -817,17 +887,17 @@ mod tests {
         t.apply(reading(ScreenState::Working, false));
         for _ in 0..IDLE_CONFIRMATIONS {
             t.apply(reading(ScreenState::Idle, false));
-            assert_eq!(t.status(), Some((AgentStatus::Working, true)));
+            assert_eq!(t.status(), evidenced(AgentStatus::Working));
         }
         t.apply(reading(ScreenState::Idle, false));
-        assert_eq!(t.status(), Some((AgentStatus::Done, true)));
+        assert_eq!(t.status(), evidenced(AgentStatus::Done));
 
         let mut t = Tracker::default();
         t.apply(reading(ScreenState::Working, false));
         t.apply(reading(ScreenState::Idle, true));
         assert_eq!(
             t.status(),
-            Some((AgentStatus::Done, true)),
+            evidenced(AgentStatus::Done),
             "an idle prompt on screen needs no second look"
         );
     }
@@ -862,7 +932,7 @@ mod tests {
             merge(
                 CLIAgent::Codex,
                 Some(&hook),
-                Some((AgentStatus::Waiting, true))
+                evidenced(AgentStatus::Waiting)
             ),
             Some(AgentStatus::Waiting),
             "codex's hooks never report a permission prompt"
@@ -871,52 +941,40 @@ mod tests {
             merge(
                 CLIAgent::Claude,
                 Some(&hook),
-                Some((AgentStatus::Idle, false))
+                unbacked(Some(AgentStatus::Idle))
             ),
             Some(AgentStatus::Working),
             "a fallback idle is no reason to overrule a reporting hook"
         );
         assert_eq!(
-            merge(CLIAgent::Kimi, Some(&hook), Some((AgentStatus::Done, true))),
+            merge(CLIAgent::Kimi, Some(&hook), evidenced(AgentStatus::Done)),
             Some(AgentStatus::Working),
             "kimi's hooks cover the whole turn, as herdr trusts them to"
         );
         let done = session(AgentStatus::Done, true);
         assert_eq!(
-            merge(
-                CLIAgent::Claude,
-                Some(&done),
-                Some((AgentStatus::Idle, true))
-            ),
+            merge(CLIAgent::Claude, Some(&done), evidenced(AgentStatus::Idle)),
             Some(AgentStatus::Done),
             "a turn that ended between two looks at the screen still ended"
         );
     }
 
     #[test]
-    fn codex_back_at_its_prompt_is_no_longer_working() {
+    fn codex_back_at_its_prompt_reads_unknown_as_herdr_shows_it() {
         // Codex boots behind a spinner in its title, then sits at a prompt that
-        // its manifest has no rule for — herdr's reading there is "unknown".
-        let fallback = Reading {
-            state: ScreenState::Unknown,
-            matched: false,
-            visible_idle: false,
-            skip: false,
-        };
+        // its manifest has no rule for.
         let mut t = Tracker::default();
         t.apply(reading(ScreenState::Working, false));
-        for _ in 0..=IDLE_CONFIRMATIONS {
-            t.apply(fallback);
-        }
-        assert_ne!(
-            t.status().map(|(s, _)| s),
-            Some(AgentStatus::Working),
-            "the spinner is gone, so the turn is over"
+        t.apply(CODEX_PROMPT);
+        assert_eq!(
+            t.status(),
+            unbacked(None),
+            "the spinner is gone, and herdr shows the prompt as unknown at once"
         );
-        assert_ne!(
+        assert_eq!(
             merge(CLIAgent::Codex, None, t.status()),
-            Some(AgentStatus::Working),
-            "and with no hook reporting yet, nothing else can keep it working"
+            None,
+            "not done: a boot is no finished turn to notify or badge"
         );
         let hook = session(AgentStatus::Idle, true);
         assert_eq!(
@@ -927,17 +985,31 @@ mod tests {
     }
 
     #[test]
+    fn only_idle_after_work_finishes_a_turn_not_unknown() {
+        let mut t = Tracker::default();
+        t.apply(reading(ScreenState::Working, false));
+        t.apply(CODEX_PROMPT);
+        t.apply(reading(ScreenState::Idle, true));
+        assert_eq!(
+            t.status(),
+            evidenced(AgentStatus::Idle),
+            "herdr marks a turn seen once it leaves working for unknown"
+        );
+    }
+
+    #[test]
     fn a_screen_the_manifest_calls_unknown_defers_to_the_hooks() {
         // Claude's model picker is a rule whose state is "unknown".
         let mut t = Tracker::default();
         t.apply(reading(ScreenState::Idle, true));
         t.apply(reading(ScreenState::Unknown, false));
-        assert_eq!(t.status(), Some((AgentStatus::Idle, false)));
+        assert_eq!(t.status(), unbacked(None));
         let hook = session(AgentStatus::Waiting, true);
         assert_eq!(
             merge(CLIAgent::Claude, Some(&hook), t.status()),
             Some(AgentStatus::Waiting)
         );
+        assert_eq!(merge(CLIAgent::Claude, None, t.status()), None);
     }
 
     #[test]
@@ -946,7 +1018,7 @@ mod tests {
             merge(
                 CLIAgent::Antigravity,
                 None,
-                Some((AgentStatus::Idle, false))
+                unbacked(Some(AgentStatus::Idle))
             ),
             Some(AgentStatus::Idle)
         );

@@ -48,7 +48,9 @@ Hermes, Antigravity, Grok Build, Qwen Code and Kimi Code have manifests. When
 the screen shows clear evidence of a state, the screen wins; when it shows none,
 the hooks decide. The exception is Pi, Oh My Pi, Kimi Code and OpenCode, whose
 hooks cover the whole turn: once those report, they are trusted over the screen,
-as herdr trusts them.
+as herdr trusts them. Some screens name no state at all — Codex sitting at its
+prompt is one — and read as unknown, as they do in herdr, until a hook says
+otherwise.
 
 The screen is read by the window showing the pane. `tty7 agents` and
 [`tty7 wait`](/agents/orchestration) still go by the hooks alone.
@@ -64,13 +66,18 @@ colours:
 | **◐** yellow | Working |
 | **✓** teal | Done with this turn, and you have not looked yet |
 | **○** green | Idle — waiting for your next prompt |
-| **·** grey | Status unknown — no hooks installed, nothing on screen to read |
+| **·** grey | Status unknown — no hooks installed, and nothing on screen names a state |
 
 <Frame caption="Placeholder — screenshot: sidebar rows showing blocked, working, done and idle agents">
   <img src="/images/placeholder.svg" alt="Agent status symbols" />
 </Frame>
 
 A finished turn keeps its check until you look at the pane, then reads as idle.
+
+A sidebar row also writes the state at the start of its second line, in the same
+colour: `working · main`. The words are herdr's, in English whatever the
+interface language, and like herdr the sidebar writes an unknown state as a grey
+`idle`.
 
 The hooks' three turn states are what `tty7 agents` reports as `working` /
 `waiting` / `done`, and what [`tty7 wait`](/agents/orchestration) blocks on.
@@ -84,6 +91,11 @@ Two, both following your **Settings → Window & Tabs → Notifications** policy
 
 Which means that by default — *When unfocused* — you are told the instant you
 are the bottleneck, and left alone while you are watching.
+
+These come from agents whose hooks are installed. An agent tty7 only reads off
+its screen, such as Cursor or Antigravity, moves its symbol but does not
+interrupt you mid-session: it gets the one "finished" notice when the agent
+exits.
 
 ## The tray icon
 
