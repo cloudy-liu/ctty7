@@ -3,9 +3,10 @@
     pip install resvg-py pillow icnsutil
     python scripts/brand/render.py
 
-The SVGs are the source of truth: app-icon.svg is the tile on the macOS icon
-grid, logo.svg is the same drawing cropped to the tile, and tray.svg is read
-by the app at runtime, so it has no raster here. resvg is also what tty7 uses
+The SVGs are the source of truth: app-icon.svg uses the macOS icon grid;
+Windows ICO frames crop that outer margin so the taskbar tile fills its slot.
+logo.svg is the transparent two-pane mark for the header and color tray;
+tray.svg is its alpha-only macOS template, read at runtime. resvg is what tty7 uses
 to draw the tray icon, so these PNGs match what the app renders. Every size is
 rendered from the vector instead of downscaled from 1024, which keeps the
 prompt crisp in the 16-32 px frames Windows shows most.
@@ -14,6 +15,7 @@ on the card's solid background each time, so repeated renders do not stack.
 """
 
 import shutil
+import xml.etree.ElementTree as ET
 from io import BytesIO
 from pathlib import Path
 
@@ -25,8 +27,13 @@ ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "assets"
 
 
-def render(svg: str, size: int) -> Image.Image:
-    png = resvg_py.svg_to_bytes(svg_path=str(ASSETS / svg), width=size, height=size)
+def render(svg: str, size: int, *, view_box: str | None = None) -> Image.Image:
+    source = {"svg_path": str(ASSETS / svg)}
+    if view_box is not None:
+        root = ET.parse(ASSETS / svg).getroot()
+        root.set("viewBox", view_box)
+        source = {"svg_string": ET.tostring(root, encoding="unicode")}
+    png = resvg_py.svg_to_bytes(**source, width=size, height=size)
     return Image.open(BytesIO(png)).convert("RGBA")
 
 
@@ -50,7 +57,10 @@ def main() -> None:
 
     # Embedded in the .exe by build.rs, and the installer's icon. Pillow only
     # writes frames no larger than the image it saves, so 256 goes first.
-    frames = [render("app-icon.svg", s) for s in (256, 128, 64, 48, 32, 24, 16)]
+    frames = [
+        render("app-icon.svg", s, view_box="80 80 864 864")
+        for s in (256, 128, 64, 48, 32, 24, 16)
+    ]
     frames[0].save(
         ASSETS / "favicon.ico",
         sizes=[f.size for f in frames],

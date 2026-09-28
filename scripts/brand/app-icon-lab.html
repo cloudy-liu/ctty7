@@ -119,15 +119,19 @@ const VARIANTS = [
   {
     id: 'stack',
     title: 'B · Session Stack (selected)',
-    note: 'Three overlapping sessions on a cream tile, with amber and pink back panes and a green prompt. Selected for the fork.',
+    note: 'Two enlarged panes with a pink back pane and green prompt. The header and tray use the transparent mark; the Windows taskbar tile has less outer padding.',
     // Mirrors assets/app-icon.svg. Change the SVG, then this.
     draw(ctx) {
       tile(ctx, '#F5F1E8');
-      pane(ctx, 392, 216, 420, 340, 64, '#FFB547');
+      ctx.save();
+      ctx.translate(512, 512);
+      ctx.scale(4 / 3, 4 / 3);
+      ctx.translate(-467, -521);
       pane(ctx, 302, 306, 420, 340, 64, '#FF5FA2');
-      pane(ctx, 212, 396, 420, 340, 64, '#17171F', 'rgba(40,20,40,0.30)');
+      pane(ctx, 212, 396, 420, 340, 64, '#17171F');
       chevron(ctx, 280, 498, 136, 44, '#3FDD8C');
       cursor(ctx, 390, 606, 150, 40, '#F5F1E8');
+      ctx.restore();
     },
   },
   {
