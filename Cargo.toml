@@ -90,6 +90,10 @@ keyring = "4"
 serde_yaml = "0.9"
 serde_path_to_error = "0.1"
 plist = "1"
+# herdr's agent screen-detection manifests (`assets/agent-detection/*.toml`,
+# read by `terminal::screen_status`). Already in the tree transitively, so it
+# pins no new code.
+toml = "0.8"
 
 # Clipboard-image paste (`terminal::view`). When the clipboard holds a screenshot
 # and a coding-agent TUI (Claude Code &co.) is in the pane, off macOS we stage the
@@ -269,7 +273,7 @@ edition = "2024"
 # they must never drift apart. This is the line a release bump edits (and the
 # one nightly's `awk '/^version = /'` stamps: it is the first such line in the
 # file, since the package entries above are all `version.workspace = true`).
-version = "26.8.3-c.7"
+version = "26.8.3-c.9"
 
 [workspace.dependencies]
 # The maintenance fork retains tty7's existing menu, button and input changes

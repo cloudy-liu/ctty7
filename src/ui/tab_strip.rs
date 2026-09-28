@@ -34,6 +34,26 @@ pub(crate) const GRAB_HANDLE_W: f32 = 80.;
 
 const KEEP_SEGMENTS: usize = 3;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TabAvatar {
+    Agent(crate::core::cli_agent::CLIAgent),
+    App(crate::core::foreground_app::ForegroundApp),
+    Terminal,
+}
+
+impl TabAvatar {
+    pub(crate) fn choose(
+        agent: Option<crate::core::cli_agent::CLIAgent>,
+        app: Option<crate::core::foreground_app::ForegroundApp>,
+    ) -> Self {
+        match (agent, app) {
+            (_, Some(app)) => Self::App(app),
+            (Some(agent), None) => Self::Agent(agent),
+            (None, None) => Self::Terminal,
+        }
+    }
+}
+
 /// Builds a launch specification without recomputing argument ownership locally.
 /// The inventory may originate from a remote host, so only its transported
 /// metadata can distinguish tty7 launch defaults from user-authored arguments.
@@ -773,19 +793,6 @@ fn menu_row(label: SharedString, note: SharedString, cx: &gpui::App) -> impl Int
         })
 }
 
-/// The words behind the status dot's colour.
-pub(crate) fn agent_status_label(
-    status: Option<crate::core::cli_agent::AgentStatus>,
-) -> Option<&'static str> {
-    use crate::core::cli_agent::AgentStatus;
-    match status? {
-        AgentStatus::Idle => None,
-        AgentStatus::Working => Some(t(L10nKey::AgentStatusWorking)),
-        AgentStatus::Waiting => Some(t(L10nKey::AgentStatusWaiting)),
-        AgentStatus::Done => Some(t(L10nKey::AgentStatusDone)),
-    }
-}
-
 pub(crate) const LIVE_DOT: u32 = 0x22C55E;
 
 pub(crate) const UNKNOWN_DOT: u32 = 0x9AA0A6;
@@ -828,7 +835,7 @@ pub(crate) fn workspace_avatar(
                 .text_color(cx.theme().foreground.opacity(0.65))
                 .child(initial),
         )
-        .children(dot.map(|rgb| Tty7App::status_dot(rgb, 0, size, cx.theme().popover, false)))
+        .children(dot.map(|rgb| Tty7App::liveness_dot(rgb, size, cx.theme().popover)))
 }
 
 pub(crate) fn select_workspace_action(index: usize) -> Option<Box<dyn gpui::Action>> {
@@ -1093,74 +1100,63 @@ impl Tty7App {
         .collect()
     }
 
-    /// Working and Done differ only in hue (blue vs green), and Waiting vs Done
-    /// — the pair that actually decides whether you go and look — is amber vs
-    /// green, the pair red-green colour vision separates worst. Give Waiting a
-    /// hole so it is a different *shape*, not just a different colour.
-    fn status_dot(
-        rgb: u32,
-        unread: usize,
-        size: f32,
-        ring: gpui::Hsla,
-        hollow: bool,
-    ) -> gpui::AnyElement {
+    /// A workspace's liveness dot: a plain disc hung off the avatar's corner.
+    fn liveness_dot(rgb: u32, size: f32, ring: gpui::Hsla) -> gpui::AnyElement {
         let d = (size * 0.42).max(7.);
         // The halo was the surface itself, which is only a ring while the
         // surface is light — on a dark theme it went near-black and read as a
         // notch bitten out of the avatar rather than a badge sitting on it.
         // Light themes already ring the dot in white; give the dark ones the
-        // same white edge, and the hollow Waiting dot the same white hole.
+        // same white edge.
         let bg = match crate::ui::presets::surface_is_dark(ring) {
             true => gpui::white(),
             false => ring,
         };
-        if unread > 0 {
-            let nd = (size * 0.72).max(13.0);
-            let label = unread.min(9).to_string();
-            div()
-                .absolute()
-                .right(px(-(nd - d) / 2.0 - d * 0.22))
-                .bottom(px(-(nd - d) / 2.0 - d * 0.22))
-                .size(px(nd))
-                .rounded_full()
-                .border_1()
-                .border_color(bg)
-                .bg(gpui::rgb(rgb))
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_size(px((nd * 0.62).round()))
-                .font_weight(FontWeight::BOLD)
-                .text_color(gpui::white())
-                .child(label)
-                .into_any_element()
-        } else {
-            div()
-                .absolute()
-                .right(px(-(d * 0.22)))
-                .bottom(px(-(d * 0.22)))
-                .size(px(d))
-                .rounded_full()
-                .border_2()
-                .border_color(bg)
-                .bg(gpui::rgb(rgb))
-                .when(hollow, |dot| {
-                    dot.flex()
-                        .items_center()
-                        .justify_center()
-                        .child(div().size(px((d * 0.36).max(2.5))).rounded_full().bg(bg))
-                })
-                .into_any_element()
-        }
+        div()
+            .absolute()
+            .right(px(-(d * 0.22)))
+            .bottom(px(-(d * 0.22)))
+            .size(px(d))
+            .rounded_full()
+            .border_2()
+            .border_color(bg)
+            .bg(gpui::rgb(rgb))
+            .into_any_element()
+    }
+
+    /// An agent's status as herdr draws it — `×` `◐` `✓` `○` `·` in herdr's
+    /// colours — on a disc of the surface, so the symbol stays legible over
+    /// whatever part of the logo it covers.
+    fn status_badge(
+        indicator: crate::ui::status_indicator::StatusIndicator,
+        size: f32,
+        surface: gpui::Hsla,
+    ) -> gpui::AnyElement {
+        let d = (size * 0.5).max(9.);
+        div()
+            .absolute()
+            .right(px(-(d * 0.25)))
+            .bottom(px(-(d * 0.25)))
+            .size(px(d))
+            .rounded_full()
+            .bg(surface)
+            .flex()
+            .items_center()
+            .justify_center()
+            .child(
+                gpui::svg()
+                    .path(indicator.icon_path())
+                    .size(px(d * 0.9))
+                    .text_color(indicator.color(surface)),
+            )
+            .into_any_element()
     }
 
     pub(crate) fn tab_avatar(
         &self,
         id: impl Into<gpui::ElementId>,
-        agent: Option<crate::core::cli_agent::CLIAgent>,
-        status: Option<crate::core::cli_agent::AgentStatus>,
-        unread: usize,
-        ssh: Option<u32>,
+        avatar: TabAvatar,
+        indicator: Option<crate::ui::status_indicator::StatusIndicator>,
         size: f32,
         cx: &App,
     ) -> gpui::AnyElement {
@@ -1171,16 +1167,16 @@ impl Tty7App {
             .flex()
             .items_center()
             .justify_center();
-        match agent {
-            Some(agent) => {
-                let hollow = status == Some(crate::core::cli_agent::AgentStatus::Waiting);
-                let dot = status
-                    .and_then(|s| s.dot_rgb())
-                    .map(|rgb| Self::status_dot(rgb, unread, size, cx.theme().background, hollow));
+        // Opaque on purpose: the sidebar's own fill goes translucent under a
+        // window material, and the logo would show through the disc.
+        let surface = cx.theme().sidebar;
+        let badge = indicator.map(|i| Self::status_badge(i, size, surface));
+        match avatar {
+            TabAvatar::Agent(agent) => {
                 // Which agent this is, and what it wants, were carried entirely
-                // by a brand hue and a nine-pixel dot. Say it in words too.
-                let tip = match agent_status_label(status) {
-                    Some(state) => format!("{} — {state}", agent.display_name()),
+                // by a brand hue and a small symbol. Say it in words too.
+                let tip = match indicator {
+                    Some(state) => format!("{} — {}", agent.display_name(), state.label()),
                     None => agent.display_name().to_string(),
                 };
                 base.relative()
@@ -1192,13 +1188,21 @@ impl Tty7App {
                                 cx.global::<crate::ui::presets::AgentIcons>().ink(agent),
                             )),
                     )
-                    .when_some(dot, |b, dot| b.child(dot))
+                    .when_some(badge, |b, badge| b.child(badge))
                     .tooltip(move |window, cx| {
                         gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
                     })
                     .into_any_element()
             }
-            None => base
+            TabAvatar::App(crate::core::foreground_app::ForegroundApp::Herdr) => base
+                .relative()
+                .child(gpui::img("icons/herdr.svg").size(px(size)).rounded_full())
+                .when_some(badge, |b, badge| b.child(badge))
+                .tooltip(|window, cx| {
+                    gpui_component::tooltip::Tooltip::new("Herdr").build(window, cx)
+                })
+                .into_any_element(),
+            TabAvatar::Terminal => base
                 .relative()
                 .rounded_full()
                 .bg(cx.theme().muted)
@@ -1208,9 +1212,6 @@ impl Tty7App {
                         .size(px(size * 0.56))
                         .text_color(cx.theme().foreground.opacity(0.65)),
                 )
-                .when_some(ssh, |b, rgb| {
-                    b.child(Self::status_dot(rgb, 0, size, cx.theme().background, false))
-                })
                 .into_any_element(),
         }
     }
@@ -1602,11 +1603,10 @@ impl Tty7App {
             let is_active = i == active;
             let label = self.tab_label(tab, i, Some(window), cx);
             let full_title = self.tab_title_tooltip(tab, i, Some(window), cx);
-            let ssh_dot = self.tab_ssh_dot(tab, cx);
-            let agent_badge = tab.focused_agent_badge(window, cx);
+            let agent_badge = tab.focused_agent_badge(Some(window), cx);
             let agent = agent_badge.agent;
-            let agent_status = agent_badge.status;
-            let agent_unread = agent_badge.unread;
+            let avatar = TabAvatar::choose(agent, tab.foreground_app(Some(window), cx));
+            let agent_indicator = agent_badge.indicator();
 
             let rename_input = self
                 .renaming
@@ -1714,25 +1714,8 @@ impl Tty7App {
                         this.activate(i, window, cx);
                     }
                 }))
-                .when_some(ssh_dot, |c, rgb| {
-                    c.child(
-                        div()
-                            .flex_shrink_0()
-                            .size(px(6.))
-                            .rounded_full()
-                            .bg(gpui::rgb(rgb)),
-                    )
-                })
-                .when_some(agent, |chip, agent| {
-                    chip.child(self.tab_avatar(
-                        ("tab-avatar", i),
-                        Some(agent),
-                        agent_status,
-                        agent_unread,
-                        None,
-                        18.,
-                        cx,
-                    ))
+                .when(avatar != TabAvatar::Terminal, |chip| {
+                    chip.child(self.tab_avatar(("tab-avatar", i), avatar, agent_indicator, 18., cx))
                 })
                 .child(label_region)
                 .when(show_badges && i < 9, |chip| {
@@ -1925,6 +1908,25 @@ mod tests {
     }
 
     #[test]
+    fn avatar_identity_prefers_the_host_app_over_a_nested_agent() {
+        use crate::core::cli_agent::CLIAgent;
+        use crate::core::foreground_app::ForegroundApp;
+
+        assert_eq!(
+            super::TabAvatar::choose(Some(CLIAgent::Codex), Some(ForegroundApp::Herdr)),
+            super::TabAvatar::App(ForegroundApp::Herdr)
+        );
+        assert_eq!(
+            super::TabAvatar::choose(Some(CLIAgent::Claude), Some(ForegroundApp::Herdr)),
+            super::TabAvatar::App(ForegroundApp::Herdr)
+        );
+        assert_eq!(
+            super::TabAvatar::choose(None, Some(ForegroundApp::Herdr)),
+            super::TabAvatar::App(ForegroundApp::Herdr)
+        );
+    }
+
+    #[test]
     fn the_new_tab_menu_stops_naming_hosts_before_it_becomes_a_list() {
         // Frecency has already put the useful ones first by the time this
         // runs, so the cut can only ever drop the tail.
@@ -1978,32 +1980,6 @@ mod tests {
         assert_eq!(
             SpawnWhere::from_modifiers(Modifiers::shift()),
             SpawnWhere::NewTab
-        );
-    }
-
-    #[test]
-    fn every_visible_agent_state_has_words_for_it() {
-        use crate::core::cli_agent::AgentStatus;
-        crate::ui::i18n::set_locale("en");
-        // Idle draws no dot, so it has nothing to name.
-        assert_eq!(agent_status_label(None), None);
-        assert_eq!(agent_status_label(Some(AgentStatus::Idle)), None);
-        // Every state that does draw a dot can be read out loud.
-        for status in [
-            AgentStatus::Working,
-            AgentStatus::Waiting,
-            AgentStatus::Done,
-        ] {
-            assert!(status.dot_rgb().is_some());
-            assert!(
-                agent_status_label(Some(status)).is_some_and(|s| !s.is_empty()),
-                "{status:?} paints a dot with no words behind it"
-            );
-        }
-        // Waiting is the state worth acting on; it must not read as Done.
-        assert_ne!(
-            agent_status_label(Some(AgentStatus::Waiting)),
-            agent_status_label(Some(AgentStatus::Done))
         );
     }
 

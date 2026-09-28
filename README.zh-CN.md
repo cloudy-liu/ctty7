@@ -68,6 +68,7 @@ Claude Code 等 coding agent 的状态感知放在同一个应用里。
 | agent 徽标跟随聚焦的 pane | 全平台 | [上游已关闭](https://github.com/l0ng-ai/tty7/pull/719) |
 | 重启、恢复失败和退出后的 agent 会话身份维护 **（c.6）** | 全平台 | 未提交上游 |
 | server 重启后精确恢复 agent 会话，无法识别时回到 shell **（c.7）** | 全平台 | 未提交上游 |
+| daemon 重建后恢复此前所有打开的工作区 **（c.8）** | 全平台 | 未提交上游 |
 | 19 个 agent 的透明、主题自适应头像 **（c.6）** | 全平台 | 未提交上游 |
 | Antigravity 品牌图标支持 | 全平台 | 未提交上游 |
 | [Markdown 默认预览、Paperglow 深浅配色与可配置阅读主题](docs/customization/markdown-themes.mdx) **（未发布）** | 全平台 | 未提交上游 |
@@ -135,6 +136,11 @@ Claude Code 等 coding agent 的状态感知放在同一个应用里。
   可用的 shell，不弹出会话选择器。Cursor 与 Antigravity 仍需 tty7 已知准确 ID。
   详见[会话恢复说明](docs/agents/sessions.mdx)与
   [cloudy-liu/tty7#29](https://github.com/cloudy-liu/tty7/pull/29)。
+- 后台 daemon 被重建时，恢复此前所有打开的工作区，而不是只恢复最后聚焦的项目。
+  前台窗口优先打开，其余窗口按保存的位置与尺寸在后台逐个显示，不抢焦点。
+  每个 pane 先尝试附着，失败时再沿原有路径恢复对应 agent 会话；daemon 仍存活时
+  保留较轻量的单窗口启动行为。见
+  [cloudy-liu/tty7#35](https://github.com/cloudy-liu/tty7/pull/35)。
 - 19 个受支持的 agent 头像，包括 Antigravity，不再绘制彩色圆底；图形占头像的比例
   从 54% 增加到 78%。Codex、Cursor 和 Grok 跟随主题前景色，其他 agent 保留品牌
   色并校正明暗。在全部 13 套内置主题中，侧边栏、顶部标签栏和切换器的静止、悬停
@@ -170,12 +176,14 @@ Claude Code 等 coding agent 的状态感知放在同一个应用里。
 Release 同时提供 `checksums.txt`，以及远程工作区需要的无头
 `tty7-server` 二进制。
 
-`v26.8.3-c.7` 在 c.6 的基础上加入
-[cloudy-liu/tty7#29](https://github.com/cloudy-liu/tty7/pull/29) 的 agent 会话恢复修复。
-准确的会话身份可跨 server 重启保留，尚未输入的空白启动直接重新打开，无法确定
-原会话时留下 shell。逐提交说明见[c.7 发布记录](docs/releases/v26.8.3-c.7.md)。
+`v26.8.3-c.9` 在 c.8 的基础上加入 Herdr 彩色标签头像。当前聚焦的 tty7 面板运行
+Herdr 时，里面的 Codex 或 Claude Code 不会替换 Herdr 头像；切换到独立的 Agent 分屏时，
+头像随焦点变化。左侧栏、顶部标签栏和工作区切换器使用相同规则。即使 shell 不报告
+命令文本，也能通过前台进程识别 Herdr；后台标签沿用最后聚焦的面板，并保留该面板
+Agent 的状态点。逐提交说明见
+[c.9 发布记录](docs/releases/v26.8.3-c.9.md)。
 草稿的全部构建和校验和验证完成后，才会公开发布安装包。此前同步上游的
-`v26.9.1-c` 已撤下；已安装该版本的用户需手动下载安装 c.7，更新器不会自动降级。
+`v26.9.1-c` 已撤下；已安装该版本的用户需手动下载安装 c.9，更新器不会自动降级。
 
 ## 版本规则
 

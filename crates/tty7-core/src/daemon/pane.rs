@@ -10,7 +10,7 @@ use std::time::Duration;
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 
 use crate::core::kitty_graphics::{GraphicsSniffer, Segment, Sniffed};
-use crate::core::osc::OscTokenizer;
+use crate::core::osc::{OscTokenizer, percent_decode};
 use crate::daemon::protocol::{
     AuthResponse, DaemonMsg, MAX_FRAME, NativeSshSpec, PaneInfo, RemoteContext, RemoteKind,
     ShellSpec, WinSize,
@@ -736,6 +736,7 @@ struct PaneState {
     shell_spec: Option<ShellSpec>,
     remote: Option<RemoteContext>,
     agent: Option<crate::core::cli_agent::CLIAgent>,
+    foreground_app: Option<crate::core::foreground_app::ForegroundApp>,
     agent_argv: Option<Vec<String>>,
     agent_session: Option<crate::core::cli_agent::AgentSessionState>,
     command_input: CommandInput,
@@ -871,6 +872,7 @@ enum PaneBackend {
 struct ForegroundProbes {
     remote: Box<dyn Fn() -> Option<RemoteContext> + Send>,
     agent: Box<dyn Fn() -> Option<Option<(crate::core::cli_agent::CLIAgent, Vec<String>)>> + Send>,
+    app: Box<dyn Fn() -> Option<Option<crate::core::foreground_app::ForegroundApp>> + Send>,
     cwd: Box<dyn Fn() -> Option<PathBuf> + Send>,
 }
 
@@ -1089,6 +1091,7 @@ pub struct Carried {
     pub last_exit: Option<i32>,
     pub remote: Option<RemoteContext>,
     pub agent: Option<crate::core::cli_agent::CLIAgent>,
+    pub foreground_app: Option<crate::core::foreground_app::ForegroundApp>,
     pub agent_argv: Option<Vec<String>>,
     pub agent_session: Option<crate::core::cli_agent::AgentSessionState>,
     pub ended_agent: Option<(crate::core::cli_agent::CLIAgent, Option<Vec<String>>)>,
@@ -1464,6 +1467,7 @@ impl DaemonPane {
                 shell_spec: spawn.shell.clone(),
                 remote: spawn.remote.clone(),
                 agent: None,
+                foreground_app: None,
                 agent_session: None,
                 agent_argv: None,
                 ended_agent: None,
@@ -1560,6 +1564,7 @@ impl DaemonPane {
         let fg_master = master.clone();
         let remote_master = master.clone();
         let agent_master = master.clone();
+        let app_master = master.clone();
         let process_agent_seen = Mutex::new(None);
         let agent_state = state.clone();
         let cwd_master = master.clone();
@@ -1577,6 +1582,7 @@ impl DaemonPane {
                 agent: Box::new(move || {
                     foreground_agent(&agent_master, shell_pid, &process_agent_seen, &agent_state)
                 }),
+                app: Box::new(move || foreground_app(&app_master, shell_pid)),
                 cwd: Box::new(move || foreground_cwd(&cwd_master, shell_pid)),
             },
             death,
@@ -1624,6 +1630,7 @@ impl DaemonPane {
             last_exit: st.shell.last_exit_code,
             remote: st.remote.clone(),
             agent: st.agent,
+            foreground_app: st.foreground_app,
             agent_argv: st.agent_argv.clone(),
             agent_session: st.agent_session.clone(),
             ended_agent: st.ended_agent.clone(),
@@ -1692,6 +1699,7 @@ impl DaemonPane {
                 },
                 remote: carried.remote,
                 agent: carried.agent,
+                foreground_app: carried.foreground_app,
                 agent_session: carried.agent_session,
                 agent_argv: carried.agent_argv,
                 ended_agent: carried.ended_agent,
@@ -1743,6 +1751,7 @@ impl DaemonPane {
             shell: ShellState::default(),
             remote: Some(remote),
             agent: None,
+            foreground_app: None,
             agent_session: None,
             agent_argv: None,
             ended_agent: None,
@@ -1790,6 +1799,7 @@ impl DaemonPane {
             ForegroundProbes {
                 remote: Box::new(|| None),
                 agent: Box::new(|| None),
+                app: Box::new(|| None),
                 cwd: Box::new(|| None),
             },
             death,
@@ -1839,6 +1849,7 @@ impl DaemonPane {
         let ForegroundProbes {
             remote: foreground_remote,
             agent: foreground_agent_fn,
+            app: foreground_app_fn,
             cwd: foreground_cwd_fn,
         } = probes;
         std::thread::Builder::new()
@@ -1846,6 +1857,10 @@ impl DaemonPane {
             .spawn(move || {
                 crate::core::threads::promote_to_user_interactive();
                 let mut sniffer = OscSniffer::new();
+                // A hook without command-start support cannot acknowledge each
+                // queued line. Retain the process-tree fallback between its
+                // prompt reports until the process tree is idle again.
+                let mut cmd_input_queued = false;
                 // Kitty graphics interception (issue #213): lifts image
                 // sequences out of the stream *before* the ring/subscriber see
                 // them, so the base64 pixels never enter replay and the client's
@@ -1965,21 +1980,44 @@ impl DaemonPane {
                             let bytes: &[u8] = &passthrough;
                             // Sniff first (cheap, over the same bytes); collect any
                             // cwd/prompt change to emit while we hold the lock.
-                            let mut signals = sniffer.feed(bytes);
-
-                            if signals.shell.iter().any(|s| s.at_prompt)
-                                && foreground_running(sniffer.reports_command_start())
-                            {
-                                for s in signals.shell.iter_mut() {
-                                    s.at_prompt = false;
-                                }
-                                signals.shell.dedup();
+                            if sniffer.clink_prompt_seen {
+                                let st = state.lock().unwrap();
+                                sniffer.cmd_command_pending |= st.command_input.submitted;
+                                cmd_input_queued |= st.command_input.queued;
                             }
+                            let mut signals = sniffer.feed(bytes);
 
                             let poll_now = std::time::Instant::now() >= next_remote_check;
                             if poll_now {
                                 next_remote_check =
                                     std::time::Instant::now() + REMOTE_CONTEXT_POLL_INTERVAL;
+                                if cmd_input_queued
+                                    && !sniffer.reports_command_start()
+                                    && !foreground_running(false)
+                                {
+                                    cmd_input_queued = false;
+                                }
+                            }
+
+                            // Clink's raw cwd report comes from its own prompt.
+                            // Its helper may still be a child process then.
+                            // The batch wrapper's earlier report is guarded by
+                            // the process tree until Clink takes over editing.
+                            let own_cmd_prompt = sniffer.clink_prompt_seen
+                                && !sniffer.cmd_command_pending
+                                && (!cmd_input_queued
+                                    || sniffer.reports_command_start()
+                                    || signals.clink_prompt_report);
+
+                            if signals.shell.iter().any(|s| s.at_prompt)
+                                && !own_cmd_prompt
+                                && (sniffer.cmd_command_pending
+                                    || foreground_running(sniffer.reports_command_start()))
+                            {
+                                for s in signals.shell.iter_mut() {
+                                    s.at_prompt = false;
+                                }
+                                signals.shell.dedup();
                             }
 
                             // The guard above can only refuse to arm the editor
@@ -1993,7 +2031,9 @@ impl DaemonPane {
                             // own report is what arms the editor again.
                             if poll_now
                                 && sniffer.shell.at_prompt
-                                && foreground_running(sniffer.reports_command_start())
+                                && !own_cmd_prompt
+                                && (sniffer.cmd_command_pending
+                                    || foreground_running(sniffer.reports_command_start()))
                             {
                                 sniffer.shell.at_prompt = false;
                                 signals.shell.push(sniffer.shell.clone());
@@ -2011,6 +2051,7 @@ impl DaemonPane {
                                 None
                             };
                             let agent = poll_now.then(&foreground_agent_fn).flatten();
+                            let app = poll_now.then(&foreground_app_fn).flatten();
                             let probed_cwd = poll_now.then(&foreground_cwd_fn).flatten();
 
                             let tr1 = trace.then(std::time::Instant::now);
@@ -2030,6 +2071,9 @@ impl DaemonPane {
                             // the hook and shell lifecycle must have the last word.
                             if let Some(agent) = agent {
                                 apply_agent(&mut st, agent);
+                            }
+                            if let Some(app) = app {
+                                apply_foreground_app(&mut st, app);
                             }
                             let (agent_ended, command_started) = apply_signals(&mut st, signals);
                             if let Some(remote) = remote {
@@ -2657,6 +2701,9 @@ fn replay_state(st: &PaneState, subscriber: &Sender<DaemonMsg>) {
     if st.agent.is_some() {
         let _ = subscriber.send(DaemonMsg::Agent(st.agent));
     }
+    if st.foreground_app.is_some() {
+        let _ = subscriber.send(DaemonMsg::ForegroundApp(st.foreground_app));
+    }
     if st.agent_session.is_some() {
         let _ = subscriber.send(DaemonMsg::AgentStatus(st.agent_session.clone()));
     }
@@ -2964,6 +3011,17 @@ fn apply_remote_context(st: &mut PaneState, remote: Option<RemoteContext>) {
     st.cwd = None;
     notify(st, DaemonMsg::RemoteContext(remote.clone()));
     st.remote = remote;
+}
+
+fn apply_foreground_app(
+    st: &mut PaneState,
+    app: Option<crate::core::foreground_app::ForegroundApp>,
+) {
+    if st.foreground_app != app {
+        st.foreground_app = app;
+        crate::core::machine::observe_pane(st.id, |record| record.foreground_app = app);
+        notify(st, DaemonMsg::ForegroundApp(app));
+    }
 }
 
 fn apply_agent(
@@ -3336,6 +3394,40 @@ fn foreground_agent(
     None
 }
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn foreground_app(
+    master: &Mutex<Option<Box<dyn MasterPty + Send>>>,
+    _shell_pid: Option<u32>,
+) -> Option<Option<crate::core::foreground_app::ForegroundApp>> {
+    let pid = master
+        .lock()
+        .ok()?
+        .as_ref()
+        .and_then(|m| m.process_group_leader())?;
+    Some(
+        crate::daemon::procinfo::proc_name(pid)
+            .as_deref()
+            .and_then(crate::core::foreground_app::ForegroundApp::from_process_name),
+    )
+}
+
+#[cfg(windows)]
+fn foreground_app(
+    _master: &Mutex<Option<Box<dyn MasterPty + Send>>>,
+    shell_pid: Option<u32>,
+) -> Option<Option<crate::core::foreground_app::ForegroundApp>> {
+    let procs = crate::daemon::winproc::snapshot();
+    Some(crate::daemon::winproc::foreground_app(&procs, shell_pid?))
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux", windows)))]
+fn foreground_app(
+    _master: &Mutex<Option<Box<dyn MasterPty + Send>>>,
+    _shell_pid: Option<u32>,
+) -> Option<Option<crate::core::foreground_app::ForegroundApp>> {
+    None
+}
+
 #[cfg(windows)]
 fn windows_agent_probe_signal(
     process_agent: &mut Option<crate::core::cli_agent::CLIAgent>,
@@ -3365,6 +3457,8 @@ struct ShellState {
 #[derive(Default)]
 struct SniffSignals {
     cwd: Option<PathBuf>,
+    /// Clink itself reported this cwd, without the batch wrapper's OSC 133 A.
+    clink_prompt_report: bool,
     /// The last title the pane set in this read, already capped. `Some("")` is
     /// a reset — an empty OSC 0/2 clears the title rather than setting a blank
     /// one, the same way the GUI's terminal treats it.
@@ -3378,6 +3472,11 @@ struct OscSniffer {
     tok: OscTokenizer,
     shell: ShellState,
     reports_command_start: bool,
+    clink_prompt_seen: bool,
+    // Unlike CommandInput, this survives a busy transition. Update it in OSC
+    // order: one read can contain a prompt followed by the next queued command.
+    cmd_command_pending: bool,
+    osc133_prompt_start: bool,
 }
 
 impl OscSniffer {
@@ -3386,6 +3485,9 @@ impl OscSniffer {
             tok: OscTokenizer::new(&[b"0", b"2", b"7", b"133", b"9", b"777"]),
             shell: ShellState::default(),
             reports_command_start: false,
+            clink_prompt_seen: false,
+            cmd_command_pending: false,
+            osc133_prompt_start: false,
         }
     }
 
@@ -3393,12 +3495,20 @@ impl OscSniffer {
         let mut signals = SniffSignals::default();
         let shell = &mut self.shell;
         let reports_command_start = &mut self.reports_command_start;
+        let clink_prompt_seen = &mut self.clink_prompt_seen;
+        let cmd_command_pending = &mut self.cmd_command_pending;
+        let osc133_prompt_start = &mut self.osc133_prompt_start;
         self.tok.feed(bytes, |payload| {
             if let Some(path) = parse_osc7(payload) {
                 signals.cwd = Some(path);
             } else if let Some((path, tty7_cmd_prompt)) = parse_osc9_cwd_report(payload) {
                 signals.cwd = Some(path);
                 if tty7_cmd_prompt {
+                    if !*osc133_prompt_start {
+                        *clink_prompt_seen = true;
+                        *cmd_command_pending = false;
+                        signals.clink_prompt_report = true;
+                    }
                     // Clink consumes OSC 133 embedded in its prompt renderer,
                     // so tty7's cmd hook marks its OSC 9;9 report explicitly.
                     // A generic OSC 9;9 only updates cwd: applications such as
@@ -3419,8 +3529,19 @@ impl OscSniffer {
             } else if let Some(title) = parse_osc_title(payload) {
                 signals.title = Some(title);
             } else if let Some(rest) = payload.strip_prefix(b"133;") {
+                match rest.first() {
+                    Some(b'A') => *osc133_prompt_start = true,
+                    Some(b'B' | b'C' | b'D') => *osc133_prompt_start = false,
+                    _ => {}
+                }
                 if rest.first() == Some(&b'C') {
                     *reports_command_start = true;
+                }
+                // Clink consumes its prompt's 133 marks and reports via raw
+                // OSC 9;9 instead. Any 133 lifecycle mark after that belongs
+                // to a command, including a queued command on an older hook.
+                if *clink_prompt_seen && matches!(rest.first(), Some(b'A' | b'B' | b'C' | b'D')) {
+                    *cmd_command_pending = true;
                 }
                 if handle_osc133(shell, rest) {
                     match signals.shell.last_mut() {
@@ -3568,32 +3689,6 @@ pub(crate) fn parse_osc_title(payload: &[u8]) -> Option<String> {
         true => title.chars().take(MAX_OSC_TITLE).collect(),
         false => title.to_string(),
     })
-}
-
-fn percent_decode(input: &[u8]) -> Vec<u8> {
-    let mut out = Vec::with_capacity(input.len());
-    let mut i = 0;
-    while i < input.len() {
-        if input[i] == b'%' && i + 2 < input.len() {
-            if let (Some(h), Some(l)) = (hex_val(input[i + 1]), hex_val(input[i + 2])) {
-                out.push((h << 4) | l);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(input[i]);
-        i += 1;
-    }
-    out
-}
-
-fn hex_val(b: u8) -> Option<u8> {
-    match b {
-        b'0'..=b'9' => Some(b - b'0'),
-        b'a'..=b'f' => Some(b - b'a' + 10),
-        b'A'..=b'F' => Some(b - b'A' + 10),
-        _ => None,
-    }
 }
 
 #[cfg(test)]
@@ -5137,6 +5232,203 @@ mod tests {
         assert!(local.shell.last().unwrap().at_prompt);
     }
 
+    #[cfg(windows)]
+    fn assert_cmd_prompt_report_survives_its_prompt_helper_child(command_start: bool) {
+        struct Chunks {
+            chunks: std::vec::IntoIter<Vec<u8>>,
+            state: Arc<Mutex<PaneState>>,
+            read_count: usize,
+        }
+
+        impl Read for Chunks {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                // Start a command after the first prompt is fully reported.
+                // Its foreign OSC marks must not rearm the cmd editor.
+                if self.read_count == 3 {
+                    assert!(
+                        !self.state.lock().unwrap().shell.at_prompt,
+                        "the batch wrapper must wait while Clink is starting"
+                    );
+                }
+                if self.read_count == 4 {
+                    note_agent_input(&mut self.state.lock().unwrap(), b"child\r");
+                }
+                let Some(chunk) = self.chunks.next() else {
+                    return Ok(0);
+                };
+                self.read_count += 1;
+                buf[..chunk.len()].copy_from_slice(&chunk);
+                Ok(chunk.len())
+            }
+        }
+
+        let state = Arc::new(Mutex::new(test_state(true)));
+        let (tx, rx) = mpsc::channel();
+        state.lock().unwrap().subscriber = Some(tx);
+        let mut chunks = vec![
+            b"\x1b]133;A\x1b\\".to_vec(),
+            b"\x1b]9;9;tty7-cmd;C:\\work\x1b\\".to_vec(),
+            b"\x1b]133;B\x1b\\".to_vec(),
+            b"\x1b]9;9;tty7-cmd;C:\\work\x1b\\".to_vec(),
+            b"\x1b]133;A\x1b]133;B\x07".to_vec(),
+            b"\x1b]133;A\x1b]133;B\x07".to_vec(),
+            b"\x1b]9;9;tty7-cmd;C:\\next\x1b\\".to_vec(),
+        ];
+        if command_start {
+            chunks.insert(4, b"\x1b]133;C;child\x07".to_vec());
+        }
+        DaemonPane::spawn_reader(
+            state.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(OutputGate::new()),
+            Box::new(Chunks {
+                chunks: chunks.into_iter(),
+                state: state.clone(),
+                read_count: 0,
+            }),
+            null_writer(),
+            // Windows only probes cmd's children until OSC 133 C arrives.
+            |reports_command_start| !reports_command_start,
+            ForegroundProbes {
+                remote: Box::new(|| None),
+                agent: Box::new(|| None),
+                app: Box::new(|| None),
+                cwd: Box::new(|| None),
+            },
+            Arc::new(DeathReporter::new(|| {})),
+        )
+        .join()
+        .unwrap();
+
+        assert!(
+            state.lock().unwrap().shell.at_prompt,
+            "a cmd prompt must stay editable while its own helper exits"
+        );
+        let mut first_prompt = false;
+        let mut child_busy = false;
+        let mut cmd_resumed = false;
+        for msg in rx.try_iter() {
+            match msg {
+                DaemonMsg::Prompt {
+                    active: true,
+                    at_prompt: true,
+                    ..
+                } if child_busy && !cmd_resumed => {
+                    panic!("a foreground command must not claim cmd's prompt");
+                }
+                DaemonMsg::Prompt {
+                    active: true,
+                    at_prompt: true,
+                    ..
+                } => first_prompt = true,
+                DaemonMsg::Prompt {
+                    active: true,
+                    at_prompt: false,
+                    ..
+                } if first_prompt => child_busy = true,
+                DaemonMsg::Cwd(path) if path == PathBuf::from(r"C:\next") => {
+                    cmd_resumed = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(first_prompt && child_busy && cmd_resumed);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_cmd_prompt_report_survives_its_prompt_helper_child() {
+        assert_cmd_prompt_report_survives_its_prompt_helper_child(false);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_clink_command_start_keeps_nested_prompt_marks_disarmed() {
+        assert_cmd_prompt_report_survives_its_prompt_helper_child(true);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_queued_clink_command_keeps_nested_prompt_marks_disarmed() {
+        struct Chunks {
+            chunks: std::vec::IntoIter<(Vec<u8>, bool)>,
+            state: Arc<Mutex<PaneState>>,
+            expected_prompt: Option<bool>,
+            submitted: bool,
+        }
+
+        impl Read for Chunks {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                let mut state = self.state.lock().unwrap();
+                if let Some(expected) = self.expected_prompt {
+                    assert_eq!(
+                        state.shell.at_prompt, expected,
+                        "queued command output must not acquire the inline editor"
+                    );
+                    if !self.submitted {
+                        note_agent_input(&mut state, b"first\rsecond\r");
+                        self.submitted = true;
+                    }
+                }
+                let Some((chunk, at_prompt)) = self.chunks.next() else {
+                    return Ok(0);
+                };
+                self.expected_prompt = Some(at_prompt);
+                buf[..chunk.len()].copy_from_slice(&chunk);
+                Ok(chunk.len())
+            }
+        }
+
+        for (command_start, coalesced) in
+            [(true, false), (true, true), (false, false), (false, true)]
+        {
+            let prompt = b"\x1b]9;9;tty7-cmd;C:\\work\x1b\\";
+            let nested_prompt = b"\x1b]133;A\x07\x1b]133;B\x07";
+            let start = if command_start {
+                b"\x1b]133;C;second\x07".as_slice()
+            } else {
+                nested_prompt.as_slice()
+            };
+            let mut chunks = vec![(prompt.to_vec(), true), (start.to_vec(), false)];
+            if coalesced {
+                chunks.push(([prompt.as_slice(), start].concat(), false));
+            } else {
+                chunks.push((prompt.to_vec(), true));
+                chunks.push((start.to_vec(), false));
+            }
+            chunks.extend([
+                (nested_prompt.to_vec(), false),
+                (
+                    [b"\x1b]133;D;0\x07".as_slice(), prompt.as_slice()].concat(),
+                    true,
+                ),
+            ]);
+            let state = Arc::new(Mutex::new(test_state(true)));
+            DaemonPane::spawn_reader(
+                state.clone(),
+                Arc::new(AtomicBool::new(false)),
+                Arc::new(OutputGate::new()),
+                Box::new(Chunks {
+                    chunks: chunks.into_iter(),
+                    state,
+                    expected_prompt: None,
+                    submitted: false,
+                }),
+                null_writer(),
+                |reports_command_start| !reports_command_start,
+                ForegroundProbes {
+                    remote: Box::new(|| None),
+                    agent: Box::new(|| None),
+                    app: Box::new(|| None),
+                    cwd: Box::new(|| None),
+                },
+                Arc::new(DeathReporter::new(|| {})),
+            )
+            .join()
+            .unwrap();
+        }
+    }
+
     #[test]
     fn sniff_resyncs_on_new_osc_after_an_unterminated_one() {
         let mut s = OscSniffer::new();
@@ -5400,19 +5692,6 @@ mod tests {
     }
 
     #[test]
-    fn hex_val_ranges() {
-        assert_eq!(hex_val(b'0'), Some(0));
-        assert_eq!(hex_val(b'9'), Some(9));
-        assert_eq!(hex_val(b'a'), Some(10));
-        assert_eq!(hex_val(b'f'), Some(15));
-        assert_eq!(hex_val(b'A'), Some(10));
-        assert_eq!(hex_val(b'F'), Some(15));
-        assert!(hex_val(b'g').is_none());
-        assert!(hex_val(b' ').is_none());
-        assert!(hex_val(b'/').is_none());
-    }
-
-    #[test]
     fn osc133_exit_code_parsing() {
         let mut s = OscSniffer::new();
         let d = s.feed(b"\x1b]133;D\x07");
@@ -5446,6 +5725,7 @@ mod tests {
             shell: ShellState::default(),
             remote: None,
             agent: None,
+            foreground_app: None,
             agent_session: None,
             agent_argv: None,
             ended_agent: None,
@@ -5672,6 +5952,7 @@ mod tests {
                 ForegroundProbes {
                     remote: Box::new(|| None),
                     agent: Box::new(move || Some(detected.clone())),
+                    app: Box::new(|| None),
                     cwd: Box::new(|| None),
                 },
                 Arc::new(DeathReporter::new(|| {})),
@@ -5861,6 +6142,7 @@ mod tests {
                     ForegroundProbes {
                         remote: Box::new(|| None),
                         agent: Box::new(move || Some(Some((agent, argv.clone())))),
+                        app: Box::new(|| None),
                         cwd: Box::new(|| None),
                     },
                     Arc::new(DeathReporter::new(|| {})),
@@ -5935,6 +6217,7 @@ mod tests {
                 ForegroundProbes {
                     remote: Box::new(|| None),
                     agent: Box::new(|| Some(None)),
+                    app: Box::new(|| None),
                     cwd: Box::new(|| None),
                 },
                 Arc::new(DeathReporter::new(|| {})),
@@ -5996,6 +6279,7 @@ mod tests {
                 ForegroundProbes {
                     remote: Box::new(|| None),
                     agent: Box::new(|| Some(None)),
+                    app: Box::new(|| None),
                     cwd: Box::new(|| None),
                 },
                 Arc::new(DeathReporter::new(|| {})),
@@ -6255,6 +6539,7 @@ mod tests {
             ForegroundProbes {
                 remote: Box::new(|| None),
                 agent: Box::new(move || Some(Some((CLIAgent::Claude, argv.clone())))),
+                app: Box::new(|| None),
                 cwd: Box::new(|| None),
             },
             Arc::new(DeathReporter::new(|| {})),
@@ -6308,6 +6593,7 @@ mod tests {
                     ForegroundProbes {
                         remote: Box::new(|| None),
                         agent: Box::new(|| Some(None)),
+                        app: Box::new(|| None),
                         cwd: Box::new(|| None),
                     },
                     Arc::new(DeathReporter::new(|| {})),
@@ -6493,6 +6779,7 @@ mod tests {
             ForegroundProbes {
                 remote: Box::new(|| None),
                 agent: Box::new(|| Some(None)),
+                app: Box::new(|| None),
                 cwd: Box::new(|| None),
             },
             Arc::new(DeathReporter::new(|| {})),
@@ -6753,6 +7040,42 @@ mod tests {
             matches!(rx.try_recv(), Ok(DaemonMsg::Cwd(p)) if p.as_path() == std::path::Path::new("/work"))
         );
         assert!(rx.try_recv().is_err());
+    }
+
+    #[test]
+    fn foreground_app_reports_changes_and_replays_on_attach() {
+        use crate::core::foreground_app::ForegroundApp;
+
+        let mut st = test_state(true);
+        let (tx, rx) = mpsc::channel();
+        attach_subscriber(&mut st, tx);
+        rx.try_iter().for_each(drop);
+
+        apply_foreground_app(&mut st, Some(ForegroundApp::Herdr));
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(DaemonMsg::ForegroundApp(Some(ForegroundApp::Herdr)))
+        ));
+        apply_foreground_app(&mut st, Some(ForegroundApp::Herdr));
+        assert!(rx.try_recv().is_err());
+
+        let (reconnect, replay) = mpsc::channel();
+        attach_subscriber(&mut st, reconnect);
+        assert!(
+            replay
+                .try_iter()
+                .any(|message| message == DaemonMsg::ForegroundApp(Some(ForegroundApp::Herdr)))
+        );
+
+        apply_foreground_app(&mut st, None);
+        assert!(matches!(
+            rx.try_recv(),
+            Err(mpsc::TryRecvError::Disconnected)
+        ));
+        assert!(matches!(
+            replay.try_recv(),
+            Ok(DaemonMsg::ForegroundApp(None))
+        ));
     }
 
     #[test]
@@ -7075,6 +7398,7 @@ mod tests {
             ForegroundProbes {
                 remote: Box::new(|| None),
                 agent: Box::new(|| None),
+                app: Box::new(|| None),
                 cwd: Box::new(|| None),
             },
             Arc::new(DeathReporter::new(move || {
@@ -7179,6 +7503,7 @@ mod tests {
             ForegroundProbes {
                 remote: Box::new(|| None),
                 agent: Box::new(|| None),
+                app: Box::new(|| None),
                 cwd: Box::new(|| None),
             },
             Arc::new(DeathReporter::new(|| {})),
@@ -7276,6 +7601,7 @@ mod tests {
             ForegroundProbes {
                 remote: Box::new(|| None),
                 agent: Box::new(|| None),
+                app: Box::new(|| None),
                 cwd: Box::new(|| None),
             },
             death.clone(),
@@ -7313,6 +7639,7 @@ mod tests {
             ForegroundProbes {
                 remote: Box::new(|| None),
                 agent: Box::new(|| None),
+                app: Box::new(|| None),
                 cwd: Box::new(|| None),
             },
             death.clone(),
@@ -7383,6 +7710,7 @@ mod tests {
             ForegroundProbes {
                 remote: Box::new(|| None),
                 agent: Box::new(|| None),
+                app: Box::new(|| None),
                 cwd: Box::new(|| None),
             },
             Arc::new(DeathReporter::new(|| {})),
@@ -7429,6 +7757,7 @@ mod tests {
             ForegroundProbes {
                 remote: Box::new(|| None),
                 agent: Box::new(|| None),
+                app: Box::new(|| None),
                 cwd: Box::new(|| None),
             },
             Arc::new(DeathReporter::new(|| {})),
@@ -7480,6 +7809,7 @@ mod tests {
             ForegroundProbes {
                 remote: Box::new(|| None),
                 agent: Box::new(|| None),
+                app: Box::new(|| None),
                 cwd: Box::new(|| Some(PathBuf::from("/Users/alice/dev/tty7"))),
             },
             Arc::new(DeathReporter::new(|| {})),
@@ -7511,6 +7841,7 @@ mod tests {
             ForegroundProbes {
                 remote: Box::new(|| None),
                 agent: Box::new(|| None),
+                app: Box::new(|| None),
                 cwd: Box::new(|| None),
             },
             Arc::new(DeathReporter::new(move || dead_tx.send(()).unwrap())),
@@ -7537,6 +7868,7 @@ mod tests {
             ForegroundProbes {
                 remote: Box::new(|| None),
                 agent: Box::new(|| None),
+                app: Box::new(|| None),
                 cwd: Box::new(|| None),
             },
             Arc::new(DeathReporter::new(move || {

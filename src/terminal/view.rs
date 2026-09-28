@@ -329,6 +329,12 @@ pub struct TerminalView {
     agent_was_rich: bool,
     agent_result_unread: bool,
     keep_unread_on_focus: bool,
+    /// The agent's status as its screen shows it — see
+    /// [`crate::terminal::screen_status`].
+    screen_status: crate::terminal::screen_status::Tracker,
+    /// Bumped on every batch of output, so the screen is only read again once
+    /// something could have changed on it.
+    output_seq: u64,
     git_status_cwd: Option<std::path::PathBuf>,
     last_agent_activity: u64,
     cmd: CmdEditor,
@@ -1340,6 +1346,8 @@ impl TerminalView {
             agent_was_rich: false,
             agent_result_unread: false,
             keep_unread_on_focus: false,
+            screen_status: Default::default(),
+            output_seq: 0,
             git_status_cwd: None,
             last_agent_activity: 0,
             cmd: CmdEditor::new(),
@@ -1554,8 +1562,32 @@ impl TerminalView {
         self.terminal.foreground_agent()
     }
 
+    pub(crate) fn foreground_app(&self) -> Option<crate::core::foreground_app::ForegroundApp> {
+        self.terminal.foreground_app().or_else(|| {
+            crate::core::foreground_app::ForegroundApp::from_command_mark(
+                &self.terminal.running_command(),
+            )
+        })
+    }
+
     pub fn agent_session(&self) -> Option<crate::core::cli_agent::AgentSessionState> {
         self.terminal.agent_session()
+    }
+
+    /// What the agent in this pane is doing: the hooks' report and the screen's
+    /// reading, reconciled by [`crate::terminal::screen_status::merge`].
+    /// Everything that shows a status reads it here rather than from
+    /// [`Self::agent_session`], which only knows what the hooks said.
+    pub fn agent_status(&self) -> Option<crate::core::cli_agent::AgentStatus> {
+        let session = self.terminal.agent_session();
+        match self.agent() {
+            Some(agent) => crate::terminal::screen_status::merge(
+                agent,
+                session.as_ref(),
+                self.screen_status.status(),
+            ),
+            None => session.map(|s| s.status),
+        }
     }
 
     /// One entry per turn of the agent's conversation, oldest first — see
@@ -1612,9 +1644,10 @@ impl TerminalView {
         // turn still in flight — running, or stopped on a question — is work
         // that closing would cut short.
         if let Some(agent) = self.agent()
-            && self
-                .agent_session()
-                .is_some_and(|s| matches!(s.status, AgentStatus::Working | AgentStatus::Waiting))
+            && matches!(
+                self.agent_status(),
+                Some(AgentStatus::Working | AgentStatus::Waiting)
+            )
         {
             return Some(PaneBusy::Agent(agent.display_name()));
         }
@@ -1850,6 +1883,7 @@ impl TerminalView {
         }
         match ev {
             AlacEvent::Wakeup => {
+                self.output_seq = self.output_seq.wrapping_add(1);
                 // The grid moved under whatever the search bar last measured.
                 self.note_output_under_search(cx);
                 // Only a pane that is on screen repaints on output. The
@@ -3554,11 +3588,24 @@ impl TerminalView {
     ) -> bool {
         use crate::core::cli_agent::AgentStatus;
 
+        let agent = self.terminal.foreground_agent();
+        // The latest title, not the settled one the tab shows: a spinner in the
+        // title is exactly what settling holds back.
+        let title = self.pending_title.as_deref().unwrap_or(&self.title);
+        let term = &self.terminal.term;
+        self.screen_status
+            .observe(agent, self.output_seq, title, || {
+                crate::terminal::screen_status::detection_text(&term.lock())
+            });
+
+        // Notifications stay with agents whose hooks report, as before the
+        // screen was read. For the rest the screen only moves the badge, and
+        // they keep the one notice when the agent exits.
         let session = self.terminal.agent_session();
         if session.as_ref().is_some_and(|s| s.rich) {
             self.agent_was_rich = true;
         }
-        if self.terminal.foreground_agent().is_none() && session.is_none() {
+        if agent.is_none() && session.is_none() {
             self.agent_was_rich = false;
         }
 
@@ -3571,7 +3618,7 @@ impl TerminalView {
             cx.emit(AgentSessionChanged);
         }
 
-        let status = session.as_ref().map(|s| s.status);
+        let status = self.agent_status();
         if status == self.last_agent_status {
             return false;
         }
@@ -6260,11 +6307,10 @@ impl Render for TerminalView {
                 self.terminal.write(bytes);
             }
             self.typeahead.drain();
-        } else if self.terminal.zle_reading() && self.input_active() {
-            // The prompt report can arrive before its vi-mode and prompt-end
-            // marks. Keep the gap pending until those marks establish which
-            // editor owns it; consuming it earlier strands it in `cmd` when
-            // the next output frame hands the prompt to the shell.
+        } else if self.input_active() && self.terminal.zle_reading() {
+            // A Prompt report can wake this view before the following OSC 133
+            // output reports vi mode. Keep gap input held until the shell has
+            // reported its input mode, or a vi prompt would strand it in cmd.
             if let Some(net) = self.hold.engage() {
                 self.cmd.prepend_str(&net);
             }
@@ -10458,8 +10504,7 @@ mod gpui_tests {
         );
     }
 
-    #[gpui::test]
-    fn shell_vi_mode_prompt_releases_gap_hold_without_stale_typeahead(cx: &mut TestAppContext) {
+    fn assert_vi_prompt_releases_gap_hold(cx: &mut TestAppContext, split_prompt_report: bool) {
         let (window, mut daemon) = harness(cx);
         DaemonMsg::Prompt {
             active: true,
@@ -10468,9 +10513,10 @@ mod gpui_tests {
         }
         .encode(&mut daemon)
         .unwrap();
+        let mut gap = false;
         for _ in 0..200 {
             cx.run_until_parked();
-            let gap = window
+            gap = window
                 .update(cx, |view, _, _| {
                     view.terminal.shell_active() && !view.terminal.at_prompt()
                 })
@@ -10480,36 +10526,67 @@ mod gpui_tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        assert!(gap, "command gap was not reported");
         window
-            .update(cx, |view, _, cx| {
-                assert!(view.terminal.shell_active() && !view.terminal.at_prompt());
-                view.commit_text("ls", cx);
-            })
+            .update(cx, |view, _, cx| view.commit_text("ls", cx))
             .unwrap();
 
-        prompt_ready(&window, cx, &mut daemon);
-        // Force a frame between the prompt report and its mode/end marks.
-        // Depending on socket batching used to hide the premature transfer
-        // of the held text into the editor on most runs.
-        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
-        vcx.update(|window, cx| {
-            let _ = window.draw(cx);
-        });
-        window
-            .update(cx, |view, _, _| {
-                assert!(!view.terminal.zle_reading());
-                assert!(
-                    view.cmd.is_empty(),
-                    "gap text must wait until the prompt's input mode is known"
-                );
-            })
-            .unwrap();
+        DaemonMsg::Prompt {
+            active: true,
+            at_prompt: true,
+            last_exit: Some(0),
+        }
+        .encode(&mut daemon)
+        .unwrap();
+        if split_prompt_report {
+            let mut saw_prompt_before_mode = false;
+            for _ in 0..200 {
+                cx.run_until_parked();
+                saw_prompt_before_mode = window
+                    .update(cx, |view, _, _| {
+                        view.terminal.at_prompt() && !view.terminal.zle_reading()
+                    })
+                    .unwrap();
+                if saw_prompt_before_mode {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(saw_prompt_before_mode, "prompt report was not processed");
+            window.update(cx, |_, _, cx| cx.notify()).unwrap();
+            cx.run_until_parked();
+            window
+                .update(cx, |view, _, _| {
+                    assert_eq!(
+                        view.cmd.text(),
+                        "",
+                        "gap text must stay held until the shell reports its input mode"
+                    );
+                })
+                .unwrap();
+        }
         DaemonMsg::Output(b"\x1b]133;V;1\x07\x1b]133;B\x07".to_vec())
             .encode(&mut daemon)
             .unwrap();
+        if !split_prompt_report {
+            let mut markers_before_render = false;
+            for _ in 0..200 {
+                markers_before_render = window
+                    .update(cx, |view, _, _| {
+                        view.terminal.shell_vi_mode() && view.terminal.zle_reading()
+                    })
+                    .unwrap();
+                if markers_before_render {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(markers_before_render, "mode marker was not processed");
+        }
+        let mut ready = false;
         for _ in 0..200 {
             cx.run_until_parked();
-            let ready = window
+            ready = window
                 .update(cx, |view, _, _| {
                     view.terminal.shell_vi_mode() && view.terminal.zle_reading()
                 })
@@ -10519,11 +10596,7 @@ mod gpui_tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
-        window
-            .update(cx, |view, _, _| {
-                assert!(view.terminal.shell_vi_mode() && view.terminal.zle_reading());
-            })
-            .unwrap();
+        assert!(ready, "vi-mode prompt was not reported");
         cx.executor().advance_clock(HOLD_WINDOW * 2);
         cx.run_until_parked();
         assert_eq!(
@@ -10531,18 +10604,61 @@ mod gpui_tests {
             Some(b"ls".to_vec()),
             "gap text typed before a vi prompt must reach the shell"
         );
+        let vi_prompt_cycle = window
+            .update(cx, |view, _, _| view.terminal.prompt_cycle())
+            .unwrap();
 
+        DaemonMsg::Output(b"\x1b]133;C\x07".to_vec())
+            .encode(&mut daemon)
+            .unwrap();
+        DaemonMsg::Prompt {
+            active: true,
+            at_prompt: false,
+            last_exit: None,
+        }
+        .encode(&mut daemon)
+        .unwrap();
+        let mut left_prompt = false;
+        for _ in 0..200 {
+            cx.run_until_parked();
+            left_prompt = window
+                .update(cx, |view, _, _| !view.terminal.at_prompt())
+                .unwrap();
+            if left_prompt {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(left_prompt, "command start was not reported");
+
+        DaemonMsg::Prompt {
+            active: true,
+            at_prompt: true,
+            last_exit: Some(0),
+        }
+        .encode(&mut daemon)
+        .unwrap();
         DaemonMsg::Output(b"\x1b]133;V;0\x07\x1b]133;B\x07".to_vec())
             .encode(&mut daemon)
             .unwrap();
+        let mut active = false;
         for _ in 0..200 {
             cx.run_until_parked();
-            let active = window.update(cx, |view, _, _| view.input_active()).unwrap();
+            active = window
+                .update(cx, |view, _, _| {
+                    view.input_active()
+                        && view.terminal.zle_reading()
+                        && view.terminal.prompt_cycle() > vi_prompt_cycle
+                })
+                .unwrap();
             if active {
                 break;
             }
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
+        assert!(active, "inline editor did not resume after vi mode");
+        window.update(cx, |_, _, cx| cx.notify()).unwrap();
+        cx.run_until_parked();
         window
             .update(cx, |view, _, _| {
                 assert!(view.input_active());
@@ -10558,6 +10674,16 @@ mod gpui_tests {
             None,
             "no stale ^U wipe once the vi prompt consumed the gap text"
         );
+    }
+
+    #[gpui::test]
+    fn shell_vi_mode_prompt_releases_gap_hold_without_stale_typeahead(cx: &mut TestAppContext) {
+        assert_vi_prompt_releases_gap_hold(cx, false);
+    }
+
+    #[gpui::test]
+    fn shell_vi_mode_prompt_releases_gap_hold_after_early_prompt_report(cx: &mut TestAppContext) {
+        assert_vi_prompt_releases_gap_hold(cx, true);
     }
 
     fn key(spec: &str) -> gpui::Keystroke {

@@ -1031,6 +1031,9 @@ if clink then
             clink.print(seq, NONL)
         else
             io.write(seq)
+            if io.flush then
+                io.flush()
+            end
         end
     end
     local function tty7_wrap_prompt(prompt)
@@ -1067,15 +1070,14 @@ if clink then
     -- own input line. Clink can report it: onendedit fires with the submitted
     -- text the moment the edit session ends, which is exactly preexec.
     --
-    -- Gated on onfilterinput, which is what v1.2.16 split the "replace the
-    -- user's input" job into. On an older Clink onendedit's *return value* is
-    -- that replacement, and a handler returning nothing would erase the line
-    -- it was only meant to observe.
+    -- Before v1.2.16, onendedit's return value could replace the user's input.
+    -- Return the original line even if emitting C fails. Older Clink versions
+    -- then report every queued command too, without changing what cmd runs.
     --
     -- No D: exit codes come from os.geterrorlevel(), which returns 0 unless
     -- cmd.get_errorlevel is enabled, so reporting one would mark every failed
     -- command as a success. The prompt's own OSC 9;9 ends the cycle instead.
-    if clink.onendedit and clink.onfilterinput then
+    if clink.onendedit then
         clink.onendedit(function(line)
             pcall(function()
                 if type(line) ~= "string" or line:match("^%s*$") then
@@ -1091,6 +1093,7 @@ if clink then
                 cmd = cmd:gsub("\n", "%%0A")
                 tty7_emit(esc .. "]133;C;" .. cmd .. st)
             end)
+            return line
         end)
     end
 end
@@ -3266,8 +3269,8 @@ printf 'user:x:%s:7::/home/user:%s\n' "$TTY7_TEST_UID" "$TTY7_TEST_LOGIN_SHELL"
              place a cmd pane can say a full-screen program took the line"
         );
         assert!(
-            lua.contains("clink.onfilterinput"),
-            "onendedit's return value replaced the user's input before v1.2.16"
+            lua.contains("return line"),
+            "onendedit must preserve the user's input before v1.2.16"
         );
         assert!(
             !lua.contains("]133;D"),

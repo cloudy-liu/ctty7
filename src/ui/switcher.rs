@@ -20,6 +20,7 @@ use crate::ui::app::Tty7App;
 use crate::ui::i18n::{L10nKey, t, t_fmt};
 use crate::ui::remote_connect::{self, HostChoice, RemoteWorkspaceRow};
 use crate::ui::remote_workspace::{ConnectFlow, MachineStatus, RemoteLinks};
+use crate::ui::tab_strip::TabAvatar;
 
 const CARD_W: f32 = 840.0;
 
@@ -161,10 +162,8 @@ struct TabRow {
     /// label is already derived from the working directory and showing `path`
     /// next to it just prints the same place twice.
     named: bool,
-    agent: Option<crate::core::cli_agent::CLIAgent>,
-    status: Option<crate::core::cli_agent::AgentStatus>,
-    unread: usize,
-    ssh: Option<u32>,
+    avatar: TabAvatar,
+    indicator: Option<crate::ui::status_indicator::StatusIndicator>,
     active: bool,
     /// Branch and diff counts, the same line the tab sidebar shows. Only this
     /// window's own tabs have it — the machine tree carries no git state.
@@ -916,6 +915,7 @@ impl Tty7App {
                 .map(|i| {
                     let tab = &self.tabs[i];
                     let agent_row = tab.agent_row(cx);
+                    let focused = tab.focused_agent_badge(None, cx);
                     TabRow {
                         id: tab.tree_id.get(),
                         index: i,
@@ -932,10 +932,8 @@ impl Tty7App {
                             })
                             .map(|(p, home)| crate::ui::home::display_path(&p, home.as_deref()))
                             .unwrap_or_default(),
-                        agent: agent_row.map(|(agent, _)| agent),
-                        status: agent_row.map(|(_, status)| status),
-                        unread: tab.agent_unread_count(cx),
-                        ssh: self.tab_ssh_dot(tab, cx),
+                        avatar: TabAvatar::choose(focused.agent, tab.foreground_app(None, cx)),
+                        indicator: focused.indicator(),
                         active: i == self.active,
                         git: tab.git_status(None, cx),
                     }
@@ -977,10 +975,12 @@ impl Tty7App {
                         crate::ui::home::display_path(std::path::Path::new(p), home.as_deref())
                     })
                     .unwrap_or_default(),
-                agent: v.agent,
-                status: v.status,
-                unread: 0,
-                ssh: None,
+                avatar: TabAvatar::choose(v.focused_agent, v.foreground_app),
+                // The tree carries no read state, so a finished turn keeps its
+                // check here rather than claiming someone has seen it.
+                indicator: v.focused_agent.map(|_| {
+                    crate::ui::status_indicator::StatusIndicator::of_agent(v.focused_status, true)
+                }),
                 active: Some(v.id) == active,
                 git: git(v.cwd.as_deref()),
                 index: i,
@@ -2853,10 +2853,8 @@ impl Tty7App {
                     .hover(move |r| r.bg(hover))
                     .child(self.tab_avatar(
                         ("switcher-avatar", index),
-                        tab.agent,
-                        tab.status,
-                        tab.unread,
-                        tab.ssh,
+                        tab.avatar,
+                        tab.indicator,
                         ROW_AVATAR,
                         cx,
                     ))
@@ -3387,10 +3385,8 @@ mod tests {
             label: label.to_string(),
             path: path.to_string(),
             named: false,
-            agent: None,
-            status: None,
-            unread: 0,
-            ssh: None,
+            avatar: TabAvatar::Terminal,
+            indicator: None,
             active: false,
             git: None,
         }
@@ -3636,6 +3632,9 @@ mod tests {
             cwd: Some("/Users/x/repo/tty7".to_string()),
             agent: Some(crate::core::cli_agent::CLIAgent::Claude),
             status: None,
+            focused_agent: None,
+            focused_status: None,
+            foreground_app: None,
             live: true,
             panes: 1,
         };

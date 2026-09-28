@@ -477,6 +477,15 @@ pub(crate) struct TabAgentBadge {
     pub(crate) unread: usize,
 }
 
+impl TabAgentBadge {
+    /// The corner mark this badge draws, or `None` when no agent runs here.
+    pub(crate) fn indicator(&self) -> Option<crate::ui::status_indicator::StatusIndicator> {
+        self.agent.map(|_| {
+            crate::ui::status_indicator::StatusIndicator::of_agent(self.status, self.unread > 0)
+        })
+    }
+}
+
 fn badge_for_focused_pane(
     focused: Option<gpui::EntityId>,
     rows: impl IntoIterator<Item = (gpui::EntityId, TabAgentBadge)>,
@@ -506,11 +515,14 @@ impl Tab {
         }
     }
 
-    pub(crate) fn from_tree(tree: &tty7_core::core::machine::Tab, pane: Pane) -> Self {
+    pub(crate) fn from_tree(tree: &tty7_core::core::machine::Tab, pane: Pane, cx: &App) -> Self {
+        let last_focused = tree
+            .focused_pane
+            .and_then(|id| pane_entity_id_for_pane(&pane, id, cx));
         Self {
             pane,
             name: tree.name.clone(),
-            last_focused: None,
+            last_focused,
             zoomed: None,
             diff_overlay: None,
             code: None,
@@ -529,6 +541,17 @@ impl Tab {
             Some(id) => self.pane.leaf_matching_or_first(|l| l.entity_id() == id),
             None => self.pane.first_leaf(),
         }
+    }
+
+    pub(crate) fn focused_pane_id(&self, cx: &App) -> Option<u64> {
+        self.focus_target().and_then(|leaf| match leaf {
+            PaneSlot::Ready(view) => Some(view.read(cx).pane_id),
+            PaneSlot::Connecting(pending) => pending.read(cx).spawn.restore_pane,
+        })
+    }
+
+    pub(crate) fn remember_tree_focus(&mut self, pane: Option<u64>, cx: &App) {
+        self.last_focused = pane.and_then(|id| pane_entity_id_for_pane(&self.pane, id, cx));
     }
 
     pub(crate) fn detail_pane(
@@ -553,6 +576,15 @@ impl Tab {
             None => self.focus_target(),
         };
         leaf.and_then(|l| l.terminal().cloned())
+    }
+
+    pub(crate) fn foreground_app(
+        &self,
+        window: Option<&Window>,
+        cx: &App,
+    ) -> Option<crate::core::foreground_app::ForegroundApp> {
+        self.title_leaf(window, cx)
+            .and_then(|leaf| leaf.read(cx).foreground_app())
     }
 
     pub(crate) fn leaf_title(&self, window: Option<&Window>, cx: &App) -> String {
@@ -592,12 +624,11 @@ impl Tab {
         self.agent_row(cx).map(|(agent, _)| agent)
     }
 
-    pub(crate) fn focused_agent_badge(&self, window: &Window, cx: &App) -> TabAgentBadge {
+    pub(crate) fn focused_agent_badge(&self, window: Option<&Window>, cx: &App) -> TabAgentBadge {
         use crate::core::cli_agent::AgentStatus;
 
-        let focused = self
-            .pane
-            .focused_leaf(window, cx)
+        let focused = window
+            .and_then(|window| self.pane.focused_leaf(window, cx))
             .or_else(|| self.focus_target())
             .map(|leaf| leaf.entity_id());
         badge_for_focused_pane(
@@ -605,11 +636,11 @@ impl Tab {
             self.pane.terminals().into_iter().map(|leaf| {
                 let view = leaf.read(cx);
                 let agent = view.agent();
-                let session_status = view.agent_session().map(|session| session.status);
-                let status = agent.map(|_| session_status.unwrap_or(AgentStatus::Idle));
-                let unread = usize::from(
-                    session_status == Some(AgentStatus::Done) && view.agent_result_unread(),
-                );
+                // `None` for an agent neither its hooks nor its screen have
+                // said anything about: the unknown state, not idle.
+                let status = view.agent_status();
+                let unread =
+                    usize::from(status == Some(AgentStatus::Done) && view.agent_result_unread());
                 (
                     leaf.entity_id(),
                     TabAgentBadge {
@@ -639,12 +670,8 @@ impl Tab {
             let view = l.read(cx);
             let agent = view.agent()?;
             // A pane whose agent is running but has never reported a
-            // session reads as idle, the same reading the badge has always
-            // given it.
-            let status = view
-                .agent_session()
-                .map(|s| s.status)
-                .unwrap_or(AgentStatus::Idle);
+            // status ranks as idle.
+            let status = view.agent_status().unwrap_or(AgentStatus::Idle);
             Some((agent, status))
         }))
     }
@@ -652,22 +679,16 @@ impl Tab {
     pub(crate) fn agent_status(&self, cx: &App) -> Option<crate::core::cli_agent::AgentStatus> {
         self.agent_row(cx).map(|(_, status)| status)
     }
+}
 
-    pub(crate) fn agent_unread_count(&self, cx: &App) -> usize {
-        use crate::core::cli_agent::AgentStatus;
-        if self.agent_status(cx) != Some(AgentStatus::Done) {
-            return 0;
-        }
-        self.pane
-            .terminals()
-            .into_iter()
-            .filter(|l| {
-                let v = l.read(cx);
-                v.agent_session().map(|s| s.status) == Some(AgentStatus::Done)
-                    && v.agent_result_unread()
-            })
-            .count()
-    }
+fn pane_entity_id_for_pane(pane: &Pane, id: u64, cx: &App) -> Option<gpui::EntityId> {
+    pane.leaves()
+        .into_iter()
+        .find(|leaf| match leaf {
+            PaneSlot::Ready(view) => view.read(cx).pane_id == id,
+            PaneSlot::Connecting(pending) => pending.read(cx).spawn.restore_pane == Some(id),
+        })
+        .map(|leaf| leaf.entity_id())
 }
 
 pub(crate) struct Renaming {
@@ -1767,10 +1788,7 @@ impl Tty7App {
             for leaf in tab.pane.terminals() {
                 let view = leaf.read(cx);
                 let Some(agent) = view.agent() else { continue };
-                let status = view
-                    .agent_session()
-                    .map(|s| s.status)
-                    .unwrap_or(AgentStatus::Idle);
+                let status = view.agent_status().unwrap_or(AgentStatus::Idle);
                 let dir = view
                     .cwd()
                     .and_then(|p| p.file_name().map(|n| n.to_string_lossy().into_owned()));
@@ -3294,9 +3312,14 @@ impl Tty7App {
             );
         }
         let slot = PaneSlot::Ready(view.clone());
-        self.tabs
-            .iter_mut()
-            .any(|tab| tab.pane.replace_leaf(slot_id, slot.clone()));
+        for tab in &mut self.tabs {
+            if tab.pane.replace_leaf(slot_id, slot.clone()) {
+                if tab.last_focused == Some(slot_id) {
+                    tab.last_focused = Some(view.entity_id());
+                }
+                break;
+            }
+        }
         if was_focused {
             self.focus_leaf(&slot, window, cx);
         }
@@ -3470,6 +3493,9 @@ impl Tty7App {
                 .pane
                 .replace_leaf(dead.entity_id(), PaneSlot::Ready(fresh.clone()))
             {
+                if tab.last_focused == Some(dead.entity_id()) {
+                    tab.last_focused = Some(fresh.entity_id());
+                }
                 break;
             }
         }
@@ -4421,7 +4447,7 @@ impl Tty7App {
             let refocus_incoming =
                 refocus.as_ref().map(|s| s.entity_id()) == Some(leaf.entity_id());
             leaf.update(cx, |view, cx| {
-                if view.agent_session().map(|s| s.status) == Some(AgentStatus::Done) {
+                if view.agent_status() == Some(AgentStatus::Done) {
                     view.mark_agent_result_unread(refocus_incoming);
                     cx.notify();
                 }
@@ -4624,7 +4650,7 @@ impl Tty7App {
             );
             return None;
         };
-        if session.status == AgentStatus::Working {
+        if view.agent_status() == Some(AgentStatus::Working) {
             window.push_notification(t_fmt(L10nKey::AppForkMidTurn, &[("name", &name)]), cx);
         }
         Some(cmd)
@@ -6177,31 +6203,6 @@ impl Tty7App {
 
     pub(crate) fn active_settings_mut(&mut self) -> Option<&mut SettingsState> {
         self.settings.as_mut()
-    }
-
-    pub(crate) fn tab_ssh_dot(&self, tab: &Tab, cx: &App) -> Option<u32> {
-        use crate::daemon::protocol::SshPhase;
-        let leaf = tab.pane.first_leaf()?;
-        let v = leaf.terminal()?.read(cx);
-        if let Some(phase) = v.ssh_phase() {
-            let rgb = if v.ssh_disconnected() {
-                0xEF4444
-            } else {
-                match phase {
-                    SshPhase::Connecting | SshPhase::Authenticating => 0xF59E0B,
-                    SshPhase::Connected => 0x22C55E,
-                    SshPhase::Failed { .. } => 0xEF4444,
-                }
-            };
-            Some(rgb)
-        } else if v
-            .remote_context()
-            .is_some_and(|r| r.kind != crate::daemon::protocol::RemoteKind::Wsl)
-        {
-            Some(0x9CA3AF)
-        } else {
-            None
-        }
     }
 
     fn leaf_is_warn_ssh(&self, leaf: &Entity<TerminalView>, cx: &App) -> bool {
@@ -7801,6 +7802,7 @@ fn tab_to_session(tab: &Tab, cx: &App) -> SessionTab {
         name: tab.name.clone(),
         pane: pane_to_session(&tab.pane, cx),
         sidebar_group: tab.sidebar_group.borrow().clone(),
+        focused_pane: tab.focused_pane_id(cx),
         tree_id: None,
     }
 }
@@ -8014,10 +8016,13 @@ fn tabs_from_session(
             dropped += 1;
             continue;
         };
+        let last_focused = st
+            .focused_pane
+            .and_then(|id| pane_entity_id_for_pane(&pane, id, cx));
         tabs.push(Tab {
             pane,
             name: st.name.clone(),
-            last_focused: None,
+            last_focused,
             zoomed: None,
             diff_overlay: None,
             code: None,
@@ -8292,9 +8297,16 @@ fn watch_pane_focus(view: &Entity<TerminalView>, window: &mut Window, cx: &mut C
     let handle = view.read(cx).focus_handle.clone();
     let app = cx.weak_entity();
     window
-        .on_focus_in(&handle, cx, move |_window, cx| {
+        .on_focus_in(&handle, cx, move |window, cx| {
             if let Some(app) = app.upgrade() {
-                app.update(cx, |_, cx| cx.notify());
+                app.update(cx, |app, cx| {
+                    let before = app.tabs.get(app.active).and_then(|tab| tab.last_focused);
+                    app.remember_active_pane(window, cx);
+                    if app.tabs.get(app.active).and_then(|tab| tab.last_focused) != before {
+                        crate::ui::tree_sync::sync_window(app, cx);
+                    }
+                    cx.notify();
+                });
             }
         })
         .detach();
@@ -10048,6 +10060,7 @@ mod ssh_rebuild_gpui_tests {
                 id: app.tabs[0].tree_id.get(),
                 name: None,
                 sidebar_group: None,
+                focused_pane: Some(1),
                 root: PaneNode::Leaf { pane: 1 },
             };
             app.apply_layout_delta(
