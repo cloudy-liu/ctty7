@@ -9,6 +9,8 @@ by the app at runtime, so it has no raster here. resvg is also what tty7 uses
 to draw the tray icon, so these PNGs match what the app renders. Every size is
 rendered from the vector instead of downscaled from 1024, which keeps the
 prompt crisp in the 16-32 px frames Windows shows most.
+The social card keeps its existing layout; its 141 px logo tile is replaced
+on the card's solid background each time, so repeated renders do not stack.
 """
 
 import shutil
@@ -38,6 +40,13 @@ def main() -> None:
     render("app-icon.svg", 1024).save(ASSETS / "app-icon.png", optimize=True)
     render("logo.svg", 1024).save(ASSETS / "logo.png", optimize=True)
     render("logo.svg", 256).save(ASSETS / "logo@256.png", optimize=True)
+
+    with Image.open(ASSETS / "social-preview.png") as card:
+        card = card.convert("RGB")
+    tile = Image.new("RGBA", (141, 141), "#0e0e11")
+    tile.alpha_composite(render("logo.svg", 141))
+    card.paste(tile.convert("RGB"), (170, 140))
+    card.save(ASSETS / "social-preview.png", optimize=True)
 
     # Embedded in the .exe by build.rs, and the installer's icon. Pillow only
     # writes frames no larger than the image it saves, so 256 goes first.
