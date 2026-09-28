@@ -226,10 +226,6 @@ pub struct Config {
     #[serde(default, deserialize_with = "de_lenient")]
     pub notify_on_command_finish: NotifyMode,
     pub check_for_updates: bool,
-    /// Which release feed update checks follow. Stable by default, so an
-    /// installation only ever ends up on Nightly by asking for it.
-    #[serde(default, deserialize_with = "de_lenient")]
-    pub update_channel: UpdateChannel,
     /// Whether a found update is fetched and verified before the user asks for
     /// it. On by default: it turns "spend five minutes downloading" into "press
     /// restart", which is the whole difference between an update people apply
@@ -473,22 +469,6 @@ pub enum NotifyMode {
     Always,
 }
 
-/// Which release feed this installation follows.
-///
-/// The channel is a property of the installation, not something derived from
-/// the version number. Without it the only thing separating a Nightly from a
-/// Stable is how their versions happen to sort, which is how a Nightly ends up
-/// being walked back onto Stable by an update it never asked for.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
-#[serde(rename_all = "kebab-case")]
-pub enum UpdateChannel {
-    #[default]
-    Stable,
-    /// Follows the rolling `nightly` prerelease, which is rebuilt from `main`
-    /// every night.
-    Nightly,
-}
-
 /// The modifier that makes the mouse wheel resize the font.
 ///
 /// `Platform` keeps the historical binding — ⌘ on macOS, Ctrl elsewhere — and
@@ -625,7 +605,6 @@ impl Default for Config {
             sidebar_group_names: BTreeMap::new(),
             notify_on_command_finish: NotifyMode::Unfocused,
             check_for_updates: true,
-            update_channel: UpdateChannel::default(),
             auto_download_updates: true,
             install_cli_on_path: true,
             gui_language: default_gui_language(),
@@ -1197,6 +1176,26 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn legacy_update_channel_is_ignored_and_not_saved() {
+        for channel in ["stable", "nightly"] {
+            let config: super::Config = serde_json::from_value(serde_json::json!({
+                "update_channel": channel,
+                "font_size": 17.0,
+                "check_for_updates": false,
+                "sidebar_group_names": {"C:/work": "My work"}
+            }))
+            .unwrap();
+            let saved = serde_json::to_value(&config).unwrap();
+            assert!(saved.get("update_channel").is_none());
+            assert_eq!(saved["font_size"], 17.0);
+            assert_eq!(saved["check_for_updates"], false);
+            assert_eq!(saved["sidebar_group_names"]["C:/work"], "My work");
+            let restored: super::Config = serde_json::from_value(saved).unwrap();
+            assert_eq!(restored.font_size, config.font_size);
+        }
+    }
+
     use super::*;
 
     #[test]

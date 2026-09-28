@@ -960,6 +960,7 @@ mod tests {
 
     fn native_spec(user: &str, host: &str, port: u16) -> NativeSshSpec {
         let mut profile = crate::core::ssh_profile::SshProfile::new(host.to_string());
+        profile.host = host.to_string();
         profile.user = user.to_string();
         profile.port = port;
         crate::ui::ssh_connect::build_native_ssh_spec(
@@ -973,10 +974,14 @@ mod tests {
     #[test]
     fn a_routed_auth_prompt_carries_the_machine_that_raised_it() {
         let _turn = claim_mailbox();
-        while take_pending_auth().is_some() {}
-        let target = RemoteTarget::direct("me", "build-box", 22);
-        let route =
-            crate::daemon::router::RouteTarget::Ssh(Box::new(native_spec("me", "build-box", 22)));
+        // ORIGINS is shared with remote-workspace tests. Use a unique route
+        // so their build-box fixture cannot replace this prompt's host mapping.
+        let target = RemoteTarget::direct("me", "auth-prompt-fixture.invalid", 22);
+        let route = crate::daemon::router::RouteTarget::Ssh(Box::new(native_spec(
+            "me",
+            "auth-prompt-fixture.invalid",
+            22,
+        )));
         note_origin(&route, &target);
 
         let handle = std::thread::spawn(move || {
@@ -985,13 +990,27 @@ mod tests {
                 &route,
                 &AuthPromptKind::Password {
                     user: "me".into(),
-                    host: "build-box".into(),
+                    host: "auth-prompt-fixture.invalid".into(),
                 },
             )
         });
         let deadline = Instant::now() + Duration::from_secs(10);
         let pending = loop {
-            if let Some(p) = take_pending_auth() {
+            // Other tests can produce prompts even while the UI pump is
+            // paused. Consume only this fixture's request, leaving theirs
+            // available for their own responders.
+            let pending = {
+                let mut mailbox = AUTH_MAILBOX.lock().unwrap();
+                mailbox
+                    .iter()
+                    .position(|p| {
+                        p.endpoint
+                            .as_ref()
+                            .is_some_and(|endpoint| endpoint.host == "auth-prompt-fixture.invalid")
+                    })
+                    .map(|index| mailbox.remove(index))
+            };
+            if let Some(p) = pending {
                 break p;
             }
             assert!(

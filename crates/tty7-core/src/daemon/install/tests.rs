@@ -459,10 +459,10 @@ fn first_install_runs_all_six_steps() {
         release.fetched(),
         vec![
             format!(
-                "https://github.com/cloudy-liu/tty7/releases/download/v{VERSION}/checksums.txt"
+                "https://github.com/cloudy-liu/ctty7/releases/download/v{VERSION}/checksums.txt"
             ),
             format!(
-                "https://github.com/cloudy-liu/tty7/releases/download/v{VERSION}/{ASSET_LINUX_X86_64}"
+                "https://github.com/cloudy-liu/ctty7/releases/download/v{VERSION}/{ASSET_LINUX_X86_64}"
             ),
         ]
     );

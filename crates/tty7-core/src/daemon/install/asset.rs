@@ -12,7 +12,7 @@ pub const ASSET_MACOS_AARCH64: &str = "tty7-server-macos-aarch64";
 
 pub const CHECKSUMS_ASSET: &str = "checksums.txt";
 
-pub const RELEASE_BASE: &str = "https://github.com/cloudy-liu/tty7/releases/download";
+pub const RELEASE_BASE: &str = "https://github.com/cloudy-liu/ctty7/releases/download";
 
 pub const INSTALL_DIR_COMPONENTS: [&str; 4] = [".local", "share", "tty7", "bin"];
 
@@ -91,11 +91,7 @@ pub fn interned(name: &str) -> &'static str {
 }
 
 pub fn release_tag(version: &str) -> String {
-    if version.contains("-nightly.") {
-        "nightly".to_string()
-    } else {
-        format!("v{version}")
-    }
+    format!("v{version}")
 }
 
 pub fn download_url(tag: &str, asset: &str) -> String {
@@ -268,10 +264,9 @@ mod tests {
     }
 
     #[test]
-    fn release_tag_sends_nightlies_to_the_rolling_tag() {
+    fn release_tag_matches_the_application_version() {
         assert_eq!(release_tag("26.7.5"), "v26.7.5");
         assert_eq!(release_tag("0.1.0"), "v0.1.0");
-        assert_eq!(release_tag("26.7.6-nightly.20260727"), "nightly");
         assert_eq!(release_tag("26.8.0-rc.1"), "v26.8.0-rc.1");
     }
 
@@ -280,11 +275,11 @@ mod tests {
         assert_eq!(release_tag("26.8.3-c"), "v26.8.3-c");
         assert_eq!(
             download_url(&release_tag("26.7.5"), ASSET_LINUX_X86_64),
-            "https://github.com/cloudy-liu/tty7/releases/download/v26.7.5/tty7-server-linux-x86_64-musl"
+            "https://github.com/cloudy-liu/ctty7/releases/download/v26.7.5/tty7-server-linux-x86_64-musl"
         );
         assert_eq!(
-            download_url(&release_tag("26.7.6-nightly.20260727"), CHECKSUMS_ASSET),
-            "https://github.com/cloudy-liu/tty7/releases/download/nightly/checksums.txt"
+            download_url(&release_tag("0.1.0"), CHECKSUMS_ASSET),
+            "https://github.com/cloudy-liu/ctty7/releases/download/v0.1.0/checksums.txt"
         );
     }
 

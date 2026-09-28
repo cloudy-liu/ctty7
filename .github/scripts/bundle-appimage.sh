@@ -1,7 +1,7 @@
 #!/bin/bash
 # Usage: bundle-appimage.sh <target-triple> <arch-label>
 # Package the release binary into a self-contained AppImage:
-#   dist/tty7-<version>-linux-<arch>.AppImage
+#   dist/ctty7-<version>-linux-<arch>.AppImage
 #
 # Unlike the bare tarball (bundle-linux.sh), this bundles the x11/wayland/xkb/
 # fontconfig/freetype runtime libraries alongside the binary, so it launches on
@@ -24,7 +24,7 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
   echo "bundle-appimage: could not read a version from Cargo.toml (got '$VERSION')" >&2
   exit 1
 fi
-NAME="tty7-${VERSION}-linux-${ARCH}"
+NAME="ctty7-${VERSION}-linux-${ARCH}"
 
 # AppImage tools need FUSE to self-mount; CI runners usually lack it, so extract
 # and run instead. Harmless on machines that do have FUSE.
@@ -73,7 +73,7 @@ chmod +x "$APPDIR/usr/bin/tty7-updater"
 cat > "$TOOLS/tty7.desktop" <<'DESKTOP'
 [Desktop Entry]
 Type=Application
-Name=tty7
+Name=ctty7
 Comment=A fast, native terminal
 Exec=tty7-app
 Icon=tty7

@@ -10,7 +10,7 @@ pub(super) struct RgbaImage {
 #[cfg(target_os = "macos")]
 const GLYPH_SVG: &[u8] = include_bytes!("../../../assets/tray.svg");
 #[cfg(not(target_os = "macos"))]
-const GLYPH_SVG: &[u8] = include_bytes!("../../../assets/app-icon.svg");
+const GLYPH_SVG: &[u8] = include_bytes!("../../../assets/logo.svg");
 
 #[cfg(target_os = "macos")]
 const SIZE: u32 = 36;

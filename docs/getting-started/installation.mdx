@@ -4,7 +4,7 @@ description: "Native builds for macOS, Windows, and Linux — plus building from
 ---
 
 Every release publishes native builds on
-[**GitHub Releases**](https://github.com/l0ng-ai/tty7/releases). There is no
+[**GitHub Releases**](https://github.com/cloudy-liu/ctty7/releases). There is no
 runtime to install first: fonts are embedded in the binary, and the Linux
 AppImage bundles its own X11/Wayland/font libraries.
 
@@ -14,11 +14,11 @@ AppImage bundles its own X11/Wayland/font libraries.
 
     | Mac | File |
     |---|---|
-    | Apple silicon (M1 and later) | `tty7-<version>-macos-arm64.dmg` |
-    | Intel | `tty7-<version>-macos-x86_64.dmg` |
+    | Apple silicon (M1 and later) | `ctty7-<version>-macos-arm64.dmg` |
+    | Intel | `ctty7-<version>-macos-x86_64.dmg` |
 
-    Builds are signed with a Developer ID certificate and notarized by Apple, so
-    Gatekeeper opens them without a right-click dance.
+    Builds use ad-hoc signing unless release signing credentials are configured.
+    Gatekeeper may require manual confirmation.
 
     <Note>
       Builds are produced on macOS 14 and macOS 15. macOS 14 (Sonoma) or later
@@ -31,11 +31,11 @@ AppImage bundles its own X11/Wayland/font libraries.
 
     | File | Use it when |
     |---|---|
-    | `tty7-<version>-windows-x86_64-setup.exe` | You want a normal install with Start-menu entries and an uninstaller. |
-    | `tty7-<version>-windows-x86_64.zip` | You want it portable — unzip anywhere and run `tty7-app.exe`. |
+    | `ctty7-<version>-windows-x86_64-setup.exe` | You want a normal install with Start-menu entries and an uninstaller. |
+    | `ctty7-<version>-windows-x86_64.zip` | You want it portable — unzip anywhere and run `tty7-app.exe`. |
 
     The installer offers one optional setup task, off by default: **Add "Open in
-    tty7" to the folder context menu**. It writes shell verbs under `HKCU`, so
+    ctty7" to the folder context menu**. It writes shell verbs under `HKCU`, so
     only your own Windows account is affected, and the uninstaller always takes
     them back out.
 
@@ -56,12 +56,12 @@ AppImage bundles its own X11/Wayland/font libraries.
   <Tab title="Linux">
     | File | Use it when |
     |---|---|
-    | `tty7-<version>-linux-x86_64.AppImage` | Almost always. `chmod +x` and run — the X11, Wayland, xkb, and font libraries are bundled, so it works on Fedora, Arch, Debian and friends, not just Ubuntu. |
-    | `tty7-<version>-linux-x86_64.tar.gz` | You would rather unpack the plain binary and place it yourself. |
+    | `ctty7-<version>-linux-x86_64.AppImage` | Almost always. `chmod +x` and run — the X11, Wayland, xkb, and font libraries are bundled, so it works on Fedora, Arch, Debian and friends, not just Ubuntu. |
+    | `ctty7-<version>-linux-x86_64.tar.gz` | You would rather unpack the plain binary and place it yourself. |
 
     ```bash
-    chmod +x tty7-*-linux-x86_64.AppImage
-    ./tty7-*-linux-x86_64.AppImage
+    chmod +x ctty7-*-linux-x86_64.AppImage
+    ./ctty7-*-linux-x86_64.AppImage
     ```
   </Tab>
 </Tabs>
@@ -93,9 +93,8 @@ tty7 checks for updates every six hours and can update itself: **Settings →
 About → Check now**, then **Update and relaunch**. Releases are downloaded and
 verified in the background so applying one is just a restart.
 
-Pick **Stable** or **Nightly** under **Settings → About → Update channel**. See
-[Updates and channels](/reference/updates) for what each feed publishes and how
-switching behaves.
+ctty7 has one official Release channel. Old 26.x installations need one manual
+installation of 0.1.0. See [Updates](/reference/updates).
 
 ## Building from source
 
@@ -105,8 +104,8 @@ binary is `tty7-app`.
 <Tabs>
   <Tab title="macOS / Windows">
     ```bash
-    git clone https://github.com/l0ng-ai/tty7
-    cd tty7
+    git clone https://github.com/cloudy-liu/ctty7
+    cd ctty7
     cargo build --release
     ```
   </Tab>

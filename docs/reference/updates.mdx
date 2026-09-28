@@ -1,16 +1,15 @@
 ---
 title: "Updates"
-description: "How tty7 updates itself, and what the two channels mean."
+description: "How cctty7 checks, verifies and installs official releases."
 ---
 
-**Settings → About** is where everything lives: the version you are on, the
-channel you follow, and the button that installs what is waiting.
+**Settings → About** is where everything lives: the version you are on and the button that installs what is waiting.
 
 ## How it works
 
 <Steps>
   <Step title="Check">
-    tty7 checks at launch and every six hours after that. Turn it off entirely
+    ctty7 checks at launch and every six hours after that. Turn it off entirely
     with `check_for_updates: false`, or check on demand with **Check now**.
   </Step>
   <Step title="Download and verify, in the background">
@@ -31,27 +30,12 @@ channel you follow, and the button that installs what is waiting.
 
 Declining an update defers it rather than retiring it; it comes back later.
 
-## Channels
+## Official releases
 
-**Settings → About → Update channel.**
-
-| | |
-|---|---|
-| **Stable** *(default)* | Published releases. Reads `/releases/latest`, which excludes prereleases. |
-| **Nightly** | Rebuilt from the latest code every night — newer, but not release-tested. Reads the rolling `nightly` tag. |
-
-The channel is a property of your **installation**, not something inferred from
-how version numbers sort. Neither feed can hand the other an update, so a
-Nightly is never walked back onto Stable by an update it did not ask for, and an
-installation only changes channel when you change it.
-
-Switching channels invalidates what the old feed produced: the staged package,
-the deferred prompt, and any transfer still in flight.
-
-<Note>
-  A stable release outranks every dated build of its core version, which is how
-  switching back to Stable *graduates* rather than downgrades.
-</Note>
+ctty7 follows the latest official Release. There is no channel selector.
+Legacy `update_channel` configuration is ignored. Version numbers increase
+from 0.1.0; old 26.x installations need one manual replacement before ordinary
+updates resume. See the [migration guide](https://github.com/cloudy-liu/ctty7/blob/main/docs/maintenance/migration.md).
 
 ## Platform notes
 
@@ -65,19 +49,18 @@ the deferred prompt, and any transfer still in flight.
     Windows cannot replace a running daemon's image, so the install path stops
     the service first — and the dialog says so before you agree.
 
-    An all-users `C:\Program Files` install cannot be updated in place and keeps
-    the release-page fallback instead. Running Setup as the signed-in user would
-    either install a second copy beside the real one, or put a bare UAC prompt
-    in front of someone whose GUI just vanished.
+    All-users installations require elevation when supported by the installed
+    updater. Otherwise use the release-page fallback and run Setup manually.
   </Accordion>
   <Accordion title="Linux">
-    AppImage and tarball installs are replaced by downloading the new file.
+    Writable AppImage installations can update through the application.
+    Tarball installations use the release-page download.
   </Accordion>
 </AccordionGroup>
 
 ## "The background server is still running &lt;build&gt;"
 
-If Settings tells you this, tty7 was updated in place: the app is the new build,
+If Settings tells you this, ctty7 was updated in place: the app is the new build,
 but your panes are still served by the previous one. Restarting the server picks
 up the new one — **and ends every process running in your panes**, shells,
 agents, and SSH sessions alike.

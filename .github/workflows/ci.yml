@@ -111,8 +111,7 @@ jobs:
       # invisible to CI and lands on contributors instead: every local `cargo`
       # run rewrites the lock, leaving a permanently dirty working tree that has
       # to be re-discarded before every commit. The release workflow locks its
-      # build too; only nightly stays unlocked, because it stamps Cargo.toml's
-      # version and relies on cargo refreshing the lock's own root entry.
+      # build too, so all builds use the recorded dependency set.
       - name: Build
         # Cold-cache builds have been observed at ~10 min; warm ones at ~90s.
         timeout-minutes: 30
@@ -160,8 +159,8 @@ jobs:
   # onto the far machine (decision D10).
   # One binary has to run on any distro without regard to the target's glibc
   # version, so it is linked fully static against musl rather than built per
-  # distro. Compile-only — this job publishes nothing; release.yml and
-  # nightly.yml carry the same job with an upload step.
+  # distro. Compile-only — this job publishes nothing; release.yml carries
+  # the same job with an upload step.
   #
   # Deliberately a *separate* job rather than two more rows in the `build` matrix
   # above: those three `build & test (<target>)` names are main's required
@@ -256,7 +255,7 @@ jobs:
   # nothing but the rustup target: the Xcode SDK carries both architectures, and
   # the linker is the same one.
   #
-  # Compile-only, like `server-musl` — release.yml and nightly.yml carry the
+  # Compile-only, like `server-musl` — release.yml carries the
   # same job with an upload step. Non-required until it has a few weeks of
   # green, for the branch-protection reason spelled out above.
   server-macos:

@@ -1,245 +1,139 @@
 <div align="center">
+<img src="assets/app-icon.svg" alt="ctty7" width="88" height="88" />
 
-<img src="assets/app-icon.svg" alt="tty7" width="88" height="88" />
+# ctty7
 
-### tty7 · Custom Fork
+A terminal workbench for local development, remote work and coding agents.
 
-**A maintained tty7 fork with deeper Windows shell integration, reliable coding-agent
-session tracking, theme-aware agent icons, native shell history, WSL and SSH fixes,
-and its own release line.**
+[English](README.md) · [简体中文](README.zh-CN.md) · [Download](https://github.com/cloudy-liu/ctty7/releases/latest)
 
-<sub>Persistent terminal sessions · remote work · coding agents · pure Rust</sub>
-
-<br />
-
-[![CI](https://github.com/cloudy-liu/tty7/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudy-liu/tty7/actions/workflows/ci.yml)
-[![Custom release](https://img.shields.io/github/v/release/cloudy-liu/tty7?label=custom%20release&color=3FDD8C)](https://github.com/cloudy-liu/tty7/releases/latest)
-[![Platforms](https://img.shields.io/badge/platforms-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-blue)](https://github.com/cloudy-liu/tty7/releases/latest)
+[![CI](https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/cloudy-liu/ctty7)](https://github.com/cloudy-liu/ctty7/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-
-<sub>English · [简体中文](README.zh-CN.md)</sub>
-
-<br />
-
-<img src="assets/hero.webp" alt="tty7 showing persistent coding-agent sessions across repositories" width="900" />
 
 </div>
 
-> [!IMPORTANT]
-> This is an independently maintained fork of [l0ng-ai/tty7](https://github.com/l0ng-ai/tty7).
-> For tty7's complete feature list, configuration, build instructions, and
-> general documentation, use the [upstream README](https://github.com/l0ng-ai/tty7#readme)
-> and [upstream docs](https://github.com/l0ng-ai/tty7/tree/main/docs). This page
-> focuses on what this fork changes and where to download its custom builds.
+ctty7 combines persistent terminal sessions, local and remote workspaces, Git
+workflows and coding-agent awareness. It adds deeper Windows CMD/Cmder support,
+Herdr host application recognition and more reliable agent-session restoration.
+It is independently maintained, forked and modified from
+[l0ng-ai/tty7](https://github.com/l0ng-ai/tty7), with no upstream affiliation.
 
-## What tty7 is
+<img src="assets/hero.webp" alt="Terminal workspaces and coding-agent sessions" width="900" />
 
-tty7 is a GPU-rendered terminal workbench whose background server owns shells
-and panes independently of the window. Closing the window leaves those shells
-running. After a reboot, tty7 reconstructs saved panes and can relaunch a
-supported coding agent and resume its conversation when the session id is
-known. It combines local and remote terminals, native SSH, Git workflows,
-editor-grade prompt input, and awareness of coding agents such as Codex and
-Claude Code.
+## What you can do
 
-The upstream project is the source of truth for the product's full behavior.
-This fork selectively follows upstream while maintaining the changes below.
+- **Keep your workspaces together.** Organize tabs and split panes, rename sidebar
+  groups, and use local terminals, WSL and SSH workspaces in one application.
+  The background server owns the shells: closing a window leaves them running.
+- **Use Windows shells with prompt editing.** CMD and Cmder/Clink report prompt
+  boundaries and working directories for completion, ghost suggestions and
+  prompt editing. Shell history keeps its native Up/Down behavior; fuzzy search
+  also reads PSReadLine and Clink history. Windows paths remain selectable as a
+  single range. Modified Enter events reach programs requesting ConPTY's
+  win32-input-mode.
+- **See Herdr and its nested agents correctly.** When Herdr is the host
+  application in a pane, its sheep avatar stays visible even when it launches
+  Codex or Claude Code. A split tab's avatar follows its focused pane; background
+  tabs retain their last focused pane.
+- **Know which agent needs attention.** Tabs and sidebar rows show working,
+  blocked, done and idle states using agent hooks and Herdr-style screen
+  detection. GUI screen recognition supplements hooks; the `tty7 agents` and
+  `tty7 wait` commands still use hook-reported states. Support varies by agent.
+- **Return to the right conversation.** Saved agent identities survive server
+  replacement. Supported agents resume a known conversation; if its identity
+  cannot be recovered, the pane opens a usable shell. All previously open
+  workspaces can return after daemon replacement. This restores layouts and
+  resumable conversations, not live processes across a system reboot.
+- **Work across machines.** Use native SSH or WSL workspaces, with Windows
+  in-pane SSH detection and WSL login-shell resolution. Windows packages include
+  the Linux server used to bootstrap WSL without a separate download.
+- **Make the workspace yours.** Theme-aware agent avatars, configurable fonts,
+  selectable prompts, keyboard shortcuts and Git diff/status views are built in.
+  The bell is off by default.
 
-## What this fork changes
+## Install
 
-Everything in this section is a difference from upstream. The **Upstream**
-column records where each change stands with the upstream project:
+Download the latest **official Release** from
+[cloudy-liu/ctty7](https://github.com/cloudy-liu/ctty7/releases/latest).
+There is one release channel.
 
-- **Closed upstream** — proposed upstream and closed there, so it is expected
-  to stay fork-only.
-- **Not submitted** — not yet proposed upstream.
-- **Fork-specific** — only meaningful in a fork, so it will not be proposed.
-- **Fork default** — the feature exists upstream, but this fork ships a
-  different default value.
-
-Changes available only in source builds from `main` are marked **unreleased**.
-
-| Change | Platform | Upstream |
+| Platform | Package | Start |
 |---|---|---|
-| CMD and Cmder prompt reporting, completion, and prompt editing | Windows | Not submitted |
-| Coding-agent detection through the Windows process tree | Windows | Not submitted |
-| Shift+Enter under ConPTY win32-input-mode | Windows | Not submitted |
-| In-pane `ssh` hop detection | Windows | [Closed upstream](https://github.com/l0ng-ai/tty7/pull/739) |
-| Vim command-line positioning over in-pane SSH | Windows | Not submitted |
-| WSL account login-shell resolution | Windows · WSL | Not submitted |
-| Selectable prompt text and Windows path smart-selection | All | Not submitted |
-| Native shell history for search and suggestions | All | Not submitted |
-| Sidebar group renaming | All | [Closed upstream](https://github.com/l0ng-ai/tty7/pull/735) |
-| Agent badges follow the focused pane | All | [Closed upstream](https://github.com/l0ng-ai/tty7/pull/719) |
-| Reliable coding-agent identity across restart, failed resume, and exit **(c.6)** | All | Not submitted |
-| Exact agent-session restore after server restarts, with shell fallback **(c.7)** | All | Not submitted |
-| Restore every open workspace after daemon replacement **(c.8)** | All | Not submitted |
-| Transparent, theme-aware avatars for all 19 agents **(c.6)** | All | Not submitted |
-| Antigravity brand icon support | All | Not submitted |
-| Bell off by default | All | Fork default |
-| Update checks without the GitHub REST API | All | Fork-specific |
-| Custom `-c` release line and update channel | All | Fork-specific |
+| Windows x86_64 | `ctty7-<version>-windows-x86_64-setup.exe` | Run Setup, then open ctty7 from Start |
+| Windows portable | `ctty7-<version>-windows-x86_64.zip` | Extract and run `tty7-app.exe` |
+| macOS Apple silicon / Intel | `ctty7-<version>-macos-arm64.dmg` / `…-x86_64.dmg` | Drag the application into Applications |
+| Linux x86_64 | `ctty7-<version>-linux-x86_64.AppImage` | Make executable, then run |
+| Linux archive | `ctty7-<version>-linux-x86_64.tar.gz` | Extract and run `tty7-app` |
 
-One earlier fork change — live focus for split-pane cursors — was accepted
-upstream as [l0ng-ai/tty7#736](https://github.com/l0ng-ai/tty7/pull/736), so it
-is no longer a difference.
+The macOS bundle directory remains `tty7.app` for compatibility. Windows builds
+are unsigned; macOS builds use ad-hoc signing unless release signing credentials
+are configured. The operating system may require manual confirmation.
 
-### Windows shell integration
+Each release includes `checksums.txt`. The macOS ZIPs support application
+updates; `tty7-server-*` assets are internal helpers for remote workspaces.
 
-- Adds prompt-boundary and working-directory reports for stock `cmd.exe`, so
-  tty7 can provide ghost suggestions, Tab completion, and prompt editing.
-- Integrates Cmder through Clink's `CLINK_PATH`, preserving every user-supplied
-  argument in launches such as `cmd.exe /K init.bat`.
-- Emits the Clink working-directory report outside the prompt string, so a long
-  path no longer pushes the prompt itself out of view.
-- Uses the Windows process tree when bare CMD cannot report command start, so a
-  running full-screen program owns its input line and tty7 re-arms the prompt
-  editor only when the command has finished.
-- Detects coding agents below CMD, Cmder, wrappers, and helper processes by
-  walking the pane's process tree, keeping agent identity on the correct pane
-  instead of mistaking prompt helpers or MCP child processes for the foreground
-  agent.
-- Latches ConPTY's `win32-input-mode` handshake across snapshot replay and
-  reconnect and encodes modified Enter as a key event, so **Shift+Enter**
-  reaches the shells and agents that ask for it instead of submitting the line.
+**Upgrading from the old fork:** install ctty7 v0.1.0 manually once. The old
+26.x updater considers 0.1.0 a downgrade. Preserve your existing configuration
+and data; see the [migration guide](docs/maintenance/migration.md).
 
-### Prompt selection and native shell history
+## Get started
 
-- Keeps shell-rendered prompt text selectable and treats Windows drive-letter
-  and backslash paths as one smart-selection range.
-- Hands Up and Down to the running shell at the edge of a one-line prompt, so
-  DOSKEY, PSReadLine, readline, zle, fish, current-session entries, duplicates,
-  and custom bindings keep their native behavior.
-- Reads PSReadLine and Clink history files for tty7's fuzzy search and ghost
-  suggestions without exposing multiline fragments or Clink metadata.
+1. Open ctty7 and create a local terminal or choose a WSL/SSH workspace.
+2. Choose your shell in Settings. Existing CMD/Cmder launch arguments remain
+   supported, including `cmd.exe /K init.bat`.
+3. Launch your coding agent in a pane. Under **Settings → Agents**, install hooks
+   for the agents whose status and notifications you want to follow.
+4. Use **Settings → About → Check now** for official updates. Packages are
+   downloaded and verified before installation; applying an update is explicit.
 
-### WSL and SSH
+The command remains `tty7`, including `tty7 agents` and `tty7 wait`. No `ctty7`
+command alias is installed.
 
-- Resolves the current distro account's login shell through NSS, with
-  `/etc/passwd`, inherited `$SHELL`, and `/bin/sh` fallbacks.
-- Avoids starting the `wsl.exe --exec sh` bootstrap as the user's shell on WSL
-  releases affected by [microsoft/WSL#10718](https://github.com/microsoft/WSL/issues/10718).
-- Recognizes an `ssh` session started inside a pane on Windows by walking the
-  process tree and reading its arguments, then drops local Git sidebar grouping
-  for that pane and refreshes the sidebar once the remote context arrives.
-- Keeps Vim's `:wq` echo on its command line when running `ssh` inside a
-  Windows pane, as reported in [l0ng-ai/tty7#774](https://github.com/l0ng-ai/tty7/issues/774).
-  Removes the cursor-position rewrite from the ConPTY flicker workaround.
-  Upstream had already disabled it on macOS and Linux in
-  [l0ng-ai/tty7#442](https://github.com/l0ng-ai/tty7/pull/442).
+## Configuration and documentation
 
-### Sidebar and agents
+Most options are available in Settings. Configuration stays at
+`%APPDATA%\tty7\config.json` on Windows and `~/.config/tty7/config.json` on
+macOS/Linux. `TTY7_CONFIG_DIR` or `--config-dir` selects an isolated directory.
 
-- Renames repository and sidebar groups from the group header's context menu.
-  Submitting an empty name restores the title derived from the path.
-- Keeps those custom names in a stable order in the config file, so saving any
-  setting does not reshuffle them.
-- Makes tab agent badges follow the focused pane in a split.
-- Keeps a known coding-agent session id attached to its pane while tty7's
-  existing restore flow starts the agent. It keeps this association even if the
-  server restarts again before the next hook arrives. Codex and Claude can
-  recover an explicit id from a saved resume command. Exiting the agent or
-  returning to the shell after a failed resume clears stale identity instead
-  of leaving the pane attached to an ended conversation. This hardens tty7's
-  resume flow; the agent still owns and stores the conversation. This landed in
-  [cloudy-liu/tty7#24](https://github.com/cloudy-liu/tty7/pull/24).
-- Saves exact resume targets before relaunching an agent. Codex conversations
-  selected through its native history picker can be captured without sending
-  a new message. An untouched interactive launch reopens directly, including
-  Claude launches whose initial id has no saved history yet. When the original
-  conversation cannot be identified, restore leaves a usable shell without
-  opening a session picker. Cursor and Antigravity still need an exact id
-  already known to tty7. See [agent sessions](docs/agents/sessions.mdx) and
-  [cloudy-liu/tty7#29](https://github.com/cloudy-liu/tty7/pull/29).
-- When the background daemon has been replaced, reopens every workspace that
-  had a window before shutdown instead of recovering only the last-focused
-  project. The foreground workspace opens first; the others return as visible,
-  unfocused windows with their saved geometry. Each pane follows the existing
-  attach-first path, then resumes its saved agent session when attachment is
-  unavailable. A surviving daemon keeps the lighter single-window behavior.
-  See [cloudy-liu/tty7#35](https://github.com/cloudy-liu/tty7/pull/35).
-- Draws all 19 supported agent marks, including Antigravity, without colored
-  circular backgrounds and increases the glyph from 54% to 78% of the avatar.
-  Codex, Cursor, and Grok follow the theme foreground; the other agents retain
-  their brand hue with brightness correction. Every agent reaches 4.5:1
-  contrast on the resting, hover, and selected fills in the sidebar, tab strip,
-  and switcher across all 13 built-in themes. This landed in
-  [cloudy-liu/tty7#25](https://github.com/cloudy-liu/tty7/pull/25).
-- Ships the Antigravity brand mark for agent avatars.
+- [Configuration reference](docs/reference/configuration.mdx)
+- [Installation and builds](docs/getting-started/installation.mdx)
+- [Agent status and notifications](docs/agents/status.mdx)
+- [Agent sessions](docs/agents/sessions.mdx)
+- [Remote workspaces](docs/remote/workspaces.mdx)
+- [Updates](docs/reference/updates.mdx)
 
-### Defaults that differ from upstream
+The reference documents retain `tty7` where it names commands and internal
+components. Product-specific support belongs in
+[this repository's issues](https://github.com/cloudy-liu/ctty7/issues).
 
-- **The bell is off** (`"bell": "none"`). Upstream defaults to `"visual"` — a
-  flash rather than a sound — so set `"bell"` back to `"visual"` to restore
-  upstream's behavior, or to `"audible"` or `"both"` if you want the sound.
+## Development and contributions
 
-### Builds and updates
+Use stable Rust and the native build tools for your platform. Linux also needs
+X11/Wayland/font development libraries listed in the
+[build instructions](docs/getting-started/installation.mdx#building-from-source).
+On Windows, install the MSVC C++ build tools and Windows SDK.
 
-- Reads the Stable tag from the `github.com` `/releases/latest` redirect and the
-  Nightly version from `nightly.json`, rather than the rate-limited REST
-  catalog, avoiding the unauthenticated REST catalog's rate limit.
-
-See [Versioning](#versioning) for the custom release scheme and how the updater
-is pointed at this fork.
-
-## Download the custom build
-
-Download the newest fork-maintained build from
-[**cloudy-liu/tty7 Releases**](https://github.com/cloudy-liu/tty7/releases/latest).
-
-| Platform | Assets | Notes |
-|---|---|---|
-| **Windows x86_64** | `…-setup.exe` or portable `….zip` | The primary target for this fork's CMD/Cmder fixes. Builds are currently unsigned, so SmartScreen may ask for confirmation. |
-| **macOS** | `…-macos-arm64.dmg` or `…-macos-x86_64.dmg` | Fork builds are ad-hoc signed until Apple notarization credentials are configured. Gatekeeper may require manual confirmation. |
-| **Linux x86_64** | `….AppImage` or `….tar.gz` | The AppImage bundles the usual X11/Wayland runtime libraries. |
-
-Release assets also include `checksums.txt` and the headless `tty7-server`
-binaries used by remote workspaces.
-
-`v26.8.3-c.9` builds on c.8 and shows Herdr's colored avatar when its tty7
-pane is focused, including shells that do not report command text. Codex or
-Claude Code inside Herdr leaves that avatar in place; a separate tty7 split
-shows its own agent icon when focused. The sidebar, top tab strip, and workspace
-switcher follow the same pane, using its last focus in the background. The
-selected pane's agent status dot remains visible. See the
-[c.9 release record](docs/releases/v26.8.3-c.9.md) for the commit ledger.
-Release assets become available after the draft's builds and checksums are verified.
-The broader `v26.9.1-c` release has been withdrawn. If you installed it,
-download and install c.9 manually; the updater does not downgrade.
-
-## Versioning
-
-Custom releases keep the upstream base version and append `-c`:
-
-```text
-upstream 26.8.3  →  custom 26.8.3-c  →  tag v26.8.3-c
+```sh
+git clone https://github.com/cloudy-liu/ctty7.git
+cd ctty7
+cargo build --locked
+cargo dev
 ```
 
-If another custom release is needed before the next upstream version, it uses
-`-c.1`, `-c.2`, and so on. A later upstream base starts a new series, for
-example `26.8.4-c`.
+`cargo dev` uses `.tty7-dev` instead of your everyday configuration. Run
+`cargo fmt --check` and `cargo test --locked --workspace` before submitting changes.
 
-The application updater and remote-server installer in this fork read releases
-from `cloudy-liu/tty7`; installing a custom build will not silently switch back
-to an upstream binary.
+Rust crates, binaries, protocol identities and data paths retain their `tty7`
+names to preserve compatibility and keep future selective patch imports
+manageable. Pull requests target this fork. The [maintenance history](docs/maintenance/fork-history.md)
+records earlier differences; the [release runbook](docs/maintenance/release.md)
+covers verified publication.
 
-Each custom release records the exact range from the previous custom tag. Its
-commit message and GitHub release notes count the integrated branch lines and
-Git commits, explain every commit, and link the relevant fork PR, upstream PR,
-or external issue. Patch-equivalent history syncs are called out separately so
-they are not presented as new behavior.
+## Origin and license
 
-## Upstream documentation
-
-- [Upstream repository and full English README](https://github.com/l0ng-ai/tty7#readme)
-- [Upstream Chinese README](https://github.com/l0ng-ai/tty7/blob/main/README.zh-CN.md)
-- [Upstream documentation](https://github.com/l0ng-ai/tty7/tree/main/docs)
-- [Upstream releases](https://github.com/l0ng-ai/tty7/releases)
-
-Please report problems specific to this custom build in
-[this fork's issue tracker](https://github.com/cloudy-liu/tty7/issues). For
-general tty7 usage and behavior, consult the upstream documentation first.
-
-## License
-
-Apache-2.0, matching upstream. See [LICENSE](LICENSE).
+ctty7 is a modified distribution of tty7, licensed under [Apache-2.0](LICENSE).
+Original copyright and attribution are retained. This distribution changes
+Windows shell integration, agent and Herdr behavior, branding, documentation
+and release/update distribution. Herdr names and detection references remain
+attributed in the agent documentation.

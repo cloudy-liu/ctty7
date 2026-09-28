@@ -2,36 +2,37 @@ name: Release
 
 on:
   push:
-    tags: ["v*-c*"]
+    tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
   validate-release:
-    name: validate custom release tag
+    name: validate release version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           path: tty7
 
-      - name: Match tag, package version, and custom suffix
+      - name: Match tag and package version
         working-directory: tty7
         shell: bash
         run: |
           set -euo pipefail
           VERSION="$(grep -m1 '^version = "' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
           EXPECTED_TAG="v${VERSION}"
-          if [[ "$GITHUB_REF_NAME" != "$EXPECTED_TAG" ]]; then
+          if [[ "$GITHUB_EVENT_NAME" == "push" && "$GITHUB_REF_NAME" != "$EXPECTED_TAG" ]]; then
             echo "::error::tag ${GITHUB_REF_NAME} does not match Cargo.toml version ${VERSION} (expected ${EXPECTED_TAG})"
             exit 1
           fi
-          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+-c(\.[0-9]+)?$ ]]; then
-            echo "::error::custom releases must use X.Y.Z-c or X.Y.Z-c.N (got ${VERSION})"
+          if [[ ! "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::releases must use X.Y.Z (got ${VERSION})"
             exit 1
           fi
-          echo "validated custom release ${EXPECTED_TAG}"
+          echo "validated release ${EXPECTED_TAG}"
 
   build:
     # The Windows installer embeds the Linux musl `tty7-server` so a WSL distro
@@ -96,7 +97,7 @@ jobs:
 
       # `--locked` because a release must ship the dependency set the tag
       # recorded, not whatever cargo would re-resolve at build time. Safe here
-      # (unlike nightly) precisely because nothing rewrites Cargo.toml: this is
+      # because nothing rewrites Cargo.toml: this is
       # a plain checkout of the tagged commit.
       # The updater ships on every GUI platform now: inside the macOS bundle,
       # beside the Windows app, and inside the Linux AppImage.
@@ -151,7 +152,7 @@ jobs:
         run: |
           set -euo pipefail
           VERSION="$(grep -m1 '^version = "' Cargo.toml | sed -E 's/.*"([^"]+)".*/\1/')"
-          IMAGE="$PWD/dist/tty7-${VERSION}-linux-${{ matrix.arch }}.AppImage"
+          IMAGE="$PWD/dist/ctty7-${VERSION}-linux-${{ matrix.arch }}.AppImage"
           VERIFY_ROOT="$RUNNER_TEMP/tty7-appimage-update-verify"
           rm -rf "$VERIFY_ROOT"
           mkdir -p "$VERIFY_ROOT"
@@ -417,6 +418,7 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@v4
       - uses: actions/download-artifact@v8
         with:
           path: dist
@@ -432,6 +434,7 @@ jobs:
       - name: Generate checksums.txt
         run: |
           set -euo pipefail
+          python3 .github/scripts/verify-release-assets.py dist "${GITHUB_REF_NAME#v}"
           cd dist
           rm -f checksums.txt
           # `find -type f` rather than a glob: nested files (should any appear)
@@ -450,16 +453,10 @@ jobs:
           mv "$RUNNER_TEMP/checksums.txt" checksums.txt
           sha256sum -c checksums.txt
           cat checksums.txt
+          cd ..
+          python3 .github/scripts/verify-release-assets.py dist "${GITHUB_REF_NAME#v}" --checksums
 
-      # Reuse an existing release rather than failing: re-triggering a tag
-      # (force-push after a fixed platform) must top up the same draft. If the
-      # release was already published, --clobber just replaces its assets and it
-      # stays published.
-      #
-      # Existence is probed with `release list`, not `release view`: GitHub's
-      # get-release-by-tag endpoint does not return drafts, so a view-based check
-      # could miss the very draft a previous run left behind and create a second
-      # one (GitHub happily allows duplicate drafts on one tag).
+      # Only an unpublished draft may be amended by a rerun.
       - name: Assemble the draft release
         run: |
           set -euo pipefail
@@ -470,7 +467,12 @@ jobs:
           EXISTING=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
             --json tagName -q '.[].tagName')
           if grep -Fxq "$GITHUB_REF_NAME" <<<"$EXISTING"; then
-            echo "release $GITHUB_REF_NAME already exists; reusing it"
+            IS_DRAFT=$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft -q .isDraft)
+            if [[ "$IS_DRAFT" != "true" ]]; then
+              echo "::error::refusing to overwrite a published release"
+              exit 1
+            fi
+            echo "release $GITHUB_REF_NAME is a draft; reusing it"
           else
             gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
               --draft --title "$GITHUB_REF_NAME" --notes ""

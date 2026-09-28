@@ -1,7 +1,7 @@
 #!/bin/bash
 # Usage: bundle-linux.sh <target-triple> <arch-label>
 # Package the release binary into a tarball:
-#   dist/tty7-<version>-linux-<arch>.tar.gz
+#   dist/ctty7-<version>-linux-<arch>.tar.gz
 #
 # Fonts and the app icon are embedded via include_bytes!, so the archive is the
 # stripped executable plus a sibling completions/ dir (loaded at runtime — see
@@ -21,7 +21,7 @@ if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
   echo "bundle-linux: could not read a version from Cargo.toml (got '$VERSION')" >&2
   exit 1
 fi
-NAME="tty7-${VERSION}-linux-${ARCH}"
+NAME="ctty7-${VERSION}-linux-${ARCH}"
 STAGE="dist/${NAME}"
 
 rm -rf dist

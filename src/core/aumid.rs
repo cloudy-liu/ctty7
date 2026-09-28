@@ -5,14 +5,15 @@
 //! AUMID when a Start Menu shortcut carries the matching
 //! `System.AppUserModel.ID`, so `init()` — called once at GUI startup — brands
 //! the process and, when nothing else already supplies that shortcut, writes
-//! one.
+//! one. Cargo builds use a separate taskbar identity so their current embedded
+//! icon is not replaced by the installed application's shortcut icon.
 //!
 //! It is deliberately reluctant to write. The installer stamps its own
 //! shortcuts (see `windows-installer.iss`), so the runtime write only has to
 //! cover the portable zip and installs that predate that change. It therefore
-//! touches at most the single per-user `tty7.lnk` that Inno's default install
+//! touches at most the single per-user `ctty7.lnk` that Inno's default install
 //! owns anyway — never a second Start Menu entry beside an all-users install
-//! (which would show "tty7" twice and outlive the uninstaller), and never
+//! (which would show "ctty7" twice and outlive the uninstaller), and never
 //! anything at all from a `cargo` build directory (which would repoint the
 //! user's installed shortcut at `target\debug`).
 //!
@@ -32,6 +33,16 @@ use std::time::{Duration, Instant};
 /// installer shortcuts in `.github/scripts/windows-installer.iss` — a
 /// mismatch silently splits the identity in two (a unit test checks this).
 pub(crate) const AUMID: &str = "com.github.tty7";
+
+const DEV_AUMID: &str = "com.github.tty7.dev";
+
+fn taskbar_app_id(exe: &Path) -> &'static str {
+    if is_build_output(exe) {
+        DEV_AUMID
+    } else {
+        AUMID
+    }
+}
 
 /// How long we keep using the PowerShell identity after writing the shortcut
 /// ourselves. The shell picks a new `.lnk` up asynchronously and silently
@@ -68,11 +79,15 @@ enum Branding {
 
 fn setup() -> Branding {
     use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+    let process_id = std::env::current_exe()
+        .as_deref()
+        .map(taskbar_app_id)
+        .unwrap_or(AUMID);
     unsafe {
-        // Branding the process is also what groups the taskbar button under
-        // our own identity, and it is safe everywhere — including the build
-        // directories the shortcut half below refuses to touch.
-        let _ = SetCurrentProcessExplicitAppUserModelID(&windows::core::HSTRING::from(AUMID));
+        // A dev window gets its own taskbar group, which uses the icon in this
+        // executable instead of the installed shortcut's cached icon. Toasts
+        // still use the registered AUMID below; no dev shortcut is written.
+        let _ = SetCurrentProcessExplicitAppUserModelID(&windows::core::HSTRING::from(process_id));
     }
     match decide() {
         Ok(Decision::Branded) => Branding::Ready,
@@ -106,8 +121,8 @@ enum Decision {
 fn decide() -> Result<Decision, String> {
     let exe = std::env::current_exe().map_err(|e| format!("current exe: {e}"))?;
 
-    // An elevated install owns `%ProgramData%\...\tty7.lnk`, which we cannot
-    // rewrite unelevated. A per-user twin beside it would list "tty7" twice in
+    // An elevated install owns `%ProgramData%\...\ctty7.lnk`, which we cannot
+    // rewrite unelevated. A per-user twin beside it would list "ctty7" twice in
     // the Start Menu and survive the uninstaller, so that file settles the
     // question on its own: branded if the installer stamped our AUMID on it,
     // unbranded until the user upgrades to an installer that does.
@@ -204,15 +219,15 @@ fn programs_dir(env_var: &str) -> Option<PathBuf> {
 }
 
 /// The only shortcut we ever write: the per-user Start Menu, which is also
-/// where Inno's default (non-elevated) install puts `tty7.lnk` — so refreshing
+/// where Inno's default (non-elevated) install puts `ctty7.lnk` — so refreshing
 /// it adds no entry the uninstaller does not already know how to remove.
 fn start_menu_shortcut_path() -> Option<PathBuf> {
-    Some(programs_dir("APPDATA")?.join("tty7.lnk"))
+    Some(programs_dir("APPDATA")?.join("ctty7.lnk"))
 }
 
 /// The all-users twin an elevated install writes. Read-only for us.
 fn all_users_shortcut_path() -> Option<PathBuf> {
-    Some(programs_dir("ProgramData")?.join("tty7.lnk"))
+    Some(programs_dir("ProgramData")?.join("ctty7.lnk"))
 }
 
 #[derive(Default)]
@@ -320,12 +335,49 @@ fn write_shortcut(lnk: &Path) -> Result<(), String> {
             .Save(&lnk_w, true)
             .map_err(|e| format!("Save: {e}"))?;
     }
+    // Portable upgrades do not run Inno's shortcut cleanup. Remove only the
+    // legacy entry belonging to this executable after its replacement exists.
+    if lnk.file_name().and_then(|name| name.to_str()) == Some("ctty7.lnk") {
+        let legacy = lnk.with_file_name("tty7.lnk");
+        if let Ok(old) = read_shortcut(&legacy)
+            && old.aumid.as_deref() == Some(AUMID)
+            && old
+                .target
+                .as_deref()
+                .is_some_and(|target| same_path(target, &exe))
+            && let Err(error) = std::fs::remove_file(&legacy)
+        {
+            log::warn!(
+                "could not remove legacy shortcut {}: {error}",
+                legacy.display()
+            );
+        }
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+
+    #[test]
+    fn portable_upgrade_reconciles_only_its_own_legacy_shortcut() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("tty7.lnk");
+        let new = dir.path().join("ctty7.lnk");
+        super::write_shortcut(&old).unwrap();
+        super::write_shortcut(&new).unwrap();
+        assert!(
+            !old.exists(),
+            "one Start-menu entry after portable migration"
+        );
+        assert!(super::read_shortcut(&new).is_ok());
+
+        // An unrecognized shortcut is not this installation's to remove.
+        std::fs::write(&old, b"unrelated shortcut").unwrap();
+        super::write_shortcut(&new).unwrap();
+        assert_eq!(std::fs::read(&old).unwrap(), b"unrelated shortcut");
+    }
 
     #[test]
     fn aumid_matches_the_installer_shortcuts() {
@@ -346,7 +398,7 @@ mod tests {
         let Some(lnk) = super::start_menu_shortcut_path() else {
             return; // no APPDATA in this environment — nothing to assert
         };
-        assert_eq!(lnk.file_name().and_then(|n| n.to_str()), Some("tty7.lnk"));
+        assert_eq!(lnk.file_name().and_then(|n| n.to_str()), Some("ctty7.lnk"));
         assert_eq!(
             lnk.parent()
                 .and_then(|p| p.file_name())
@@ -380,6 +432,7 @@ mod tests {
                 super::has_build_layout(Path::new(exe)),
                 "{exe} should look like a build directory"
             );
+            assert_eq!(super::taskbar_app_id(Path::new(exe)), super::DEV_AUMID);
         }
     }
 
@@ -396,6 +449,7 @@ mod tests {
             let exe = Path::new(exe);
             assert!(!super::has_build_layout(exe), "{} misread", exe.display());
             assert!(!super::is_build_output(exe), "{} misread", exe.display());
+            assert_eq!(super::taskbar_app_id(exe), super::AUMID);
         }
     }
 
@@ -432,7 +486,7 @@ mod tests {
     fn a_written_shortcut_reads_back_as_ours() {
         let dir = std::env::temp_dir().join(format!("tty7-aumid-{}", std::process::id()));
         std::fs::create_dir_all(&dir).expect("create temp dir");
-        let lnk = dir.join("tty7.lnk");
+        let lnk = dir.join("ctty7.lnk");
 
         let written = super::write_shortcut(&lnk);
         let read = written.as_ref().ok().map(|()| super::read_shortcut(&lnk));
