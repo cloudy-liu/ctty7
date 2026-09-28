@@ -79,6 +79,7 @@ Changes available only in source builds from `main` are marked **unreleased**.
 | Bell off by default | All | Fork default |
 | Update checks without the GitHub REST API | All | Fork-specific |
 | Custom `-c` release line and update channel | All | Fork-specific |
+| "Aurora Prompt" app icon and `tty7 Custom` display name **(unreleased)** | All | Fork-specific |
 
 One earlier fork change — live focus for split-pane cursors — was accepted
 upstream as [l0ng-ai/tty7#736](https://github.com/l0ng-ai/tty7/pull/736), so it

@@ -267,6 +267,11 @@ const DOCS_URL: &str = "https://github.com/l0ng-ai/tty7#readme";
 const DISCORD_URL: &str = "https://discord.gg/s3dethqz2V";
 const ISSUES_URL: &str = "https://github.com/cloudy-liu/tty7/issues/new";
 
+/// What the window title and the About page call the app. The fork keeps every
+/// identifier upstream ships — binaries, config directories, the AUMID — and
+/// marks itself only where people read the name.
+pub(crate) const DISPLAY_NAME: &str = "tty7 Custom";
+
 pub(crate) const CONTENT_INSET: f32 = 12.;
 
 const TILE_EDGE_GAP: f32 = 5.;
@@ -3225,7 +3230,7 @@ impl Tty7App {
             .get(self.workspace)
             .filter(|w| crate::ui::machine_mirror::pane_count(cx, w).unwrap_or(0) > 0)
             .and_then(|w| crate::ui::machine_mirror::display_name(cx, w))
-            .unwrap_or_else(|| "tty7".to_string());
+            .unwrap_or_else(|| DISPLAY_NAME.to_string());
         if *self.window_title.borrow() == title {
             return;
         }

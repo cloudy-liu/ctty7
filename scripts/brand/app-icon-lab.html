@@ -1,0 +1,211 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>App Icon Lab</title>
+<style>
+  :root { color-scheme: light dark; }
+  body {
+    margin: 0; padding: 40px;
+    font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #f4f2ee; color: #1b1b20;
+  }
+  h1 { font-size: 20px; margin: 0 0 4px; }
+  p.lead { margin: 0 0 32px; color: #666; }
+  .variant {
+    display: grid; grid-template-columns: 320px 1fr; gap: 32px;
+    padding: 28px; margin-bottom: 28px; border-radius: 20px; background: #fff;
+    box-shadow: 0 1px 2px rgba(0,0,0,.06), 0 8px 24px rgba(0,0,0,.04);
+  }
+  .variant h2 { margin: 0 0 6px; font-size: 16px; }
+  .variant p { margin: 0 0 16px; color: #555; }
+  .hero { width: 320px; height: 320px; }
+  .sizes { display: flex; align-items: end; gap: 18px; padding: 16px; border-radius: 12px; margin-bottom: 12px; }
+  .sizes.light { background: #ececec; }
+  .sizes.dark { background: #1e1e22; }
+  .sizes canvas { display: block; }
+  button {
+    font: inherit; padding: 6px 12px; margin: 0 6px 6px 0; border-radius: 8px;
+    border: 1px solid #ccc; background: #fafafa; cursor: pointer;
+  }
+  button:hover { background: #eee; }
+</style>
+</head>
+<body>
+<h1>App Icon Lab</h1>
+<p class="lead">The directions explored for the fork's app icon, drawn with Canvas on the macOS Big Sur icon grid (824 tile @ 1024, radius 185). A shipped: <code>assets/app-icon.svg</code> is its source of truth, and <code>scripts/brand/render.py</code> renders every raster from it.</p>
+<div id="variants"></div>
+
+<script>
+// All drawing happens in a 1024×1024 coordinate space; render() scales it.
+const TILE = { x: 100, y: 100, size: 824, radius: 185 };
+
+function linear(ctx, x0, y0, x1, y1, stops) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  stops.forEach(([at, color]) => g.addColorStop(at, color));
+  return g;
+}
+
+function tile(ctx, fill) {
+  ctx.beginPath();
+  ctx.roundRect(TILE.x, TILE.y, TILE.size, TILE.size, TILE.radius);
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+// Soft top-left sheen so the tile doesn't read flat at large sizes.
+function sheen(ctx, alpha) {
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(TILE.x, TILE.y, TILE.size, TILE.size, TILE.radius);
+  ctx.clip();
+  const g = ctx.createRadialGradient(260, 180, 0, 260, 180, 700);
+  g.addColorStop(0, `rgba(255,255,255,${alpha})`);
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(TILE.x, TILE.y, TILE.size, TILE.size);
+  ctx.restore();
+}
+
+function chevron(ctx, x, y, h, width, stroke) {
+  ctx.beginPath();
+  ctx.moveTo(x, y);
+  ctx.lineTo(x + h / 2, y + h / 2);
+  ctx.lineTo(x, y + h);
+  ctx.lineWidth = width;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = stroke;
+  ctx.stroke();
+}
+
+function cursor(ctx, x, y, w, h, fill) {
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, h / 2);
+  ctx.fillStyle = fill;
+  ctx.fill();
+}
+
+function pane(ctx, x, y, w, h, r, fill, shadow) {
+  ctx.save();
+  if (shadow) {
+    ctx.shadowColor = shadow;
+    ctx.shadowBlur = 60 * ctx.unit;
+    ctx.shadowOffsetY = 24 * ctx.unit;
+  }
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, r);
+  ctx.fillStyle = fill;
+  ctx.fill();
+  ctx.restore();
+}
+
+const VARIANTS = [
+  {
+    id: 'aurora',
+    title: 'A · Aurora Prompt (shipped)',
+    note: 'A dark terminal window on a violet→pink→amber tile: traffic-light dots, a mint-to-cyan prompt and a warm white cursor. Reads as a terminal app and stays legible at 16 px.',
+    // Mirrors assets/app-icon.svg. Change the SVG, then this.
+    draw(ctx) {
+      tile(ctx, linear(ctx, 100, 100, 924, 924, [[0, '#7B61FF'], [0.55, '#FF5FA2'], [1, '#FFB547']]));
+      sheen(ctx, 0.22);
+      pane(ctx, 206, 250, 612, 500, 76, '#15151C', 'rgba(60,10,70,0.40)');
+      [['#FF5F57', 284], ['#FEBC2E', 346], ['#28C840', 408]].forEach(([c, x]) => {
+        ctx.beginPath(); ctx.arc(x, 326, 20, 0, Math.PI * 2); ctx.fillStyle = c; ctx.fill();
+      });
+      chevron(ctx, 300, 440, 200, 58, linear(ctx, 300, 440, 400, 640, [[0, '#3FDD8C'], [1, '#4CC9F0']]));
+      cursor(ctx, 452, 590, 190, 52, '#F6F1E7');
+    },
+  },
+  {
+    id: 'stack',
+    title: 'B · Session Stack',
+    note: 'Upstream\'s "Duo" panes grown to a stack of three: sessions that outlive the window. Too close to upstream\'s icon to tell the fork apart.',
+    draw(ctx) {
+      tile(ctx, '#F5F1E8');
+      pane(ctx, 392, 216, 420, 340, 64, '#FFB547');
+      pane(ctx, 302, 306, 420, 340, 64, '#FF5FA2');
+      pane(ctx, 212, 396, 420, 340, 64, '#17171F', 'rgba(40,20,40,0.30)');
+      chevron(ctx, 280, 498, 136, 44, '#3FDD8C');
+      cursor(ctx, 390, 606, 150, 40, '#F5F1E8');
+    },
+  },
+  {
+    id: 'glyph',
+    title: 'C · Neon Glyph',
+    note: 'A single gradient >_ on a dark tile. The most minimal, but it sinks into a dark taskbar.',
+    draw(ctx) {
+      tile(ctx, linear(ctx, 100, 100, 924, 924, [[0, '#23232E'], [1, '#101016']]));
+      sheen(ctx, 0.08);
+      ctx.save();
+      ctx.shadowColor = 'rgba(255,95,162,0.55)';
+      ctx.shadowBlur = 50 * ctx.unit;
+      chevron(ctx, 250, 332, 300, 84, linear(ctx, 250, 332, 400, 632, [[0, '#4CC9F0'], [0.5, '#7B61FF'], [1, '#FF5FA2']]));
+      ctx.restore();
+      ctx.save();
+      ctx.shadowColor = 'rgba(63,221,140,0.55)';
+      ctx.shadowBlur = 40 * ctx.unit;
+      cursor(ctx, 480, 580, 280, 76, linear(ctx, 480, 0, 760, 0, [[0, '#3FDD8C'], [1, '#FFD166']]));
+      ctx.restore();
+    },
+  },
+];
+
+function render(variant, size) {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.scale(size / 1024, size / 1024);
+  // Shadow blur/offset ignore the transform, so drawers multiply by this.
+  ctx.unit = size / 1024;
+  variant.draw(ctx);
+  return canvas;
+}
+
+function download(variant, size) {
+  render(variant, size).toBlob((blob) => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `app-icon-${variant.id}-${size}.png`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }, 'image/png');
+}
+
+const EXPORT_SIZES = [1024, 512, 256, 128, 64, 32, 16];
+const PREVIEW_SIZES = [128, 64, 48, 32, 24, 16];
+const host = document.getElementById('variants');
+
+for (const v of VARIANTS) {
+  const section = document.createElement('section');
+  section.className = 'variant';
+
+  const hero = render(v, 640);
+  hero.className = 'hero';
+  section.appendChild(hero);
+
+  const side = document.createElement('div');
+  side.innerHTML = `<h2>${v.title}</h2><p>${v.note}</p>`;
+  for (const theme of ['light', 'dark']) {
+    const row = document.createElement('div');
+    row.className = `sizes ${theme}`;
+    for (const s of PREVIEW_SIZES) {
+      // Render at device resolution so the small previews are honest.
+      const c = render(v, Math.round(s * devicePixelRatio));
+      c.style.width = c.style.height = `${s}px`;
+      row.appendChild(c);
+    }
+    side.appendChild(row);
+  }
+  for (const s of EXPORT_SIZES) {
+    const b = document.createElement('button');
+    b.textContent = `PNG ${s}`;
+    b.onclick = () => download(v, s);
+    side.appendChild(b);
+  }
+  section.appendChild(side);
+  host.appendChild(section);
+}
+</script>
+</body>
+</html>

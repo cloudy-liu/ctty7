@@ -6937,7 +6937,7 @@ impl Tty7App {
                                     .text_xl()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(foreground)
-                                    .child("tty7"),
+                                    .child(crate::ui::app::DISPLAY_NAME),
                             )
                             .child(div().text_sm().text_color(muted_fg).child(format!(
                                 "{} {}",
