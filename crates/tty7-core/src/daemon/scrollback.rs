@@ -244,7 +244,11 @@ pub fn sweep(keep: &HashSet<u64>) {
     let Some(dir) = dir() else {
         return;
     };
-    let Ok(entries) = std::fs::read_dir(&dir) else {
+    sweep_dir(&dir, keep);
+}
+
+fn sweep_dir(dir: &std::path::Path, keep: &HashSet<u64>) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
     for entry in entries.flatten() {
@@ -381,20 +385,23 @@ mod tests {
 
     #[test]
     fn the_sweep_keeps_only_panes_something_can_still_ask_for() {
-        pin_config_dir();
+        // sweep removes every snapshot outside its keep set. Give it a private
+        // directory so it cannot remove another parallel test's saved pane.
+        let fixture = tempfile::tempdir().unwrap();
         let (kept, dropped) = (90_003, 90_004);
-        save(kept, &[seg(80, b"in a workspace")], None);
-        save(dropped, &[seg(80, b"in no workspace")], None);
-        sweep(&HashSet::from([kept]));
+        let kept_path = fixture.path().join(format!("{kept}.bin"));
+        let dropped_path = fixture.path().join(format!("{dropped}.bin"));
+        std::fs::write(&kept_path, encode(&[seg(80, b"in a workspace")], None)).unwrap();
+        std::fs::write(&dropped_path, encode(&[seg(80, b"in no workspace")], None)).unwrap();
+        sweep_dir(fixture.path(), &HashSet::from([kept]));
         assert!(
-            load(kept).is_some(),
+            kept_path.exists(),
             "a pane a tree still names is restorable"
         );
         assert!(
-            load(dropped).is_none(),
+            !dropped_path.exists(),
             "nobody can ask to restore a pane no tree refers to, so its output must not sit on disk"
         );
-        forget(kept);
     }
 
     #[cfg(unix)]
