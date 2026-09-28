@@ -974,9 +974,14 @@ mod tests {
     fn a_routed_auth_prompt_carries_the_machine_that_raised_it() {
         let _turn = claim_mailbox();
         while take_pending_auth().is_some() {}
-        let target = RemoteTarget::direct("me", "build-box", 22);
-        let route =
-            crate::daemon::router::RouteTarget::Ssh(Box::new(native_spec("me", "build-box", 22)));
+        // ORIGINS is shared with remote-workspace tests. Use a unique route
+        // so their build-box fixture cannot replace this prompt's host mapping.
+        let target = RemoteTarget::direct("me", "auth-prompt-fixture.invalid", 22);
+        let route = crate::daemon::router::RouteTarget::Ssh(Box::new(native_spec(
+            "me",
+            "auth-prompt-fixture.invalid",
+            22,
+        )));
         note_origin(&route, &target);
 
         let handle = std::thread::spawn(move || {
@@ -985,7 +990,7 @@ mod tests {
                 &route,
                 &AuthPromptKind::Password {
                     user: "me".into(),
-                    host: "build-box".into(),
+                    host: "auth-prompt-fixture.invalid".into(),
                 },
             )
         });

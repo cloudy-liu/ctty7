@@ -28,7 +28,7 @@ if (-not $Version) {
 # compares the release version's numeric core against it. Keep the same split.
 $VersionCore = ($Version -split '[-+]', 2)[0]
 
-$Name  = "tty7-$Version-windows-$Arch"
+$Name  = "ctty7-$Version-windows-$Arch"
 $Zip   = "dist/$Name.zip"
 $Setup = "dist/$Name-setup.exe"
 $Stage = "dist/$Name"

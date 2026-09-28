@@ -3,7 +3,6 @@ use gpui::http_client::{AsyncBody, HttpClient as _, HttpRequestExt as _, Redirec
 use gpui::{AnyWindowHandle, App, AsyncApp, Global, PromptLevel, Window, http_client};
 use reqwest_client::ReqwestClient;
 use smol::future::FutureExt as _;
-use smol::io::AsyncReadExt as _;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -12,26 +11,10 @@ use std::time::Duration;
 use tty7_core::daemon::install::AssetFetcher as _;
 use tty7_core::daemon::install::asset::{CHECKSUMS_ASSET, download_url};
 
-use crate::core::config::{Config, UpdateChannel};
+use crate::core::config::Config;
 use crate::ui::i18n::{L10nKey, t, t_fmt};
 
-const REPO: &str = "cloudy-liu/tty7";
-
-/// The rolling prerelease the Nightly channel follows. Force-moved to a new
-/// commit every night, which is exactly why it cannot double as a version.
-const NIGHTLY_TAG: &str = "nightly";
-
-/// Published beside the nightly packages so the version is stated rather than
-/// inferred from asset names. The Nightly channel reads this file directly.
-const NIGHTLY_MANIFEST: &str = "nightly.json";
-
-pub const RELEASES_URL: &str = "https://github.com/cloudy-liu/tty7/releases/latest";
-
-/// The nightly release's own page. Unlike Stable's, this URL is stable across
-/// nights — the tag stays put even as the commit under it moves. Spelled out
-/// rather than built from `NIGHTLY_TAG`, which `concat!` cannot take; the tail
-/// is asserted against it in `each_channel_reads_its_own_feed` instead.
-pub const NIGHTLY_RELEASE_URL: &str = "https://github.com/cloudy-liu/tty7/releases/tag/nightly";
+pub const RELEASES_URL: &str = "https://github.com/cloudy-liu/ctty7/releases/latest";
 
 const CHECK_TIMEOUT: Duration = Duration::from_secs(15);
 
@@ -55,13 +38,8 @@ const STAGE_TTL: Duration = Duration::from_secs(24 * 60 * 60);
 /// single flag is the whole mechanism.
 static DOWNLOAD_CANCELLED: AtomicBool = AtomicBool::new(false);
 
-/// Bumped by `switch_channel`. A download carries the value it started under,
-/// so a package prepared for the feed the user just left is thrown away instead
-/// of being staged. `DOWNLOAD_CANCELLED` handles the common case — a transfer
-/// still reading bytes — but stops being observed once the download is through
-/// and the work moves on to hashing and unpacking, and that tail is exactly
-/// long enough for a switch to land inside it.
-static CHANNEL_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// Identifies the current transfer so cancelled work cannot be staged later.
+static DOWNLOAD_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 /// Whether the user has asked to install as soon as the package is ready. Set
 /// by pressing the install button while a background download is still going,
@@ -302,11 +280,10 @@ fn spawn_check_inner(report_failure: bool, cx: &mut App) {
 
     let manual_proxy = cx.global::<Config>().http_proxy.clone();
     let auto_download = cx.global::<Config>().auto_download_updates;
-    let channel = cx.global::<Config>().update_channel;
 
     cx.spawn(async move |cx| {
         let current = current_version();
-        let (release, version) = match fetch_latest_release(channel, manual_proxy)
+        let (release, version) = match fetch_latest_release(manual_proxy)
             .or(async {
                 cx.background_executor().timer(CHECK_TIMEOUT).await;
                 Err(anyhow::anyhow!("timed out after {CHECK_TIMEOUT:?}"))
@@ -331,7 +308,7 @@ fn spawn_check_inner(report_failure: bool, cx: &mut App) {
         };
 
         if !is_update_available(&version, current) {
-            log::debug!("update check: up to date ({channel:?} {version}, running {current})");
+            log::debug!("update check: up to date ({version}, running {current})");
             cx.update(|cx| {
                 update_status(cx, |status| {
                     status.available = None;
@@ -557,43 +534,10 @@ fn remind_later() {
     state.save();
 }
 
-/// Drops everything the previous channel produced, then checks the new feed.
-///
-/// A staged package and a deferred prompt are both answers to a question the
-/// old feed asked; neither carries over. The staged package especially — one
-/// armed for the next launch would otherwise install a Stable build onto
-/// someone who just moved to Nightly.
-///
-/// "Everything" includes a download still in flight, which is the likely one:
-/// checking starts a background transfer on its own, so the seconds spent
-/// finding this setting are seconds that transfer is running. Cancelling stops
-/// it where it can be stopped, and the generation bump covers the rest.
-///
-/// Nightly to Stable deliberately does *not* downgrade. The nightly in hand
-/// keeps running until a stable release supersedes it, which is already how
-/// `parse_version` orders a release above the prerelease sharing its core
-/// version. Rolling back to an older build to honour the switch immediately
-/// would be a bigger surprise than arriving there one release later.
-pub fn switch_channel(cx: &mut App) {
-    CHANNEL_GENERATION.fetch_add(1, Ordering::Relaxed);
-    cancel_download(cx);
-    discard_pending(cx);
-    let mut state = UpdateState::load();
-    state.last_prompted = None;
-    state.remind_after = None;
-    state.last_failure = None;
-    state.save();
-    update_status(cx, |status| {
-        status.available = None;
-        status.failure = None;
-        status.phase = UpdatePhase::Idle;
-    });
-    spawn_check_forced(cx);
-}
-
 /// Abandons the transfer. The staging directory is removed by the download
 /// thread as it unwinds, so nothing is left to collect.
 pub fn cancel_download(cx: &mut App) {
+    DOWNLOAD_GENERATION.fetch_add(1, Ordering::Relaxed);
     DOWNLOAD_CANCELLED.store(true, Ordering::Relaxed);
     INSTALL_WHEN_READY.store(false, Ordering::Relaxed);
     APPLY_ON_LAUNCH.store(false, Ordering::Relaxed);
@@ -724,7 +668,7 @@ fn spawn_download(update: AvailableUpdate, cx: &mut App) {
     });
     spawn_progress_pump(cx);
 
-    let generation = CHANNEL_GENERATION.load(Ordering::Relaxed);
+    let generation = DOWNLOAD_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
     let version = update.version.clone();
     let task = cx.background_executor().spawn(smol::unblock(move || {
         prepare_update(&version, &asset, &|received, total| {
@@ -749,10 +693,7 @@ fn spawn_download(update: AvailableUpdate, cx: &mut App) {
                 APPLY_ON_LAUNCH.store(false, Ordering::Relaxed);
                 if DOWNLOAD_CANCELLED.load(Ordering::Relaxed) {
                     log::info!("update download cancelled");
-                    // Only if nothing has claimed the phase since. A channel
-                    // switch cancels this download and starts a check in the
-                    // same breath, and the check is already the live work by
-                    // the time the transfer notices it was called off.
+                    // Only clear the phase if no newer work has claimed it.
                     cx.update(|cx| {
                         update_status(cx, |status| {
                             if matches!(
@@ -781,13 +722,10 @@ fn spawn_download(update: AvailableUpdate, cx: &mut App) {
             update.version.clone(),
             APPLY_ON_LAUNCH.load(Ordering::Relaxed),
         );
-        // The feed moved under this download. Staging it anyway would hand a
-        // Nightly user the Stable package they were mid-way through fetching
-        // when they left — and if they had pressed install, relaunch them into
-        // it. Both flags were consent to a version from the old channel.
-        if CHANNEL_GENERATION.load(Ordering::Relaxed) != generation {
+        // A cancelled transfer may finish hashing after a new one starts.
+        if DOWNLOAD_GENERATION.load(Ordering::Relaxed) != generation {
             log::info!(
-                "discarding {}: the update channel changed while it was being prepared",
+                "discarding {}: the download was cancelled while it was being prepared",
                 update.version
             );
             INSTALL_WHEN_READY.store(false, Ordering::Relaxed);
@@ -954,18 +892,9 @@ fn record_failure(version: &str, detail: &str, cx: &mut App) {
     update_status(cx, |status| status.failure = Some(record));
 }
 
-/// Opens the page for whichever channel this installation follows. A Nightly
-/// user sent to the Stable release page would be handed the wrong package —
-/// and, since Linux and unsupported installs update by hand, that page is the
-/// entire update path for some of them.
-///
-/// Reads the config from disk rather than the global: several callers reach
-/// here from a background thread where the `App` is out of reach.
+/// Opens the official release download page.
 pub fn open_releases_page() {
-    open_url(match Config::load().update_channel {
-        UpdateChannel::Stable => RELEASES_URL,
-        UpdateChannel::Nightly => NIGHTLY_RELEASE_URL,
-    });
+    open_url(RELEASES_URL);
 }
 
 pub fn open_url(url: &str) {
@@ -1365,7 +1294,9 @@ fn human_bytes(bytes: u64) -> String {
 /// launched: its staged helper is the *old* build's updater and would not
 /// understand this build's arguments. Absent from pre-parameterization
 /// plans, which deserialize as 0 and never match.
-const PLAN_VERSION: u32 = 2;
+// ctty7 changes the distribution identity: invalidate pre-migration plans
+// even when their old 26.x version sorts above the new version line.
+const PLAN_VERSION: u32 = 3;
 
 /// A downloaded, verified package waiting to be installed.
 ///
@@ -1766,38 +1697,6 @@ struct GitHubAsset {
     browser_download_url: String,
 }
 
-/// `nightly.json`, written by the nightly workflow. Only `version` is read
-/// today; the rest is there so a build can be traced back to its commit
-/// without cross-referencing the release notes.
-#[derive(Clone, Debug, serde::Deserialize)]
-struct NightlyManifest {
-    version: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    commit: String,
-    #[serde(default)]
-    #[allow(dead_code)]
-    published_at: String,
-}
-
-/// The GitHub URL each channel hits to learn which build is current.
-///
-/// These are github.com pages and files, not api.github.com: the REST catalog
-/// is rate-limited per public IP, and a shared NAT can exhaust that quota
-/// without this installation making many requests of its own.
-///
-/// Keeping the two feeds apart is the whole point of the channel: neither can
-/// hand the other an update, so an installation only changes channel when the
-/// user changes it in Settings. `/releases/latest` excludes prereleases, so
-/// Stable can never be offered a nightly even though both live in the same
-/// repository.
-fn release_endpoint(channel: UpdateChannel) -> String {
-    match channel {
-        UpdateChannel::Stable => format!("https://github.com/{REPO}/releases/latest"),
-        UpdateChannel::Nightly => download_url(NIGHTLY_TAG, NIGHTLY_MANIFEST),
-    }
-}
-
 /// GitHub answers `/releases/latest` with a redirect to `/releases/tag/<tag>`.
 /// The Location may be absolute or site-relative, and may carry a query string.
 fn tag_from_release_location(location: &str) -> Option<&str> {
@@ -1812,12 +1711,12 @@ fn tag_from_release_location(location: &str) -> Option<&str> {
 /// built from the tag rather than listed through the REST API.
 fn published_gui_assets(tag: &str, version: &str) -> Vec<GitHubAsset> {
     [
-        format!("tty7-{version}-linux-x86_64.AppImage"),
-        format!("tty7-{version}-linux-x86_64.tar.gz"),
-        format!("tty7-{version}-macos-arm64.zip"),
-        format!("tty7-{version}-macos-x86_64.zip"),
-        format!("tty7-{version}-windows-x86_64-setup.exe"),
-        format!("tty7-{version}-windows-x86_64.zip"),
+        format!("ctty7-{version}-linux-x86_64.AppImage"),
+        format!("ctty7-{version}-linux-x86_64.tar.gz"),
+        format!("ctty7-{version}-macos-arm64.zip"),
+        format!("ctty7-{version}-macos-x86_64.zip"),
+        format!("ctty7-{version}-windows-x86_64-setup.exe"),
+        format!("ctty7-{version}-windows-x86_64.zip"),
         CHECKSUMS_ASSET.to_string(),
     ]
     .into_iter()
@@ -1826,35 +1725,6 @@ fn published_gui_assets(tag: &str, version: &str) -> Vec<GitHubAsset> {
         name,
     })
     .collect()
-}
-
-/// Recovers the version from a package name such as
-/// `tty7-26.8.2-nightly.202608071800-macos-arm64.zip`.
-///
-/// The platform segment is a closed set, which is what makes the split
-/// unambiguous — the version is everything between the `tty7-` prefix and the
-/// platform marker. `tty7-server-linux-x86_64-musl` matches that shape too but
-/// yields `server`, which `parse_version` rejects, so the remote-server assets
-/// sitting in the same release are skipped without special-casing them.
-///
-/// The highest version wins rather than the first one found. Two nights can be
-/// on the release at once: the workflow uploads tonight's packages before
-/// pruning yesterday's, and a prune that never ran leaves them there for good.
-/// GitHub lists assets oldest first, so taking the first match is taking the
-/// older build — which reads as "no update" and stalls the channel silently.
-fn version_from_assets(assets: &[GitHubAsset]) -> Option<String> {
-    assets
-        .iter()
-        .filter_map(|asset| {
-            let rest = asset.name.strip_prefix("tty7-")?;
-            let cut = ["-macos-", "-linux-", "-windows-"]
-                .iter()
-                .find_map(|marker| rest.find(marker))?;
-            let version = &rest[..cut];
-            Some((parse_version(version)?, version.to_string()))
-        })
-        .max()
-        .map(|(_, version)| version)
 }
 
 fn build_http_client(manual_proxy: Option<&str>) -> Result<ReqwestClient> {
@@ -1881,95 +1751,64 @@ fn github_http_error(status: http_client::http::StatusCode, body: &[u8]) -> Stri
     }
 }
 
-async fn fetch_json<T: serde::de::DeserializeOwned>(
-    client: &ReqwestClient,
-    url: &str,
-) -> Result<T> {
-    let request = http_client::Request::get(url)
-        .follow_redirects(RedirectPolicy::FollowAll)
-        .body(AsyncBody::default())
-        .context("building request")?;
-
-    let mut response = client.send(request).await.context("sending the request")?;
-    let status = response.status();
-    let mut body = Vec::new();
-    response
-        .body_mut()
-        .read_to_end(&mut body)
-        .await
-        .context("reading response body")?;
-
-    if !status.is_success() {
-        anyhow::bail!("{}", github_http_error(status, &body));
+/// Follow repository renames until GitHub identifies a release tag. The tag
+/// page itself is never downloaded; asset URLs are built from the verified tag.
+async fn fetch_stable_tag(client: &ReqwestClient, endpoint: &str) -> Result<String> {
+    let mut url = http_client::Url::parse(endpoint).context("invalid release endpoint")?;
+    for _ in 0..5 {
+        let request = http_client::Request::get(url.as_str())
+            .follow_redirects(RedirectPolicy::NoFollow)
+            .body(AsyncBody::default())
+            .context("building request")?;
+        let response = client.send(request).await.context("sending the request")?;
+        let status = response.status();
+        if !status.is_redirection() {
+            anyhow::bail!("{}", github_http_error(status, &[]));
+        }
+        let location = response
+            .headers()
+            .get(http_client::http::header::LOCATION)
+            .and_then(|value| value.to_str().ok())
+            .context("latest release redirect had no Location header")?;
+        let next = url.join(location).context("invalid release redirect")?;
+        // Repository renames stay on the same origin. Avoid following a
+        // misconfigured endpoint to an unrelated host or a different scheme.
+        if next.origin() != url.origin() {
+            anyhow::bail!("release redirect changed origin");
+        }
+        if let Some(tag) = tag_from_release_location(next.path()) {
+            return Ok(tag.to_string());
+        }
+        url = next;
     }
-
-    serde_json::from_slice(&body).context("parsing JSON")
+    anyhow::bail!("too many release redirects")
 }
 
-/// `/releases/latest` 302s to `/releases/tag/<tag>`. Not following that
-/// redirect is the whole discovery: the tag is the Location, not a REST body.
-async fn fetch_stable_tag(client: &ReqwestClient) -> Result<String> {
-    let request = http_client::Request::get(RELEASES_URL)
-        .follow_redirects(RedirectPolicy::NoFollow)
-        .body(AsyncBody::default())
-        .context("building request")?;
-
-    let mut response = client.send(request).await.context("sending the request")?;
-    let status = response.status();
-    let location = response
-        .headers()
-        .get(http_client::http::header::LOCATION)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-
-    let mut body = Vec::new();
-    let _ = response.body_mut().read_to_end(&mut body).await;
-
-    if status.is_redirection() {
-        let location = location
-            .ok_or_else(|| anyhow::anyhow!("latest release redirect had no Location header"))?;
-        return tag_from_release_location(&location)
-            .map(str::to_string)
-            .ok_or_else(|| anyhow::anyhow!("could not parse release tag from {location}"));
-    }
-
-    anyhow::bail!("{}", github_http_error(status, &body));
-}
-
-/// Returns the release together with the version it advertises.
-///
-/// Stable states the version in the tag (`v26.8.1`). Nightly cannot: its tag
-/// is force-moved to a new commit every night and so is the literal string
-/// `nightly`. It publishes `nightly.json` beside the packages instead.
-async fn fetch_latest_release(
-    channel: UpdateChannel,
-    manual_proxy: Option<String>,
-) -> Result<(LatestRelease, String)> {
+/// Returns the official release and its version.
+async fn fetch_latest_release(manual_proxy: Option<String>) -> Result<(LatestRelease, String)> {
     let client = build_http_client(manual_proxy.as_deref())?;
-    let (tag, version) = match channel {
-        UpdateChannel::Stable => {
-            let tag = fetch_stable_tag(&client)
-                .await
-                .context("requesting the release")?;
-            let version = parse_version(&tag)
-                .map(|_| tag.trim_start_matches('v').to_string())
-                .with_context(|| format!("latest tag {tag:?} is not a usable version"))?;
-            (tag, version)
-        }
-        UpdateChannel::Nightly => {
-            let tag = NIGHTLY_TAG.to_string();
-            let manifest: NightlyManifest = fetch_json(&client, &release_endpoint(channel))
-                .await
-                .context("requesting the release")?;
-            if parse_version(&manifest.version).is_none() {
-                anyhow::bail!(
-                    "release {tag} advertises no usable version ({:?})",
-                    manifest.version
-                );
-            }
-            (tag, manifest.version)
-        }
-    };
+    fetch_release(&client, RELEASES_URL).await
+}
+
+async fn fetch_release(client: &ReqwestClient, endpoint: &str) -> Result<(LatestRelease, String)> {
+    let tag = fetch_stable_tag(client, endpoint)
+        .await
+        .context("requesting the release")?;
+    let version = tag
+        .strip_prefix('v')
+        .context("release tag must start with v")?;
+    let parts: Vec<_> = version.split('.').collect();
+    if parts.len() != 3
+        || parts.iter().any(|part| {
+            part.is_empty()
+                || !part.bytes().all(|c| c.is_ascii_digit())
+                || (part.len() > 1 && part.starts_with('0'))
+                || part.parse::<u64>().is_err()
+        })
+    {
+        anyhow::bail!("latest tag {tag:?} is not an official release version");
+    }
+    let version = version.to_string();
     Ok((
         LatestRelease {
             assets: published_gui_assets(&tag, &version),
@@ -2079,7 +1918,7 @@ fn package_for_current_install(version: &str) -> Result<PackageOffer, UpdateInst
             return Err(UpdateInstallHint::UnsupportedMacos);
         };
         return Ok(PackageOffer::plain(format!(
-            "tty7-{version}-macos-{arch}.zip"
+            "ctty7-{version}-macos-{arch}.zip"
         )));
     }
     #[cfg(target_os = "linux")]
@@ -2631,10 +2470,10 @@ fn linux_package_for(
 ) -> Result<PackageOffer, UpdateInstallHint> {
     if !is_appimage {
         return Err(UpdateInstallHint::LinuxManualPackage(format!(
-            "tty7-{version}-linux-{arch}.tar.gz"
+            "ctty7-{version}-linux-{arch}.tar.gz"
         )));
     }
-    let name = format!("tty7-{version}-linux-{arch}.AppImage");
+    let name = format!("ctty7-{version}-linux-{arch}.AppImage");
     if can_self_update {
         Ok(PackageOffer::plain(name))
     } else {
@@ -2666,8 +2505,8 @@ fn windows_package_for_layout(version: &str, layout: &WindowsUpdateLayout) -> Op
         return None;
     };
     Some(match layout {
-        WindowsUpdateLayout::Inno(_) => format!("tty7-{version}-windows-{arch}-setup.exe"),
-        WindowsUpdateLayout::Portable(_) => format!("tty7-{version}-windows-{arch}.zip"),
+        WindowsUpdateLayout::Inno(_) => format!("ctty7-{version}-windows-{arch}-setup.exe"),
+        WindowsUpdateLayout::Portable(_) => format!("ctty7-{version}-windows-{arch}.zip"),
     })
 }
 
@@ -2904,29 +2743,7 @@ fn run_updater(updater: &Path, args: impl IntoIterator<Item = PathBuf>) -> Resul
     Ok(())
 }
 
-/// `(major, minor, patch, is_release, build)`.
-///
-/// Ordering the release flag *before* the build number is what lets a stable
-/// release supersede the prerelease that carries the same core version: a
-/// Nightly stamped `26.7.1-nightly.202607161800` is offered `v26.7.1` and
-/// graduates out of the prerelease no matter how recent its build is.
-///
-/// `build` then orders two prereleases sharing a core version against each
-/// other, by the timestamp the nightly workflow stamps. That comparison is the
-/// whole reason the Nightly channel can roll forward at all — without it every
-/// nightly compares equal to the next one. It is unreachable on Stable, which
-/// reads `/releases/latest` and so never sees a prerelease.
-///
-/// Every numeric identifier in the prerelease is collected, not just the last
-/// one, and they are compared left to right the way semver compares them. The
-/// nightly stamp is a single number today, but reading only the last segment
-/// meant that appending one — a counter for a second build in the same day, a
-/// finer clock — would silently *reverse* the ordering (`…20260807.2` scoring
-/// 2) instead of failing where someone would notice. Non-numeric identifiers
-/// are skipped rather than ranked: `-beta` and `-rc` are not versions this
-/// project ships, and guessing an order between them buys nothing. A
-/// prerelease with no number at all yields an empty list, which sorts below
-/// every stamped build.
+/// Orders official versions and legacy custom prerelease versions.
 fn parse_version(s: &str) -> Option<(u64, u64, u64, bool, Vec<u64>)> {
     let trimmed = s.trim();
     let core = trimmed.strip_prefix('v').unwrap_or(trimmed);
@@ -2958,6 +2775,118 @@ fn is_update_available(latest: &str, current: &str) -> bool {
 mod tests {
     use super::*;
 
+    // Exercise discovery with real HTTP responses, without GitHub or user settings.
+    fn release_from_http(responses: Vec<String>) -> Result<(LatestRelease, String)> {
+        use std::io::{BufRead, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let endpoint = format!(
+            "http://{}/old/releases/latest",
+            listener.local_addr().unwrap()
+        );
+        listener.set_nonblocking(true).unwrap();
+        let stop = std::sync::Arc::new(AtomicBool::new(false));
+        let done = stop.clone();
+        let server = std::thread::spawn(move || {
+            for response in responses {
+                let mut stream = loop {
+                    match listener.accept() {
+                        Ok((stream, _)) => break stream,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            if done.load(Ordering::Relaxed) {
+                                return;
+                            }
+                            std::thread::sleep(Duration::from_millis(5));
+                        }
+                        Err(e) => panic!("{e}"),
+                    }
+                };
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(3)))
+                    .unwrap();
+                let mut request = std::io::BufReader::new(&stream);
+                loop {
+                    let mut line = String::new();
+                    if request.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                        break;
+                    }
+                }
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        let client = build_http_client(None).unwrap();
+        let result = smol::block_on(async {
+            fetch_release(&client, &endpoint)
+                .or(async {
+                    smol::Timer::after(Duration::from_secs(5)).await;
+                    anyhow::bail!("fixture timed out")
+                })
+                .await
+        });
+        stop.store(true, Ordering::Relaxed);
+        server.join().unwrap();
+        result
+    }
+
+    fn redirect(location: &str) -> String {
+        format!(
+            "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+    }
+
+    #[test]
+    fn official_release_offer_survives_repository_rename() {
+        let (release, version) = release_from_http(vec![
+            redirect("/new/releases/latest"),
+            redirect("/new/releases/tag/v0.1.1"),
+        ])
+        .unwrap();
+        assert_eq!(version, "0.1.1");
+        assert!(is_update_available(&version, "0.1.0"));
+        assert!(!is_update_available("0.1.0", "26.8.3-c.9"));
+        let offer = select_release_asset_for(
+            Ok(PackageOffer::plain(
+                "ctty7-0.1.1-windows-x86_64-setup.exe".into(),
+            )),
+            &release.assets,
+        );
+        let asset = offer.asset.unwrap();
+        assert_eq!(
+            asset.url,
+            "https://github.com/cloudy-liu/ctty7/releases/download/v0.1.1/ctty7-0.1.1-windows-x86_64-setup.exe"
+        );
+        assert_eq!(
+            asset.checksums_url,
+            "https://github.com/cloudy-liu/ctty7/releases/download/v0.1.1/checksums.txt"
+        );
+    }
+
+    #[test]
+    fn official_release_discovery_rejects_invalid_responses() {
+        for tag in [
+            "nightly",
+            "v0.1.1-nightly.20260929",
+            "v01.1.0",
+            "v1.2",
+            "v1.2.3.4",
+            "v26.8.3-c.9",
+        ] {
+            let result = release_from_http(vec![redirect(&format!("/releases/tag/{tag}"))]);
+            assert!(result.is_err(), "{tag} is not an official release");
+        }
+        for response in [
+            "HTTP/1.1 302 Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".into(),
+            redirect("https://example.invalid/releases/tag/v0.1.1"),
+        ] {
+            assert!(release_from_http(vec![response]).is_err());
+        }
+        let error = release_from_http(vec![redirect("/old/releases/latest"); 5]).unwrap_err();
+        assert!(
+            format!("{error:#}").contains("too many release redirects"),
+            "{error:#}"
+        );
+    }
+
     fn github_asset(name: &str) -> GitHubAsset {
         GitHubAsset {
             name: name.to_string(),
@@ -2967,7 +2896,7 @@ mod tests {
 
     #[test]
     fn release_asset_requires_the_platform_package_and_checksums() {
-        let name = "tty7-27.1.0-macos-arm64.zip";
+        let name = "ctty7-27.1.0-macos-arm64.zip";
         let assets = [github_asset(name), github_asset("checksums.txt")];
         let selected = select_release_asset_for(Ok(PackageOffer::plain(name.to_string())), &assets);
         assert_eq!(
@@ -2983,7 +2912,7 @@ mod tests {
 
     #[test]
     fn release_without_checksums_is_never_installable() {
-        let name = "tty7-27.1.0-macos-arm64.zip";
+        let name = "ctty7-27.1.0-macos-arm64.zip";
         let selected = select_release_asset_for(
             Ok(PackageOffer::plain(name.to_string())),
             &[github_asset(name)],
@@ -2996,10 +2925,10 @@ mod tests {
     fn release_without_the_exact_platform_package_is_never_guessed() {
         let selected = select_release_asset_for(
             Ok(PackageOffer::plain(
-                "tty7-27.1.0-macos-arm64.zip".to_string(),
+                "ctty7-27.1.0-macos-arm64.zip".to_string(),
             )),
             &[
-                github_asset("tty7-27.1.0-macos-x86_64.zip"),
+                github_asset("ctty7-27.1.0-macos-x86_64.zip"),
                 github_asset("checksums.txt"),
             ],
         );
@@ -3007,7 +2936,7 @@ mod tests {
         assert_eq!(
             selected.reason,
             Some(UpdateInstallHint::MissingPackage(
-                "tty7-27.1.0-macos-arm64.zip".to_string()
+                "ctty7-27.1.0-macos-arm64.zip".to_string()
             ))
         );
     }
@@ -3019,7 +2948,7 @@ mod tests {
     fn an_appimage_that_can_replace_itself_is_offered_the_appimage() {
         let offer = linux_package_for("27.1.0", "x86_64", true, true)
             .expect("a self-updating AppImage yields an offer");
-        assert_eq!(offer.name, "tty7-27.1.0-linux-x86_64.AppImage");
+        assert_eq!(offer.name, "ctty7-27.1.0-linux-x86_64.AppImage");
     }
 
     /// Everything else keeps the manual hint, and the hint names the exact
@@ -3032,12 +2961,12 @@ mod tests {
         // helper shipped: still an AppImage, still updated by hand.
         assert_eq!(
             linux_package_for("27.1.0", "x86_64", true, false).unwrap_err(),
-            UpdateInstallHint::LinuxManualPackage("tty7-27.1.0-linux-x86_64.AppImage".to_string())
+            UpdateInstallHint::LinuxManualPackage("ctty7-27.1.0-linux-x86_64.AppImage".to_string())
         );
         // A tarball (or distro-packaged) install is never guessed at.
         assert_eq!(
             linux_package_for("27.1.0", "x86_64", false, false).unwrap_err(),
-            UpdateInstallHint::LinuxManualPackage("tty7-27.1.0-linux-x86_64.tar.gz".to_string())
+            UpdateInstallHint::LinuxManualPackage("ctty7-27.1.0-linux-x86_64.tar.gz".to_string())
         );
         // `can_self_update` without an AppImage cannot happen (the probe is
         // gated on the variable), but the policy must not invent an offer if
@@ -3051,10 +2980,10 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn appimage_selection_matches_the_published_asset_names() {
-        let name = "tty7-27.1.0-linux-x86_64.AppImage";
+        let name = "ctty7-27.1.0-linux-x86_64.AppImage";
         let offer = linux_package_for("27.1.0", "x86_64", true, true).unwrap();
         let assets = [
-            github_asset("tty7-27.1.0-linux-x86_64.tar.gz"),
+            github_asset("ctty7-27.1.0-linux-x86_64.tar.gz"),
             github_asset(name),
             github_asset("checksums.txt"),
         ];
@@ -3115,46 +3044,6 @@ mod tests {
         assert_eq!(parse_version("vv0.3.1"), None);
     }
 
-    /// Every numeric identifier is collected, so appending one to the nightly
-    /// stamp extends the ordering instead of replacing it. Reading only the
-    /// last segment made `…20260807.2` score 2 and lose to the build before it.
-    #[test]
-    fn prerelease_identifiers_order_left_to_right() {
-        assert_eq!(
-            parse_version("26.8.2-nightly.20260807.2"),
-            Some((26, 8, 2, false, vec![20260807, 2]))
-        );
-        assert!(is_update_available(
-            "26.8.2-nightly.20260807.2",
-            "26.8.2-nightly.20260807"
-        ));
-        assert!(!is_update_available(
-            "26.8.2-nightly.20260807",
-            "26.8.2-nightly.20260807.2"
-        ));
-        // The day still dominates whatever trails it.
-        assert!(is_update_available(
-            "26.8.2-nightly.20260808",
-            "26.8.2-nightly.20260807.9"
-        ));
-        // And the move from date to minute stamps carries the installs that
-        // are already out there: 202608071800 > 20260807.
-        assert!(is_update_available(
-            "26.8.2-nightly.202608071800",
-            "26.8.2-nightly.20260807"
-        ));
-    }
-
-    /// Two builds in one day used to collide on the date and read as "up to
-    /// date" — the reason the stamp goes to the minute.
-    #[test]
-    fn two_builds_on_one_day_are_distinguishable() {
-        assert!(is_update_available(
-            "26.8.2-nightly.202608071800",
-            "26.8.2-nightly.202608070200"
-        ));
-    }
-
     #[test]
     fn detects_newer_versions() {
         assert!(is_update_available("v0.3.1", "0.3.0"));
@@ -3171,13 +3060,6 @@ mod tests {
     }
 
     #[test]
-    fn nightly_binaries_prompt_when_their_stable_ships() {
-        assert!(is_update_available("v26.7.1", "26.7.1-nightly.20260716"));
-        assert!(!is_update_available("v26.7.0", "26.7.1-nightly.20260716"));
-        assert!(!is_update_available("v26.7.1-rc.1", "26.7.1"));
-    }
-
-    #[test]
     fn custom_release_series_advances_without_falling_back_to_upstream() {
         assert!(!is_update_available("v26.8.3-c", "26.8.3-c"));
         assert!(is_update_available("v26.8.3-c.1", "26.8.3-c"));
@@ -3185,94 +3067,26 @@ mod tests {
         assert!(!is_update_available("v26.8.3-c", "26.8.3-c.1"));
     }
 
-    /// The Nightly channel's whole reason to exist: last night's build has to
-    /// be able to supersede the one before it. This is what the old ordering
-    /// deliberately refused to do, back when the only feed was
-    /// `/releases/latest` and no nightly could ever be offered.
-    #[test]
-    fn a_newer_nightly_supersedes_an_older_one() {
-        assert!(is_update_available(
-            "26.7.1-nightly.20260717",
-            "26.7.1-nightly.20260716"
-        ));
-        assert!(!is_update_available(
-            "26.7.1-nightly.20260716",
-            "26.7.1-nightly.20260717"
-        ));
-        assert!(!is_update_available(
-            "26.7.1-nightly.20260716",
-            "26.7.1-nightly.20260716"
-        ));
-        // Across core versions the date is irrelevant — a nightly for the next
-        // patch wins however old its build is.
-        assert!(is_update_available(
-            "26.7.2-nightly.20260101",
-            "26.7.1-nightly.20260716"
-        ));
-    }
-
-    /// Ordering the release flag ahead of the build number is what keeps this
-    /// true: a stable release outranks every dated build sharing its core
-    /// version, so a user who switches back to Stable still graduates.
-    #[test]
-    fn a_stable_release_still_outranks_every_nightly_of_its_core_version() {
-        for date in ["20260101", "20991231"] {
-            assert!(is_update_available(
-                "v26.7.1",
-                &format!("26.7.1-nightly.{date}")
-            ));
-        }
-    }
-
-    /// Each channel reads its own release, which is the mechanism that keeps a
-    /// Nightly from being walked back onto Stable by an update it never asked
-    /// for. `/releases/latest` excludes prereleases by definition, so the two
-    /// feeds cannot see each other's builds. Discovery stays on github.com so
-    /// a shared public IP cannot exhaust the REST catalog quota.
-    #[test]
-    fn each_channel_reads_its_own_feed() {
-        assert_eq!(REPO, "cloudy-liu/tty7");
-        assert_eq!(release_endpoint(UpdateChannel::Stable), RELEASES_URL);
-        assert!(
-            !release_endpoint(UpdateChannel::Stable).contains("api.github.com"),
-            "Stable must not use the REST catalog"
-        );
-        assert_eq!(
-            release_endpoint(UpdateChannel::Nightly),
-            "https://github.com/cloudy-liu/tty7/releases/download/nightly/nightly.json"
-        );
-        assert!(
-            !release_endpoint(UpdateChannel::Nightly).contains("api.github.com"),
-            "Nightly must not use the REST catalog"
-        );
-        // The page a Nightly user is sent to is the tag they follow, not the
-        // json the checker reads. `concat!` cannot build the URL from the
-        // constant, so this is where the two are held together.
-        assert!(NIGHTLY_RELEASE_URL.ends_with(&format!("/releases/tag/{NIGHTLY_TAG}")));
-        assert!(RELEASES_URL.starts_with("https://github.com/cloudy-liu/tty7/"));
-        assert!(NIGHTLY_RELEASE_URL.starts_with("https://github.com/cloudy-liu/tty7/"));
-    }
-
     #[test]
     fn latest_redirect_location_yields_the_tag() {
         assert_eq!(
             tag_from_release_location(
-                "https://github.com/cloudy-liu/tty7/releases/tag/v26.8.3-c.1"
+                "https://github.com/cloudy-liu/ctty7/releases/tag/v26.8.3-c.1"
             ),
             Some("v26.8.3-c.1")
         );
         assert_eq!(
-            tag_from_release_location("/cloudy-liu/tty7/releases/tag/v26.8.3-c.1"),
+            tag_from_release_location("/cloudy-liu/ctty7/releases/tag/v26.8.3-c.1"),
             Some("v26.8.3-c.1")
         );
         assert_eq!(
             tag_from_release_location(
-                "https://github.com/cloudy-liu/tty7/releases/tag/v26.8.3-c.1?foo=1#assets"
+                "https://github.com/cloudy-liu/ctty7/releases/tag/v26.8.3-c.1?foo=1#assets"
             ),
             Some("v26.8.3-c.1")
         );
         assert_eq!(
-            tag_from_release_location("https://github.com/cloudy-liu/tty7/releases/latest"),
+            tag_from_release_location("https://github.com/cloudy-liu/ctty7/releases/latest"),
             None
         );
     }
@@ -3286,108 +3100,13 @@ mod tests {
             .expect("checksums.txt");
         assert_eq!(
             checksums.browser_download_url,
-            "https://github.com/cloudy-liu/tty7/releases/download/v26.8.3-c.1/checksums.txt"
+            "https://github.com/cloudy-liu/ctty7/releases/download/v26.8.3-c.1/checksums.txt"
         );
         assert!(
             assets
                 .iter()
-                .any(|asset| asset.name == "tty7-26.8.3-c.1-windows-x86_64-setup.exe")
+                .any(|asset| asset.name == "ctty7-26.8.3-c.1-windows-x86_64-setup.exe")
         );
-
-        let nightly = published_gui_assets("nightly", "26.8.2-nightly.20260807");
-        let setup = nightly
-            .iter()
-            .find(|asset| asset.name.ends_with("-windows-x86_64-setup.exe"))
-            .expect("windows setup");
-        assert_eq!(
-            setup.browser_download_url,
-            "https://github.com/cloudy-liu/tty7/releases/download/nightly/tty7-26.8.2-nightly.20260807-windows-x86_64-setup.exe"
-        );
-    }
-
-    /// The fallback for a nightly published without `nightly.json`. The tag is
-    /// the literal "nightly", so the asset names are the only place left that
-    /// states which build this is.
-    #[test]
-    fn version_is_recovered_from_nightly_asset_names() {
-        let assets = [
-            github_asset("checksums.txt"),
-            github_asset("tty7-26.8.2-nightly.20260807-macos-arm64.zip"),
-            github_asset("tty7-26.8.2-nightly.20260807-windows-x86_64-setup.exe"),
-        ];
-        assert_eq!(
-            version_from_assets(&assets).as_deref(),
-            Some("26.8.2-nightly.20260807")
-        );
-    }
-
-    /// The remote-server binaries ride along in the same release and match the
-    /// `tty7-…-linux-…` shape, but have no version in front of the platform.
-    /// `parse_version` rejecting "server" is what skips them, so no name-based
-    /// special case is needed.
-    #[test]
-    fn remote_server_assets_are_not_mistaken_for_a_version() {
-        let assets = [
-            github_asset("checksums.txt"),
-            github_asset("tty7-server-linux-x86_64-musl"),
-            github_asset("tty7-server-linux-aarch64-musl"),
-        ];
-        assert_eq!(version_from_assets(&assets), None);
-
-        // And they must not win when a real package is also present, whatever
-        // order GitHub returns them in.
-        let mixed = [
-            github_asset("tty7-server-linux-x86_64-musl"),
-            github_asset("tty7-26.8.2-nightly.202608071800-linux-x86_64.tar.gz"),
-        ];
-        assert_eq!(
-            version_from_assets(&mixed).as_deref(),
-            Some("26.8.2-nightly.202608071800")
-        );
-    }
-
-    /// Tonight's packages are uploaded before last night's are pruned, so both
-    /// nights are briefly on the release at once — and stay that way for good
-    /// if the prune step ever fails. GitHub lists assets oldest first, so
-    /// taking the first match would take yesterday's build and read as "no
-    /// update", stalling the channel with no error anywhere.
-    #[test]
-    fn the_newest_asset_version_wins_when_two_nights_overlap() {
-        let assets = [
-            github_asset("tty7-26.8.2-nightly.202608062200-macos-arm64.zip"),
-            github_asset("tty7-26.8.2-nightly.202608062200-linux-x86_64.tar.gz"),
-            github_asset("checksums.txt"),
-            github_asset("tty7-26.8.2-nightly.202608071800-macos-arm64.zip"),
-            github_asset("tty7-26.8.2-nightly.202608071800-linux-x86_64.tar.gz"),
-        ];
-        assert_eq!(
-            version_from_assets(&assets).as_deref(),
-            Some("26.8.2-nightly.202608071800")
-        );
-    }
-
-    /// Pins the contract between `nightly.yml`'s manifest step and this side of
-    /// it. Renaming a field in the workflow silently drops Nightly back to
-    /// guessing versions out of filenames; this fails instead.
-    #[test]
-    fn nightly_manifest_matches_what_the_workflow_writes() {
-        let manifest: NightlyManifest = serde_json::from_str(
-            r#"{
-                "version": "26.8.2-nightly.20260807",
-                "commit": "0123456789abcdef0123456789abcdef01234567",
-                "published_at": "2026-08-07T02:11:00Z"
-            }"#,
-        )
-        .expect("the workflow's shape must deserialize");
-        assert_eq!(manifest.version, "26.8.2-nightly.20260807");
-        assert!(parse_version(&manifest.version).is_some());
-
-        // Older manifests, or a workflow that stops writing the extras, must
-        // still yield a usable version rather than failing the whole check.
-        let minimal: NightlyManifest =
-            serde_json::from_str(r#"{"version": "26.8.2-nightly.20260807"}"#)
-                .expect("version alone is enough");
-        assert_eq!(minimal.commit, "");
     }
 
     #[test]
@@ -3482,7 +3201,7 @@ mod tests {
         // The bookkeeping half of `record_failure`, which needs an App to run.
         state.last_failure = Some(FailureRecord {
             version: "27.0.0".into(),
-            detail: "downloading tty7-27.0.0-macos-arm64.zip: timed out".into(),
+            detail: "downloading ctty7-27.0.0-macos-arm64.zip: timed out".into(),
         });
         if state.last_prompted.as_deref() == Some("27.0.0") {
             state.last_prompted = None;
@@ -3710,12 +3429,12 @@ mod tests {
         assert_eq!(
             windows_package_for_layout("26.8.2", &WindowsUpdateLayout::Inno(directory.clone()))
                 .as_deref(),
-            Some("tty7-26.8.2-windows-x86_64-setup.exe")
+            Some("ctty7-26.8.2-windows-x86_64-setup.exe")
         );
         assert_eq!(
             windows_package_for_layout("26.8.2", &WindowsUpdateLayout::Portable(directory))
                 .as_deref(),
-            Some("tty7-26.8.2-windows-x86_64.zip")
+            Some("ctty7-26.8.2-windows-x86_64.zip")
         );
     }
 
@@ -3850,6 +3569,7 @@ mod tests {
         assert!(plan(PLAN_VERSION).is_usable());
         // Plans written before the field existed deserialize it as 0.
         assert!(!plan(0).is_usable());
+        assert!(!plan(2).is_usable(), "discard pre-ctty7 staged packages");
         assert!(!plan(PLAN_VERSION + 1).is_usable());
     }
 
@@ -3889,9 +3609,9 @@ mod tests {
             // The order `prepare_windows_update` pushes: installer, checksums,
             // asset name, install dir, version, log, stage.
             rest: vec![
-                stage.join("tty7-27.0.0-windows-x86_64-setup.exe"),
+                stage.join("ctty7-27.0.0-windows-x86_64-setup.exe"),
                 stage.join("checksums.txt"),
-                PathBuf::from("tty7-27.0.0-windows-x86_64-setup.exe"),
+                PathBuf::from("ctty7-27.0.0-windows-x86_64-setup.exe"),
                 PathBuf::from(r"C:\Program Files\tty7"),
                 PathBuf::from("27.0.0"),
                 stage.join("update.log"),
@@ -3908,9 +3628,9 @@ mod tests {
             .expect("a complete elevated plan yields its parts");
         assert_eq!(
             parts.installer,
-            stage.join("tty7-27.0.0-windows-x86_64-setup.exe")
+            stage.join("ctty7-27.0.0-windows-x86_64-setup.exe")
         );
-        assert_eq!(parts.asset_name, "tty7-27.0.0-windows-x86_64-setup.exe");
+        assert_eq!(parts.asset_name, "ctty7-27.0.0-windows-x86_64-setup.exe");
         assert_eq!(parts.install_dir, PathBuf::from(r"C:\Program Files\tty7"));
         assert_eq!(parts.version, "27.0.0");
         assert_eq!(parts.expected_sha256, digest);
@@ -3929,7 +3649,7 @@ mod tests {
     fn the_elevated_command_line_quotes_every_argument() {
         let parts = ElevatedPlanParts {
             installer: PathBuf::from(r"C:\Users\some one\stage\setup.exe"),
-            asset_name: "tty7-27.0.0-windows-x86_64-setup.exe".into(),
+            asset_name: "ctty7-27.0.0-windows-x86_64-setup.exe".into(),
             install_dir: PathBuf::from(r"C:\Program Files\tty7"),
             version: "27.0.0".into(),
             log: PathBuf::from(r"C:\Users\some one\stage\update.log"),

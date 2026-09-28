@@ -1,6 +1,8 @@
-<svg width="120" height="120" viewBox="8 6 80 80" xmlns="http://www.w3.org/2000/svg">
-  <!-- "Duo" mark on transparent — same geometry as app-icon.svg, no tile. -->
-  <rect x="28" y="16" width="58" height="46" rx="12" fill="#3FDD8C" opacity="0.8"/>
-  <rect x="10" y="30" width="58" height="46" rx="12" fill="#17171A"/>
-  <path d="M24 42 L35 53 L24 64" fill="none" stroke="#ECEAE4" stroke-width="7" stroke-linecap="round" stroke-linejoin="round"/>
+<svg width="120" height="120" viewBox="190 244 554 554" xmlns="http://www.w3.org/2000/svg">
+  <!-- Transparent two-pane mark for the window header and color tray icons.
+       The tight crop keeps the actual panes legible at small sizes. -->
+  <rect x="302" y="306" width="420" height="340" rx="64" fill="#FF5FA2"/>
+  <rect x="212" y="396" width="420" height="340" rx="64" fill="#17171F"/>
+  <path d="M280 498 L348 566 L280 634" fill="none" stroke="#3FDD8C" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="390" y="606" width="150" height="40" rx="20" fill="#F5F1E8"/>
 </svg>

@@ -263,9 +263,14 @@ pub(crate) const TILE_GLYPH_LINE: f32 = 16.;
 pub(crate) const TILE_PAD: f32 = (TILE_SIZE - TILE_GLYPH) / 2.;
 pub(crate) const TILE_PAD_SM: f32 = (TILE_SIZE_SM - TILE_GLYPH_SM) / 2.;
 
-const DOCS_URL: &str = "https://github.com/l0ng-ai/tty7#readme";
+const DOCS_URL: &str = "https://github.com/cloudy-liu/ctty7#readme";
 const DISCORD_URL: &str = "https://discord.gg/s3dethqz2V";
-const ISSUES_URL: &str = "https://github.com/cloudy-liu/tty7/issues/new";
+const ISSUES_URL: &str = "https://github.com/cloudy-liu/ctty7/issues/new";
+
+/// What the window title and the About page call the app. The fork keeps every
+/// identifier upstream ships — binaries, config directories, the installed AUMID — and
+/// marks itself only where people read the name.
+pub(crate) const DISPLAY_NAME: &str = "ctty7";
 
 pub(crate) const CONTENT_INSET: f32 = 12.;
 
@@ -2997,21 +3002,6 @@ impl Tty7App {
         self.update_config(cx, |cfg| cfg.auto_download_updates = on);
     }
 
-    /// Moves this installation to another release feed. See
-    /// `update::switch_channel` for what a switch invalidates, and why moving
-    /// back to Stable does not roll the running build back.
-    pub(crate) fn set_update_channel(
-        &mut self,
-        channel: crate::core::config::UpdateChannel,
-        cx: &mut Context<Self>,
-    ) {
-        if cx.global::<Config>().update_channel == channel {
-            return;
-        }
-        self.update_config(cx, |cfg| cfg.update_channel = channel);
-        crate::core::update::switch_channel(cx);
-    }
-
     /// Takes effect at next launch: `core::cli_install` runs once from `main`,
     /// before there is a window to flip this in. Turning it off does not remove
     /// a symlink already placed — the install is idempotent, not reversible.
@@ -3225,7 +3215,7 @@ impl Tty7App {
             .get(self.workspace)
             .filter(|w| crate::ui::machine_mirror::pane_count(cx, w).unwrap_or(0) > 0)
             .and_then(|w| crate::ui::machine_mirror::display_name(cx, w))
-            .unwrap_or_else(|| "tty7".to_string());
+            .unwrap_or_else(|| DISPLAY_NAME.to_string());
         if *self.window_title.borrow() == title {
             return;
         }

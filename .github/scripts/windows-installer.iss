@@ -24,14 +24,15 @@
 ; Never change AppId: it is how Windows ties upgrades + the uninstall entry
 ; to previous installs of tty7.
 AppId={{9A3F6C1E-4B7D-4E2A-8C5F-D01B92E64A37}
-AppName=tty7
+AppName=ctty7
 AppVersion={#AppVersion}
 VersionInfoVersion={#VersionInfoVersion}
-AppPublisher=cloudy-liu/tty7 contributors
-AppPublisherURL=https://github.com/cloudy-liu/tty7
-AppSupportURL=https://github.com/cloudy-liu/tty7/issues
-AppUpdatesURL=https://github.com/cloudy-liu/tty7/releases
-DefaultDirName={autopf}\tty7
+AppPublisher=cloudy-liu/ctty7 contributors
+AppPublisherURL=https://github.com/cloudy-liu/ctty7
+AppSupportURL=https://github.com/cloudy-liu/ctty7/issues
+AppUpdatesURL=https://github.com/cloudy-liu/ctty7/releases
+DefaultDirName={autopf}\ctty7
+UsePreviousAppDir=yes
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
@@ -61,7 +62,7 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 ; it. Off by default: the registry is user-visible system state. The keys land
 ; under HKCU even for an all-users install, so this only ever affects whoever
 ; ran the installer. Inno restores the previous choice when upgrading.
-Name: "explorermenu"; Description: "Add ""Open in tty7"" to the folder context menu"; GroupDescription: "Shell integration:"; Flags: unchecked
+Name: "explorermenu"; Description: "Add ""Open in ctty7"" to the folder context menu"; GroupDescription: "Shell integration:"; Flags: unchecked
 
 ; Builds before the tty7/tty7-app split installed the GUI as tty7.exe. Upgrading
 ; only *adds* tty7-app.exe, so the old binary would stay on disk — and a taskbar
@@ -79,6 +80,8 @@ Name: "explorermenu"; Description: "Add ""Open in tty7"" to the folder context m
 ; is not ours to rewrite; the Start Menu entry in [Icons] is correct either way.
 [InstallDelete]
 Type: files; Name: "{app}\tty7.exe"
+Type: files; Name: "{autoprograms}\tty7.lnk"
+Type: files; Name: "{autodesktop}\tty7.lnk"
 
 [Files]
 Source: "{#StageDir}\tty7-app.exe"; DestDir: "{app}"; Flags: ignoreversion
@@ -117,8 +120,8 @@ Source: "{#StageDir}\server\*"; DestDir: "{app}\server"; Flags: ignoreversion re
 ; per-user twin would both duplicate the Start Menu entry and outlive this
 ; uninstaller — so an elevated install depends on the stamp right here.
 [Icons]
-Name: "{autoprograms}\tty7"; Filename: "{app}\tty7-app.exe"; AppUserModelID: "com.github.tty7"
-Name: "{autodesktop}\tty7"; Filename: "{app}\tty7-app.exe"; Tasks: desktopicon; AppUserModelID: "com.github.tty7"
+Name: "{autoprograms}\ctty7"; Filename: "{app}\tty7-app.exe"; AppUserModelID: "com.github.tty7"
+Name: "{autodesktop}\ctty7"; Filename: "{app}\tty7-app.exe"; Tasks: desktopicon; AppUserModelID: "com.github.tty7"
 
 [Run]
 ; The registry shape lives in core::explorer_context_menu, not here: the app
@@ -131,7 +134,7 @@ Name: "{autodesktop}\tty7"; Filename: "{app}\tty7-app.exe"; Tasks: desktopicon; 
 ; Skipping loses nothing: an upgrade keeps the install path, so the HKCU keys
 ; a ticked first install wrote still point at the right executable.
 Filename: "{app}\tty7-app.exe"; Parameters: "--register-explorer-menu"; Tasks: explorermenu; Flags: runhidden waituntilterminated skipifsilent
-Filename: "{app}\tty7-app.exe"; Description: "{cm:LaunchProgram,tty7}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\tty7-app.exe"; Description: "{cm:LaunchProgram,ctty7}"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
 ; Stop the daemon before the uninstaller deletes tty7-app.exe — the running daemon

@@ -1,7 +1,7 @@
 # Usage: bundle-windows.ps1 <target-triple> <arch-label>
 # Package the release binary twice from one staged payload:
-#   dist/tty7-<version>-windows-<arch>.zip        portable (unzip anywhere)
-#   dist/tty7-<version>-windows-<arch>-setup.exe  Inno Setup installer
+#   dist/ctty7-<version>-windows-<arch>.zip        portable (unzip anywhere)
+#   dist/ctty7-<version>-windows-<arch>-setup.exe  Inno Setup installer
 #     (Program Files or per-user, Start Menu shortcut, "Apps" uninstall entry)
 #
 # Fonts are embedded via include_bytes! and the app icon is compiled into the
@@ -17,11 +17,11 @@ $Target = $args[0]
 $Arch   = $args[1]
 $Version = (Select-String -Path Cargo.toml -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
 # Inno accepts the full semantic version for AppVersion, but the PE version
-# resource only accepts numeric components. Keep both values so Nightly and
+# resource only accepts numeric components. Keep both values so display and
 # other prerelease builds retain their display version without breaking ISCC.
 $VersionCore = ($Version -split '[-+]', 2)[0]
 $VersionInfoVersion = "${VersionCore}.0"
-$Name  = "tty7-$Version-windows-$Arch"
+$Name  = "ctty7-$Version-windows-$Arch"
 $Stage = "dist/$Name"
 $PackageUpdater = $env:TTY7_PACKAGE_UPDATE_HELPER -ne '0'
 
@@ -110,7 +110,7 @@ if ($LASTEXITCODE -ne 0) { throw "ISCC exited with $LASTEXITCODE" }
 # The staging directory stays. It is what ISCC compiled the installer from, and
 # reading the compiled setup.exe back would need innoextract, which the runners
 # do not carry — so `verify-windows-package.ps1` reads the payload here instead.
-# It never reaches the release: both workflows upload named file globs
+# It never reaches the release: the workflow uploads named file globs
 # (*.zip, *-setup.exe, …), and a directory matches none of them.
 Write-Host "OK dist/$Name.zip"
 Write-Host "OK dist/$Name-setup.exe"

@@ -24,7 +24,7 @@ use uuid::Uuid;
 
 use crate::core::config::{
     BellMode, Config, CursorStyle, LinkFileOpen, MouseZoomModifier, NewTabPosition, NotifyMode,
-    TabBarPosition, UI_FONT_SIZE_DEFAULT, UpdateChannel, WindowBackdrop,
+    TabBarPosition, UI_FONT_SIZE_DEFAULT, WindowBackdrop,
 };
 use crate::core::keychain::CredentialRef;
 use crate::core::ssh_profile::{
@@ -697,11 +697,6 @@ fn settings_search_entries() -> &'static [SearchEntry] {
             section: About,
             title: SettingsAppHttpProxy,
             keywords: SettingsSearchAppHttpProxyKeywords,
-        },
-        SearchEntry {
-            section: About,
-            title: SettingsUpdateChannel,
-            keywords: SettingsSearchUpdateChannelKeywords,
         },
         SearchEntry {
             section: About,
@@ -6878,26 +6873,6 @@ impl Tty7App {
         };
         let check_for_updates = cx.global::<Config>().check_for_updates;
         let auto_download = cx.global::<Config>().auto_download_updates;
-        let channel_idx = match cx.global::<Config>().update_channel {
-            UpdateChannel::Stable => 0,
-            UpdateChannel::Nightly => 1,
-        };
-        let channel_picker = self.segmented(
-            "wt-update-channel",
-            &[
-                t(L10nKey::SettingsUpdateChannelStable),
-                t(L10nKey::SettingsUpdateChannelNightly),
-            ],
-            channel_idx,
-            cx,
-            |this, ix, _w, cx| {
-                let channel = match ix {
-                    0 => UpdateChannel::Stable,
-                    _ => UpdateChannel::Nightly,
-                };
-                this.set_update_channel(channel, cx);
-            },
-        );
         let http_proxy_input = match self.active_settings() {
             Some(s) => s.http_proxy_input.clone(),
             None => return div().into_any_element(),
@@ -6937,7 +6912,7 @@ impl Tty7App {
                                     .text_xl()
                                     .font_weight(FontWeight::SEMIBOLD)
                                     .text_color(foreground)
-                                    .child("tty7"),
+                                    .child(crate::ui::app::DISPLAY_NAME),
                             )
                             .child(div().text_sm().text_color(muted_fg).child(format!(
                                 "{} {}",
@@ -6946,9 +6921,9 @@ impl Tty7App {
                             )))
                             .child(
                                 Link::new("about-github")
-                                    .href("https://github.com/cloudy-liu/tty7")
+                                    .href("https://github.com/cloudy-liu/ctty7")
                                     .text_sm()
-                                    .child("github.com/cloudy-liu/tty7"),
+                                    .child("github.com/cloudy-liu/ctty7"),
                             ),
                     ),
             )
@@ -7149,12 +7124,6 @@ impl Tty7App {
                                 )
                             }),
                     )
-                    .child(self.settings_row(
-                        t(L10nKey::SettingsUpdateChannel),
-                        t(L10nKey::SettingsUpdateChannelDesc),
-                        channel_picker,
-                        cx,
-                    ))
                     .child(
                         self.settings_row(
                             t(L10nKey::SettingsCheckUpdatesOnLaunch),
@@ -7718,8 +7687,6 @@ mod tests {
             // group on About, and Smooth scrolling between two rows that were
             // both findable.
             ("smooth", Terminal),
-            ("nightly", About),
-            ("channel", About),
             ("metered", About),
             ("automatic", About),
             // A headline feature the index had never heard of: "background
@@ -7845,7 +7812,7 @@ mod tests {
             ssh_group_label(crate::core::ssh_config::IMPORTED_GROUP),
             "~/.ssh/config"
         );
-        assert_eq!(ssh_group_label(""), "In tty7");
+        assert_eq!(ssh_group_label(""), "In ctty7");
         assert_eq!(ssh_group_label("Work"), "Work");
     }
 

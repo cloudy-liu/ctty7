@@ -1,218 +1,111 @@
 <div align="center">
+<img src="assets/app-icon.svg" alt="ctty7" width="88" height="88" />
 
-<img src="assets/app-icon.svg" alt="tty7" width="88" height="88" />
+# ctty7
 
-### tty7 · 客制维护版
+面向本地开发、远程工作和 AI 编程的终端工作台。
 
-**在 tty7 上持续维护：更深的 Windows shell 集成、更可靠的 coding-agent
-会话身份维护、随主题适配的 agent 图标、原生 shell 历史、WSL 与 SSH 修复，
-以及独立的客制发布线。**
+[English](README.md) · [简体中文](README.zh-CN.md) · [下载](https://github.com/cloudy-liu/ctty7/releases/latest)
 
-<sub>会话常驻 · 远程开发 · Coding Agent · 纯 Rust</sub>
-
-<br />
-
-[![CI](https://github.com/cloudy-liu/tty7/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudy-liu/tty7/actions/workflows/ci.yml)
-[![客制版本](https://img.shields.io/github/v/release/cloudy-liu/tty7?label=%E5%AE%A2%E5%88%B6%E7%89%88%E6%9C%AC&color=3FDD8C)](https://github.com/cloudy-liu/tty7/releases/latest)
-[![平台](https://img.shields.io/badge/%E5%B9%B3%E5%8F%B0-macOS%20%C2%B7%20Windows%20%C2%B7%20Linux-blue)](https://github.com/cloudy-liu/tty7/releases/latest)
+[![CI](https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/cloudy-liu/ctty7)](https://github.com/cloudy-liu/ctty7/releases/latest)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
-
-<sub>[English](README.md) · 简体中文</sub>
-
-<br />
-
-<img src="assets/hero.webp" alt="tty7 展示跨仓库常驻运行的 coding agent 会话" width="900" />
 
 </div>
 
-> [!IMPORTANT]
-> 这是基于 [l0ng-ai/tty7](https://github.com/l0ng-ai/tty7) 独立维护的 fork。
-> tty7 的完整功能、配置、编译方法和通用文档，请直接查看
-> [上游 README](https://github.com/l0ng-ai/tty7/blob/main/README.zh-CN.md) 与
-> [上游文档](https://github.com/l0ng-ai/tty7/tree/main/docs)。本页只说明这个
-> fork 额外维护了什么，以及从哪里下载客制安装包。
+ctty7 将持久终端会话、本地与远程工作区、Git 操作和编程 Agent 状态放在一起，
+重点改进 Windows CMD/Cmder 支持、Herdr 识别和 Agent 会话恢复。
+项目由 [l0ng-ai/tty7](https://github.com/l0ng-ai/tty7) fork 并修改，独立维护，与上游无隶属关系。
 
-## tty7 是什么
+<img src="assets/hero.webp" alt="终端工作区和编程 Agent 会话" width="900" />
 
-tty7 是一个 GPU 渲染的终端工作台。真正持有 shell 和 pane 的是后台 server，
-因此关闭窗口后 shell 仍会继续运行。重启机器后，tty7 会从保存状态重建 pane；
-如果已经知道 session id，还能重新启动受支持的 coding agent 并恢复对应对话。
-它把本地与远程终端、原生 SSH、Git 工作流、编辑器级提示符输入，以及 Codex、
-Claude Code 等 coding agent 的状态感知放在同一个应用里。
+## 主要功能
 
-完整产品能力以上游为准。这个 fork 会选择性同步上游，同时独立维护下面的
-优化。
+- **管理多个工作区。** 本地终端、WSL 和 SSH 工作区共用标签、分屏和侧栏；分组可以重命名。
+  后台服务持有 shell，关闭窗口后进程继续运行。
+- **Windows CMD / Cmder 支持。** 通过提示符边界和工作目录报告提供补全、输入建议及提示符编辑。
+  保留 CMD、Clink、PowerShell 等 shell 原生的上下键历史行为，模糊搜索可读取 PSReadLine 和
+  Clink 历史。Windows 路径支持整段选择；对于请求 ConPTY win32-input-mode 的程序，
+  Shift+Enter 等组合键会按键盘事件传递。
+- **Herdr 与嵌套 Agent 识别。** Herdr 作为面板内的宿主应用运行时，即使内部启动 Codex 或
+  Claude Code，标签仍显示 Herdr 羊头像。分屏标签的头像跟随当前焦点面板，后台标签沿用最后的焦点。
+- **Agent 状态一眼可见。** 标签和侧栏结合 hooks 与 Herdr 式屏幕识别，显示工作中、等待确认、
+  完成和空闲等状态。支持情况因 Agent 而异；GUI 的屏幕识别是对 hooks 的补充，
+  `tty7 agents` 和 `tty7 wait` 仍使用 hooks 报告的状态。
+- **恢复对应的会话。** 后台服务被替换后，重新打开原先的工作区并保留 Agent 会话身份。
+  对支持的 Agent，已知会话 ID 时恢复对应对话；无法确定时退回可用 shell。
+  系统重启后恢复的是布局和可恢复的对话，不是让运行中的进程跨重启存活。
+- **WSL 与 SSH 工作。** 支持远程工作区、Windows 面板内 SSH 识别和 WSL 登录 shell 解析。
+  Windows 安装包附带用于启动 WSL 的 Linux server，无需另行下载。
+- **日常终端操作。** 内置 Git 状态与差异查看、主题、字体、快捷键、可选择提示符文字和适配主题的
+  Agent 头像，默认关闭响铃。
 
-## 这个 fork 改了什么
+## 下载与安装
 
-本节列出的都是相对上游的差异。**上游状态**一列说明每项改动在上游项目的处境：
+从 [cloudy-liu/ctty7 Releases](https://github.com/cloudy-liu/ctty7/releases/latest)
+下载最新正式版。项目只有一个 Release 发布渠道。
 
-- **上游已关闭** —— 已向上游提交，但被关闭，因此预计会长期只存在于本 fork。
-- **未提交上游** —— 尚未向上游提交。
-- **仅限 fork** —— 只在 fork 语境下有意义，不会向上游提交。
-- **fork 默认值** —— 功能在上游已经存在，但这个 fork 使用不同的默认配置。
-
-只有从 `main` 源码构建才能使用的改动会明确标记为**尚未发布**。
-
-| 改动 | 平台 | 上游状态 |
+| 平台 | 文件 | 启动方式 |
 |---|---|---|
-| CMD 与 Cmder 提示符上报、补全与提示符编辑 | Windows | 未提交上游 |
-| 通过 Windows 进程树识别 coding agent | Windows | 未提交上游 |
-| ConPTY win32-input-mode 下的 Shift+Enter | Windows | 未提交上游 |
-| pane 内 `ssh` 跳转识别 | Windows | [上游已关闭](https://github.com/l0ng-ai/tty7/pull/739) |
-| pane 内 SSH 的 Vim 命令行光标位置 | Windows | 未提交上游 |
-| WSL 账号登录 shell 解析 | Windows · WSL | 未提交上游 |
-| 提示符文本可选择与 Windows 路径智能选择 | 全平台 | 未提交上游 |
-| 用于搜索和建议的原生 shell 历史 | 全平台 | 未提交上游 |
-| 侧边栏分组重命名 | 全平台 | [上游已关闭](https://github.com/l0ng-ai/tty7/pull/735) |
-| agent 徽标跟随聚焦的 pane | 全平台 | [上游已关闭](https://github.com/l0ng-ai/tty7/pull/719) |
-| 重启、恢复失败和退出后的 agent 会话身份维护 **（c.6）** | 全平台 | 未提交上游 |
-| server 重启后精确恢复 agent 会话，无法识别时回到 shell **（c.7）** | 全平台 | 未提交上游 |
-| daemon 重建后恢复此前所有打开的工作区 **（c.8）** | 全平台 | 未提交上游 |
-| 19 个 agent 的透明、主题自适应头像 **（c.6）** | 全平台 | 未提交上游 |
-| Antigravity 品牌图标支持 | 全平台 | 未提交上游 |
-| 响铃默认关闭 | 全平台 | fork 默认值 |
-| 更新检查不走 GitHub REST API | 全平台 | 仅限 fork |
-| 客制 `-c` 发布线与更新通道 | 全平台 | 仅限 fork |
+| Windows x86_64 | `ctty7-<版本>-windows-x86_64-setup.exe` | 运行安装器，从开始菜单打开 ctty7 |
+| Windows 便携版 | `ctty7-<版本>-windows-x86_64.zip` | 解压后运行 `tty7-app.exe` |
+| macOS Apple silicon / Intel | `ctty7-<版本>-macos-arm64.dmg` / `…-x86_64.dmg` | 拖入 Applications |
+| Linux x86_64 | `ctty7-<版本>-linux-x86_64.AppImage` | 添加执行权限后运行 |
+| Linux 压缩包 | `ctty7-<版本>-linux-x86_64.tar.gz` | 解压后运行 `tty7-app` |
 
-早期有一项 fork 改动——分屏光标的实时聚焦——已被上游接受为
-[l0ng-ai/tty7#736](https://github.com/l0ng-ai/tty7/pull/736)，因此不再是差异。
+为兼容现有安装，macOS 内部应用包目录仍叫 `tty7.app`。Windows 构建未签名；macOS 在未配置
+发布签名凭据时使用临时签名，系统可能要求手动确认。每次发布提供 `checksums.txt`；macOS ZIP
+供应用更新使用，`tty7-server-*` 是远程工作区内部组件。
 
-### Windows shell 集成
+**从旧 fork 迁移：** 首次需要手动安装 ctty7 v0.1.0。旧版 26.x 更新器会将 0.1.0 视为降级。
+保留原配置和数据，操作步骤见[迁移指南](docs/maintenance/migration.md)。
 
-- 为原生 `cmd.exe` 增加提示符边界和工作目录上报，使 tty7 能提供历史影子
-  建议、Tab 补全和提示符编辑。
-- 通过 Clink 的 `CLINK_PATH` 集成 Cmder，完整保留
-  `cmd.exe /K init.bat` 等启动方式中的所有用户参数。
-- 把 Clink 的工作目录上报移到提示符字符串之外，避免过长的路径把提示符本身
-  挤出可见区域。
-- 原生 CMD 无法上报命令开始时，通过 Windows 进程树判断命令是否仍在运行，
-  避免 tty7 的输入层覆盖全屏程序，并在命令结束后重新接管提示符。
-- 遍历 pane 的进程树，识别位于 CMD、Cmder、脚本包装器和辅助进程下面的
-  coding agent，把 agent 身份绑定到正确的 pane，避免把提示符运行的 Git
-  命令或 MCP 子进程误识别成前台 agent。
-- 在快照重放和重连之间保持 ConPTY 的 `win32-input-mode` 握手状态，并把带
-  修饰键的 Enter 编码为 key event，使 **Shift+Enter** 能真正送达申请了该模式
-  的 shell 和 agent，而不是直接提交当前行。
+## 快速上手
 
-### 提示符选择与原生 shell 历史
+1. 启动 ctty7，创建本地终端，或选择 WSL / SSH 工作区。
+2. 在设置中选择 shell。CMD/Cmder 原有启动参数继续可用，例如 `cmd.exe /K init.bat`。
+3. 在面板中启动编程 Agent。在 **设置 → Agents** 为需要状态和通知的 Agent 安装 hooks。
+4. 在 **设置 → 关于 → 检查更新** 获取正式版。安装包会先下载并校验，应用更新需要明确操作。
 
-- 保持 shell 绘制的提示符文本可选择，并把 Windows 驱动器号和反斜杠路径识别为
-  一个完整的智能选择范围。
-- 在单行提示符边缘把上下方向键交给正在运行的 shell，使 DOSKEY、PSReadLine、
-  readline、zle、fish、当前会话条目、重复项和自定义绑定保持原生行为。
-- 为 tty7 的模糊搜索和历史影子建议读取 PSReadLine 与 Clink 历史，同时过滤多行
-  片段和 Clink 元数据。
+命令仍然叫 `tty7`，包括 `tty7 agents` 和 `tty7 wait`，不会安装 `ctty7` 命令别名。
 
-### WSL 与 SSH
+## 配置与文档
 
-- 通过 NSS 解析当前发行版账号的登录 shell，并依次回退到 `/etc/passwd`、继承的
-  `$SHELL` 和 `/bin/sh`。
-- 避免受 [microsoft/WSL#10718](https://github.com/microsoft/WSL/issues/10718)
-  影响的 WSL 版本把 `wsl.exe --exec sh` 的 bootstrap 当作用户 shell 启动。
-- 在 Windows 上通过遍历进程树并读取参数，识别在 pane 内启动的 `ssh` 会话，
-  随后取消该 pane 的本地 Git 侧边栏分组，并在远程上下文就绪后刷新侧边栏。
-- 修复 Windows pane 内直接运行 `ssh` 时，Vim 的 `:wq` 回显落到文件行的问题，
-  见 [l0ng-ai/tty7#774](https://github.com/l0ng-ai/tty7/issues/774)。移除 ConPTY
-  防闪烁补偿中改写光标位置的处理。上游此前已通过
-  [l0ng-ai/tty7#442](https://github.com/l0ng-ai/tty7/pull/442) 在 macOS/Linux 禁用它。
+大部分选项可以在设置中调整。Windows 配置仍在 `%APPDATA%\tty7\config.json`，
+macOS/Linux 仍在 `~/.config/tty7/config.json`。可以通过 `TTY7_CONFIG_DIR` 或
+`--config-dir` 指定独立配置目录。
 
-### 侧边栏与 agent
+- [配置参考](docs/reference/configuration.mdx)
+- [安装与构建](docs/getting-started/installation.mdx)
+- [Agent 状态和通知](docs/agents/status.mdx)
+- [Agent 会话](docs/agents/sessions.mdx)
+- [远程工作区](docs/remote/workspaces.mdx)
+- [更新说明](docs/reference/updates.mdx)
 
-- 支持从分组标题的右键菜单重命名仓库/侧边栏分组。提交空名称即可恢复由路径
-  派生的标题。
-- 让这些自定义名称在配置文件中保持稳定顺序，避免保存任意设置时被重新排列。
-- 分屏时，标签页上的 agent 徽标跟随当前聚焦的 pane。
-- 恢复已知的 coding-agent 会话时，在 agent 启动阶段继续保留 session id；即使
-  server 在下一个 hook 到达前再次重启，仍能恢复同一段对话。Codex 与 Claude
-  还能从保存的 resume 命令中取回明确的 id。退出 agent，或者恢复失败后返回 shell
-  时会清除过期身份，不会让 pane 继续绑定到已经结束的会话。这会强化 tty7 现有的
-  会话恢复流程；对话本身仍由 agent 保存和管理。对应改动见
-  [cloudy-liu/tty7#24](https://github.com/cloudy-liu/tty7/pull/24)。
-- 重新启动 agent 前先保存准确的恢复目标。Codex 从原生历史列表进入旧会话后，
-  无需发送新消息也能捕获会话 ID。尚未输入内容的交互式启动会直接重新打开；Claude
-  启动时已分配 ID、但还没有历史记录的空会话也按此处理。无法确定原会话时，留下
-  可用的 shell，不弹出会话选择器。Cursor 与 Antigravity 仍需 tty7 已知准确 ID。
-  详见[会话恢复说明](docs/agents/sessions.mdx)与
-  [cloudy-liu/tty7#29](https://github.com/cloudy-liu/tty7/pull/29)。
-- 后台 daemon 被重建时，恢复此前所有打开的工作区，而不是只恢复最后聚焦的项目。
-  前台窗口优先打开，其余窗口按保存的位置与尺寸在后台逐个显示，不抢焦点。
-  每个 pane 先尝试附着，失败时再沿原有路径恢复对应 agent 会话；daemon 仍存活时
-  保留较轻量的单窗口启动行为。见
-  [cloudy-liu/tty7#35](https://github.com/cloudy-liu/tty7/pull/35)。
-- 19 个受支持的 agent 头像，包括 Antigravity，不再绘制彩色圆底；图形占头像的比例
-  从 54% 增加到 78%。Codex、Cursor 和 Grok 跟随主题前景色，其他 agent 保留品牌
-  色并校正明暗。在全部 13 套内置主题中，侧边栏、顶部标签栏和切换器的静止、悬停
-  与选中状态都达到 4.5:1 对比度。对应改动见
-  [cloudy-liu/tty7#25](https://github.com/cloudy-liu/tty7/pull/25)。
-- 内置 Antigravity 品牌标识作为 agent 头像。
+参考文档中命令和内部组件继续使用 `tty7` 名称。
+使用问题请提交到[本仓库 Issues](https://github.com/cloudy-liu/ctty7/issues)。
 
-### 与上游不同的默认值
+## 开发与贡献
 
-- **响铃完全关闭**（`"bell": "none"`）。上游默认是 `"visual"`，即闪烁提示而非
-  声音；把 `"bell"` 设回 `"visual"` 即可恢复上游行为，需要声音则设为
-  `"audible"` 或 `"both"`。
+需要稳定版 Rust 和对应平台的原生构建工具。Windows 需要 MSVC C++ 构建工具与 Windows SDK；
+Linux 所需 X11、Wayland 和字体开发库见[构建说明](docs/getting-started/installation.mdx#building-from-source)。
 
-### 构建与更新
-
-- 从 `github.com` 的 `/releases/latest` 重定向读取 Stable 标签，从
-  `nightly.json` 读取 Nightly 版本，不再依赖有速率限制的 REST 接口，
-  避免触发未认证 REST catalog 的速率限制。
-
-客制发布规则、以及更新如何指向本 fork，见[版本规则](#版本规则)。
-
-## 下载客制安装包
-
-从 [**cloudy-liu/tty7 Releases**](https://github.com/cloudy-liu/tty7/releases/latest)
-下载最新客制版本。
-
-| 平台 | 安装包 | 说明 |
-|---|---|---|
-| **Windows x86_64** | `…-setup.exe` 或免安装 `….zip` | 这是本 fork 的主要优化平台。当前构建尚未进行商业代码签名，SmartScreen 可能要求确认。 |
-| **macOS** | `…-macos-arm64.dmg` 或 `…-macos-x86_64.dmg` | 配置 Apple 公证凭据前使用 ad-hoc 签名，Gatekeeper 可能要求手动确认。 |
-| **Linux x86_64** | `….AppImage` 或 `….tar.gz` | AppImage 已打包常用的 X11/Wayland 运行库。 |
-
-Release 同时提供 `checksums.txt`，以及远程工作区需要的无头
-`tty7-server` 二进制。
-
-`v26.8.3-c.9` 在 c.8 的基础上加入 Herdr 彩色标签头像。当前聚焦的 tty7 面板运行
-Herdr 时，里面的 Codex 或 Claude Code 不会替换 Herdr 头像；切换到独立的 Agent 分屏时，
-头像随焦点变化。左侧栏、顶部标签栏和工作区切换器使用相同规则。即使 shell 不报告
-命令文本，也能通过前台进程识别 Herdr；后台标签沿用最后聚焦的面板，并保留该面板
-Agent 的状态点。逐提交说明见
-[c.9 发布记录](docs/releases/v26.8.3-c.9.md)。
-草稿的全部构建和校验和验证完成后，才会公开发布安装包。此前同步上游的
-`v26.9.1-c` 已撤下；已安装该版本的用户需手动下载安装 c.9，更新器不会自动降级。
-
-## 版本规则
-
-客制版本沿用上游基础版本号，并追加 `-c`：
-
-```text
-上游 26.8.3  →  客制版 26.8.3-c  →  tag v26.8.3-c
+```sh
+git clone https://github.com/cloudy-liu/ctty7.git
+cd ctty7
+cargo build --locked
+cargo dev
 ```
 
-如果在下一个上游版本前还要继续发布，则依次使用 `-c.1`、`-c.2`。同步到
-新的上游基础版本后开启新序列，例如 `26.8.4-c`。
+`cargo dev` 使用 `.tty7-dev`，不使用日常配置。提交前运行 `cargo fmt --check` 和
+`cargo test --locked --workspace`。
 
-这个 fork 的应用内更新和远程 server 安装都从 `cloudy-liu/tty7` 获取资源；
-安装客制版本后，不会在更新时悄悄换回上游二进制。
+保留 Rust crate、二进制、协议标识和数据路径中的 `tty7` 命名，是为了兼容已有配置和脚本，
+也便于以后按需引入 patch。PR 提交到本 fork。
+旧差异记录见[维护历史](docs/maintenance/fork-history.md)，发布流程见[发布操作清单](docs/maintenance/release.md)。
 
-每个客制版本都会记录相对上一个客制 tag 的准确范围。发布提交和 GitHub Release
-说明会统计合入的分支线与 Git 提交数，逐笔说明提交解决的问题，并引用对应的 fork
-PR、上游 PR 或外部 issue。补丁等价的历史同步会单独说明，不会被写成新增功能。
+## 来源与许可证
 
-## 上游项目与完整文档
-
-- [上游仓库与英文 README](https://github.com/l0ng-ai/tty7#readme)
-- [上游中文 README](https://github.com/l0ng-ai/tty7/blob/main/README.zh-CN.md)
-- [上游完整文档](https://github.com/l0ng-ai/tty7/tree/main/docs)
-- [上游 Releases](https://github.com/l0ng-ai/tty7/releases)
-
-客制版本特有的问题请提交到
-[本 fork 的 Issues](https://github.com/cloudy-liu/tty7/issues)。通用的 tty7
-用法和行为问题，请先查阅上游文档。
-
-## License
-
-与上游一致，采用 Apache-2.0。详见 [LICENSE](LICENSE)。
+ctty7 是 tty7 的修改发行版，使用 [Apache-2.0](LICENSE) 许可证，保留原作者版权和署名。
+本发行版修改了 Windows shell 集成、Agent 与 Herdr 行为、品牌、文档以及发布和更新流程。
+Agent 文档保留 Herdr 名称及检测规则来源说明。
