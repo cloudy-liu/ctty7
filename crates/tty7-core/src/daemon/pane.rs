@@ -1857,6 +1857,10 @@ impl DaemonPane {
             .spawn(move || {
                 crate::core::threads::promote_to_user_interactive();
                 let mut sniffer = OscSniffer::new();
+                // Keep a Clink submission pending until Clink reports its
+                // next prompt. apply_signals clears CommandInput on a busy
+                // transition, so that field alone cannot cover a long command.
+                let mut cmd_command_pending = false;
                 // Kitty graphics interception (issue #213): lifts image
                 // sequences out of the stream *before* the ring/subscriber see
                 // them, so the base64 pixels never enter replay and the client's
@@ -1978,7 +1982,23 @@ impl DaemonPane {
                             // cwd/prompt change to emit while we hold the lock.
                             let mut signals = sniffer.feed(bytes);
 
+                            // Clink's raw cwd report comes from its own prompt.
+                            // Its helper may still be a child process then.
+                            // The batch wrapper's earlier report is guarded by
+                            // the process tree until Clink takes over editing.
+                            let own_cmd_prompt = if sniffer.clink_prompt_seen {
+                                cmd_command_pending |=
+                                    state.lock().unwrap().command_input.submitted;
+                                if signals.clink_prompt_report {
+                                    cmd_command_pending = false;
+                                }
+                                !cmd_command_pending
+                            } else {
+                                false
+                            };
+
                             if signals.shell.iter().any(|s| s.at_prompt)
+                                && !own_cmd_prompt
                                 && foreground_running(sniffer.reports_command_start())
                             {
                                 for s in signals.shell.iter_mut() {
@@ -2004,6 +2024,7 @@ impl DaemonPane {
                             // own report is what arms the editor again.
                             if poll_now
                                 && sniffer.shell.at_prompt
+                                && !own_cmd_prompt
                                 && foreground_running(sniffer.reports_command_start())
                             {
                                 sniffer.shell.at_prompt = false;
@@ -3428,6 +3449,8 @@ struct ShellState {
 #[derive(Default)]
 struct SniffSignals {
     cwd: Option<PathBuf>,
+    /// Clink itself reported this cwd, without the batch wrapper's OSC 133 A.
+    clink_prompt_report: bool,
     /// The last title the pane set in this read, already capped. `Some("")` is
     /// a reset — an empty OSC 0/2 clears the title rather than setting a blank
     /// one, the same way the GUI's terminal treats it.
@@ -3441,6 +3464,8 @@ struct OscSniffer {
     tok: OscTokenizer,
     shell: ShellState,
     reports_command_start: bool,
+    clink_prompt_seen: bool,
+    osc133_prompt_start: bool,
 }
 
 impl OscSniffer {
@@ -3449,6 +3474,8 @@ impl OscSniffer {
             tok: OscTokenizer::new(&[b"0", b"2", b"7", b"133", b"9", b"777"]),
             shell: ShellState::default(),
             reports_command_start: false,
+            clink_prompt_seen: false,
+            osc133_prompt_start: false,
         }
     }
 
@@ -3456,12 +3483,18 @@ impl OscSniffer {
         let mut signals = SniffSignals::default();
         let shell = &mut self.shell;
         let reports_command_start = &mut self.reports_command_start;
+        let clink_prompt_seen = &mut self.clink_prompt_seen;
+        let osc133_prompt_start = &mut self.osc133_prompt_start;
         self.tok.feed(bytes, |payload| {
             if let Some(path) = parse_osc7(payload) {
                 signals.cwd = Some(path);
             } else if let Some((path, tty7_cmd_prompt)) = parse_osc9_cwd_report(payload) {
                 signals.cwd = Some(path);
                 if tty7_cmd_prompt {
+                    if !*osc133_prompt_start {
+                        *clink_prompt_seen = true;
+                        signals.clink_prompt_report = true;
+                    }
                     // Clink consumes OSC 133 embedded in its prompt renderer,
                     // so tty7's cmd hook marks its OSC 9;9 report explicitly.
                     // A generic OSC 9;9 only updates cwd: applications such as
@@ -3482,6 +3515,11 @@ impl OscSniffer {
             } else if let Some(title) = parse_osc_title(payload) {
                 signals.title = Some(title);
             } else if let Some(rest) = payload.strip_prefix(b"133;") {
+                match rest.first() {
+                    Some(b'A') => *osc133_prompt_start = true,
+                    Some(b'B' | b'C' | b'D') => *osc133_prompt_start = false,
+                    _ => {}
+                }
                 if rest.first() == Some(&b'C') {
                     *reports_command_start = true;
                 }
@@ -5172,6 +5210,106 @@ mod tests {
             }
         }
         assert!(local.shell.last().unwrap().at_prompt);
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn a_cmd_prompt_report_survives_its_prompt_helper_child() {
+        struct Chunks {
+            chunks: std::vec::IntoIter<Vec<u8>>,
+            state: Arc<Mutex<PaneState>>,
+            read_count: usize,
+        }
+
+        impl Read for Chunks {
+            fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+                // Start a command after the first prompt is fully reported.
+                // Its foreign OSC marks must not rearm the cmd editor.
+                if self.read_count == 3 {
+                    assert!(
+                        !self.state.lock().unwrap().shell.at_prompt,
+                        "the batch wrapper must wait while Clink is starting"
+                    );
+                }
+                if self.read_count == 4 {
+                    note_agent_input(&mut self.state.lock().unwrap(), b"child\r");
+                }
+                let Some(chunk) = self.chunks.next() else {
+                    return Ok(0);
+                };
+                self.read_count += 1;
+                buf[..chunk.len()].copy_from_slice(&chunk);
+                Ok(chunk.len())
+            }
+        }
+
+        let state = Arc::new(Mutex::new(test_state(true)));
+        let (tx, rx) = mpsc::channel();
+        state.lock().unwrap().subscriber = Some(tx);
+        let chunks = vec![
+            b"\x1b]133;A\x1b\\".to_vec(),
+            b"\x1b]9;9;tty7-cmd;C:\\work\x1b\\".to_vec(),
+            b"\x1b]133;B\x1b\\".to_vec(),
+            b"\x1b]9;9;tty7-cmd;C:\\work\x1b\\".to_vec(),
+            b"\x1b]133;A\x1b]133;B\x07".to_vec(),
+            b"\x1b]133;A\x1b]133;B\x07".to_vec(),
+            b"\x1b]9;9;tty7-cmd;C:\\next\x1b\\".to_vec(),
+        ];
+        DaemonPane::spawn_reader(
+            state.clone(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(OutputGate::new()),
+            Box::new(Chunks {
+                chunks: chunks.into_iter(),
+                state: state.clone(),
+                read_count: 0,
+            }),
+            null_writer(),
+            |_| true,
+            ForegroundProbes {
+                remote: Box::new(|| None),
+                agent: Box::new(|| None),
+                app: Box::new(|| None),
+                cwd: Box::new(|| None),
+            },
+            Arc::new(DeathReporter::new(|| {})),
+        )
+        .join()
+        .unwrap();
+
+        assert!(
+            state.lock().unwrap().shell.at_prompt,
+            "a cmd prompt must stay editable while its own helper exits"
+        );
+        let mut first_prompt = false;
+        let mut child_busy = false;
+        let mut cmd_resumed = false;
+        for msg in rx.try_iter() {
+            match msg {
+                DaemonMsg::Prompt {
+                    active: true,
+                    at_prompt: true,
+                    ..
+                } if child_busy && !cmd_resumed => {
+                    panic!("a foreground command must not claim cmd's prompt");
+                }
+                DaemonMsg::Prompt {
+                    active: true,
+                    at_prompt: true,
+                    ..
+                } => first_prompt = true,
+                DaemonMsg::Prompt {
+                    active: true,
+                    at_prompt: false,
+                    ..
+                } if first_prompt => child_busy = true,
+                DaemonMsg::Cwd(path) if path == PathBuf::from(r"C:\next") => {
+                    cmd_resumed = true;
+                }
+                _ => {}
+            }
+        }
+        assert!(first_prompt && child_busy && cmd_resumed);
     }
 
     #[test]
