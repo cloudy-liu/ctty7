@@ -139,4 +139,3 @@ is no longer a difference.
 
 See [Versioning](#versioning) for the custom release scheme and how the updater
 is pointed at this fork.
-

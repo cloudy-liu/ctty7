@@ -335,12 +335,49 @@ fn write_shortcut(lnk: &Path) -> Result<(), String> {
             .Save(&lnk_w, true)
             .map_err(|e| format!("Save: {e}"))?;
     }
+    // Portable upgrades do not run Inno's shortcut cleanup. Remove only the
+    // legacy entry belonging to this executable after its replacement exists.
+    if lnk.file_name().and_then(|name| name.to_str()) == Some("ctty7.lnk") {
+        let legacy = lnk.with_file_name("tty7.lnk");
+        if let Ok(old) = read_shortcut(&legacy)
+            && old.aumid.as_deref() == Some(AUMID)
+            && old
+                .target
+                .as_deref()
+                .is_some_and(|target| same_path(target, &exe))
+            && let Err(error) = std::fs::remove_file(&legacy)
+        {
+            log::warn!(
+                "could not remove legacy shortcut {}: {error}",
+                legacy.display()
+            );
+        }
+    }
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::Path;
+
+    #[test]
+    fn portable_upgrade_reconciles_only_its_own_legacy_shortcut() {
+        let dir = tempfile::tempdir().unwrap();
+        let old = dir.path().join("tty7.lnk");
+        let new = dir.path().join("ctty7.lnk");
+        super::write_shortcut(&old).unwrap();
+        super::write_shortcut(&new).unwrap();
+        assert!(
+            !old.exists(),
+            "one Start-menu entry after portable migration"
+        );
+        assert!(super::read_shortcut(&new).is_ok());
+
+        // An unrecognized shortcut is not this installation's to remove.
+        std::fs::write(&old, b"unrelated shortcut").unwrap();
+        super::write_shortcut(&new).unwrap();
+        assert_eq!(std::fs::read(&old).unwrap(), b"unrelated shortcut");
+    }
 
     #[test]
     fn aumid_matches_the_installer_shortcuts() {

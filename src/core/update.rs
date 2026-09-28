@@ -6,6 +6,7 @@ use smol::future::FutureExt as _;
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 use tty7_core::daemon::install::AssetFetcher as _;
@@ -52,13 +53,12 @@ static APPLY_ON_LAUNCH: AtomicBool = AtomicBool::new(false);
 
 /// Byte counters the download thread publishes and the UI samples. Cheaper and
 /// less fussy than a channel for something the user reads a few times a second.
-static DOWNLOAD_RECEIVED: AtomicU64 = AtomicU64::new(0);
-/// Zero when the server sent no usable `content-length`.
-static DOWNLOAD_TOTAL: AtomicU64 = AtomicU64::new(0);
-/// Set once the bytes are in and the hashing, unpacking and signature checks
-/// start. That work has no progress to report, and a percentage frozen at 100
-/// is indistinguishable from a hang.
-static DOWNLOAD_VERIFYING: AtomicBool = AtomicBool::new(false);
+#[derive(Default)]
+struct DownloadProgress {
+    received: AtomicU64,
+    total: AtomicU64,
+    verifying: AtomicBool,
+}
 
 const PROGRESS_TICK: Duration = Duration::from_millis(120);
 
@@ -655,9 +655,6 @@ fn spawn_download(update: AvailableUpdate, cx: &mut App) {
     };
 
     DOWNLOAD_CANCELLED.store(false, Ordering::Relaxed);
-    DOWNLOAD_VERIFYING.store(false, Ordering::Relaxed);
-    DOWNLOAD_RECEIVED.store(0, Ordering::Relaxed);
-    DOWNLOAD_TOTAL.store(0, Ordering::Relaxed);
     update_status(cx, |status| {
         status.available = Some(update.clone());
         status.failure = None;
@@ -666,15 +663,17 @@ fn spawn_download(update: AvailableUpdate, cx: &mut App) {
             total: None,
         };
     });
-    spawn_progress_pump(cx);
-
     let generation = DOWNLOAD_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+    let progress = Arc::new(DownloadProgress::default());
+    spawn_progress_pump(progress.clone(), generation, cx);
     let version = update.version.clone();
     let task = cx.background_executor().spawn(smol::unblock(move || {
-        prepare_update(&version, &asset, &|received, total| {
-            DOWNLOAD_RECEIVED.store(received, Ordering::Relaxed);
-            DOWNLOAD_TOTAL.store(total.unwrap_or(0), Ordering::Relaxed);
-            if DOWNLOAD_CANCELLED.load(Ordering::Relaxed) {
+        prepare_update(&version, &asset, &progress, &|received, total| {
+            progress.received.store(received, Ordering::Relaxed);
+            progress.total.store(total.unwrap_or(0), Ordering::Relaxed);
+            if DOWNLOAD_GENERATION.load(Ordering::Relaxed) != generation
+                || DOWNLOAD_CANCELLED.load(Ordering::Relaxed)
+            {
                 ControlFlow::Break(())
             } else {
                 ControlFlow::Continue(())
@@ -683,7 +682,16 @@ fn spawn_download(update: AvailableUpdate, cx: &mut App) {
     }));
 
     cx.spawn(async move |cx| {
-        let prepared = match task.await {
+        let result = task.await;
+        // Only the current attempt owns the UI state and install consent.
+        // Obsolete work may clean up its own staging directory, nothing else.
+        if DOWNLOAD_GENERATION.load(Ordering::Relaxed) != generation {
+            if let Ok(prepared) = result {
+                let _ = std::fs::remove_dir_all(&prepared.stage);
+            }
+            return;
+        }
+        let prepared = match result {
             Ok(prepared) => prepared,
             Err(error) => {
                 // Both flags are consent to *this* attempt. Leaving either set
@@ -722,17 +730,6 @@ fn spawn_download(update: AvailableUpdate, cx: &mut App) {
             update.version.clone(),
             APPLY_ON_LAUNCH.load(Ordering::Relaxed),
         );
-        // A cancelled transfer may finish hashing after a new one starts.
-        if DOWNLOAD_GENERATION.load(Ordering::Relaxed) != generation {
-            log::info!(
-                "discarding {}: the download was cancelled while it was being prepared",
-                update.version
-            );
-            INSTALL_WHEN_READY.store(false, Ordering::Relaxed);
-            APPLY_ON_LAUNCH.store(false, Ordering::Relaxed);
-            let _ = std::fs::remove_dir_all(&pending.stage);
-            return;
-        }
         let mut state = UpdateState::load();
         state.pending = Some(pending.clone());
         state.last_failure = None;
@@ -754,14 +751,17 @@ fn spawn_download(update: AvailableUpdate, cx: &mut App) {
 /// Samples the download counters into the global the UI renders from. Stops as
 /// soon as the phase leaves the transfer, so a finished, cancelled or failed
 /// download does not leave a timer running.
-fn spawn_progress_pump(cx: &mut App) {
+fn spawn_progress_pump(progress: Arc<DownloadProgress>, generation: u64, cx: &mut App) {
     cx.spawn(async move |cx| {
         loop {
             cx.background_executor().timer(PROGRESS_TICK).await;
             let live = cx.update(|cx| {
-                let received = DOWNLOAD_RECEIVED.load(Ordering::Relaxed);
-                let total = DOWNLOAD_TOTAL.load(Ordering::Relaxed);
-                let verifying = DOWNLOAD_VERIFYING.load(Ordering::Relaxed);
+                if DOWNLOAD_GENERATION.load(Ordering::Relaxed) != generation {
+                    return false;
+                }
+                let received = progress.received.load(Ordering::Relaxed);
+                let total = progress.total.load(Ordering::Relaxed);
+                let verifying = progress.verifying.load(Ordering::Relaxed);
                 let mut live = false;
                 update_status(cx, |status| {
                     if matches!(
@@ -2009,6 +2009,7 @@ fn capabilities_cover_elevation(stdout: &[u8]) -> bool {
 fn prepare_update(
     version: &str,
     asset: &ReleaseAsset,
+    progress: &DownloadProgress,
     on_progress: &dyn Fn(u64, Option<u64>) -> ControlFlow<()>,
 ) -> Result<PreparedUpdate> {
     // Runs off the main thread, so the `Config` global is out of reach.
@@ -2024,7 +2025,7 @@ fn prepare_update(
         .get_cancellable(&asset.url, on_progress)
         .map_err(anyhow::Error::msg)
         .with_context(|| format!("downloading {}", asset.name))?;
-    DOWNLOAD_VERIFYING.store(true, Ordering::Relaxed);
+    progress.verifying.store(true, Ordering::Relaxed);
     #[cfg(target_os = "macos")]
     {
         return prepare_macos_update(version, &asset.name, &archive, &checksums);
