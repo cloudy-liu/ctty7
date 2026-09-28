@@ -4,7 +4,8 @@
     python scripts/brand/render.py
 
 The SVGs are the source of truth: app-icon.svg uses the macOS icon grid;
-Windows ICO frames crop that outer margin so the taskbar tile fills its slot.
+Windows ICO frames remove that outer margin and enlarge the panes by 10%
+so both the tile and its contents fill the taskbar slot.
 logo.svg is the transparent two-pane mark for the header and color tray;
 tray.svg is its alpha-only macOS template, read at runtime. resvg is what tty7 uses
 to draw the tray icon, so these PNGs match what the app renders. Every size is
@@ -27,11 +28,21 @@ ROOT = Path(__file__).resolve().parents[2]
 ASSETS = ROOT / "assets"
 
 
-def render(svg: str, size: int, *, view_box: str | None = None) -> Image.Image:
+def render(svg: str, size: int, *, taskbar: bool = False) -> Image.Image:
     source = {"svg_path": str(ASSETS / svg)}
-    if view_box is not None:
+    if taskbar:
         root = ET.parse(ASSETS / svg).getroot()
-        root.set("viewBox", view_box)
+        root.set("viewBox", "100 100 824 824")
+        panes = root.find("{http://www.w3.org/2000/svg}g")
+        if panes is None:
+            raise ValueError("App icon must contain a group for the two panes")
+        # Scale around the tile center without changing the macOS icon grid,
+        # the transparent header/tray mark, or the tile's corner radius.
+        panes.set(
+            "transform",
+            "translate(512 512) scale(1.1) translate(-512 -512) "
+            + panes.get("transform", ""),
+        )
         source = {"svg_string": ET.tostring(root, encoding="unicode")}
     png = resvg_py.svg_to_bytes(**source, width=size, height=size)
     return Image.open(BytesIO(png)).convert("RGBA")
@@ -58,7 +69,7 @@ def main() -> None:
     # Embedded in the .exe by build.rs, and the installer's icon. Pillow only
     # writes frames no larger than the image it saves, so 256 goes first.
     frames = [
-        render("app-icon.svg", s, view_box="80 80 864 864")
+        render("app-icon.svg", s, taskbar=True)
         for s in (256, 128, 64, 48, 32, 24, 16)
     ]
     frames[0].save(
