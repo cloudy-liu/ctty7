@@ -814,6 +814,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsAgentKimiCode => "Kimi Code",
         L10nKey::SettingsAgentQoderCLI => "Qoder CLI",
         L10nKey::SettingsAgentCodeBuddy => "CodeBuddy",
+        L10nKey::SettingsAgentQoderCn => "Qoder CN CLI",
         L10nKey::SettingsSearchAboutKeywords => "version license credits build update check github",
         L10nKey::SettingsSearchAppHttpProxyKeywords => {
             "proxy http https socks socks5 clash v2ray network download update"
@@ -912,6 +913,9 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsSearchQoderCLIKeywords => "agent integration hooks install qoder qodercli",
         L10nKey::SettingsSearchCodeBuddyKeywords => {
             "agent integration hooks install codebuddy codebuddy-code cbc tencent"
+        }
+        L10nKey::SettingsSearchQoderCnKeywords => {
+            "agent integration hooks install qodercn qoderclicn qoder-cn qoder china"
         }
         L10nKey::SettingsSearchPiKeywords => "agent integration extension install pi",
         L10nKey::SettingsSearchPortForwardingKeywords => {
