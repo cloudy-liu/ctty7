@@ -83,13 +83,15 @@ impl TabCode {
     }
 }
 
+enum EditorNavigation {
+    Source { line: u32, column: u32 },
+    PreviewAnchor(String),
+}
+
 pub(crate) struct EditorPanelState {
-    /// Where to put the cursor once a particular file is on screen, for a
-    /// `file.rs:120:3` that has to load first. Carried rather than applied at
-    /// the call site because opening is asynchronous: the click is long over
-    /// by the time there is a buffer to put a cursor in.
-    pending_cursor: Option<(PathBuf, u32, u32)>,
-    pending_preview_anchor: Option<(HostId, PathBuf, String)>,
+    /// Only the latest open request may install a file or move focus. Its
+    /// navigation target travels with the request and is dropped on failure.
+    open_seq: u64,
     watch: Option<Arc<WatchSub>>,
     watch_host: Option<SharedHost>,
     watch_opening: bool,
@@ -124,8 +126,7 @@ impl EditorPanelState {
         })
         .detach();
         Self {
-            pending_cursor: None,
-            pending_preview_anchor: None,
+            open_seq: 0,
             watch: None,
             watch_host: None,
             watch_opening: false,
@@ -439,34 +440,30 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.editor.pending_cursor =
-            line.map(|line| (path.to_path_buf(), line, column.unwrap_or(1)));
-        self.open_file_in_editor(path, window, cx);
+        let Some(host) = self.active_host(cx) else {
+            return;
+        };
+        self.editor_open_with_navigation(
+            host,
+            path,
+            line.map(|line| EditorNavigation::Source {
+                line,
+                column: column.unwrap_or(1),
+            }),
+            window,
+            cx,
+        );
     }
 
-    /// Moves the cursor to the position a link asked for, if the file it asked
-    /// about is the one that just opened. Anything else — a different file
-    /// opened in between, a file that never arrived — drops the request rather
-    /// than throwing the cursor somewhere it was never meant to go.
-    fn apply_pending_cursor(
+    fn apply_editor_navigation(
         &mut self,
         host: HostId,
-        requested: &Path,
         opened: &Path,
+        navigation: Option<EditorNavigation>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Peeked before it is taken: another file opening in the meantime must
-        // not swallow a request that was never about it.
-        if self
-            .editor
-            .pending_cursor
-            .as_ref()
-            .is_none_or(|(wanted, ..)| wanted != requested)
-        {
-            return;
-        }
-        let Some((_, line, column)) = self.editor.pending_cursor.take() else {
+        let Some(navigation) = navigation else {
             return;
         };
         let Some(file) = self.tab_code_mut().and_then(|c| {
@@ -476,16 +473,26 @@ impl Tty7App {
         }) else {
             return;
         };
-        let input = file.input.clone();
-        file.preview = false;
-        input.update(cx, |input, cx| input.focus(window, cx));
-        // The grid counts from one and `Position` counts from zero, and a
-        // compiler that says "line 1" means the first line either way.
-        let position = Position {
-            line: line.saturating_sub(1),
-            character: column.saturating_sub(1),
-        };
-        place_cursor(input, position, CURSOR_SCROLL_ATTEMPTS, window, cx);
+        match navigation {
+            EditorNavigation::Source { line, column } => {
+                let input = file.input.clone();
+                file.preview = false;
+                input.update(cx, |input, cx| input.focus(window, cx));
+                // File links count from one; Position counts from zero.
+                let position = Position {
+                    line: line.saturating_sub(1),
+                    character: column.saturating_sub(1),
+                };
+                place_cursor(input, position, CURSOR_SCROLL_ATTEMPTS, window, cx);
+            }
+            EditorNavigation::PreviewAnchor(anchor) => {
+                if let Some(preview) = &file.reading {
+                    file.preview = true;
+                    preview.update(cx, |preview, cx| preview.navigate_anchor(anchor, cx));
+                    window.focus(&preview.focus_handle(cx), cx);
+                }
+            }
+        }
     }
 
     pub(crate) fn editor_open_markdown_link(
@@ -496,43 +503,13 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.editor.pending_cursor = None;
-        self.editor.pending_preview_anchor =
-            fragment.map(|anchor| (host.id(), path.to_owned(), anchor));
-        self.editor_open_on_host(host, path, window, cx);
-    }
-
-    fn apply_pending_preview_anchor(
-        &mut self,
-        host: HostId,
-        requested: &Path,
-        opened: &Path,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
-        if self
-            .editor
-            .pending_preview_anchor
-            .as_ref()
-            .is_none_or(|(id, path, _)| *id != host || path != requested)
-        {
-            return;
-        }
-        let Some((_, _, anchor)) = self.editor.pending_preview_anchor.take() else {
-            return;
-        };
-        let Some(file) = self.tab_code_mut().and_then(|code| {
-            code.files
-                .iter_mut()
-                .find(|file| file.host.id() == host && file.path == opened)
-        }) else {
-            return;
-        };
-        if let Some(preview) = &file.reading {
-            file.preview = true;
-            preview.update(cx, |preview, cx| preview.navigate_anchor(anchor, cx));
-            window.focus(&preview.focus_handle(cx), cx);
-        }
+        self.editor_open_with_navigation(
+            host,
+            path,
+            fragment.map(EditorNavigation::PreviewAnchor),
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn open_file_in_editor(
@@ -556,16 +533,29 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.editor_open_with_navigation(host, path, None, window, cx);
+    }
+
+    fn editor_open_with_navigation(
+        &mut self,
+        host: SharedHost,
+        path: &Path,
+        navigation: Option<EditorNavigation>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.editor.open_seq = self.editor.open_seq.wrapping_add(1);
+        let open_seq = self.editor.open_seq;
         if self.tabs.get(self.active).is_none() {
             return;
         }
         self.raise_code_overlay();
         if self.editor_activate_open(host.id(), path, window, cx) {
+            self.apply_editor_navigation(host.id(), path, navigation, window, cx);
             return;
         }
         let host_id = host.id();
         let p = path.to_path_buf();
-        let requested = p.clone();
         HostOps::run_in(
             host.clone(),
             window,
@@ -613,16 +603,19 @@ impl Tty7App {
                 })?;
                 Ok((path, text, meta.mtime))
             },
-            move |app, opened, window, cx| match opened {
-                Ok((path, text, mtime)) => {
-                    app.editor_install_file(host, path.clone(), text, mtime, window, cx);
-                    // Against `requested`, not `path`: the host canonicalised
-                    // it on the way through, and a link that named a symlink
-                    // would otherwise lose the line it asked for.
-                    app.apply_pending_cursor(host_id, &requested, &path, window, cx);
-                    app.apply_pending_preview_anchor(host_id, &requested, &path, window, cx);
+            move |app, opened, window, cx| {
+                if app.editor.open_seq != open_seq {
+                    return;
                 }
-                Err(message) => window.push_notification(message, cx),
+                match opened {
+                    Ok((path, text, mtime)) => {
+                        app.editor_install_file(host, path.clone(), text, mtime, window, cx);
+                        // Apply this request to the canonical path returned by
+                        // its Host, including when the link named a symlink.
+                        app.apply_editor_navigation(host_id, &path, navigation, window, cx);
+                    }
+                    Err(message) => window.push_notification(message, cx),
+                }
             },
         );
     }
@@ -649,8 +642,6 @@ impl Tty7App {
         code.files.insert(0, f);
         code.active = 0;
         self.focus_editor(window, cx);
-        self.apply_pending_cursor(host, path, path, window, cx);
-        self.apply_pending_preview_anchor(host, path, path, window, cx);
         cx.notify();
         true
     }
@@ -1657,14 +1648,88 @@ mod tests {
             assert!(app.editor_activate_open(host.id(), &path, window, cx));
             assert!(!app.tab_code().unwrap().active_file().unwrap().preview);
             app.editor_toggle_preview(window, cx);
-            app.editor.pending_cursor = Some((path.clone(), 3, 2));
-            app.editor_activate_open(host.id(), &path, window, cx);
+            app.open_file_in_editor_at(&path, Some(3), Some(2), window, cx);
             let file = app.tab_code().unwrap().active_file().unwrap();
             assert!(!file.preview);
             assert!(file.input.focus_handle(cx).is_focused(window));
             app.editor_close_file(0, window, cx);
             app.editor_install_file(host, path, "# Reopened".into(), None, window, cx);
             assert!(app.tab_code().unwrap().active_file().unwrap().preview);
+        });
+    }
+
+    #[gpui::test]
+    fn markdown_failed_anchor_does_not_override_later_source_navigation(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guide.md");
+        let host: SharedHost = tty7_core::host::local::LocalHost::new();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_open_markdown_link(host, &path, Some("intro".into()), window, cx);
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            cx.update(|window, cx| {
+                !gpui_component::Root::read(window, cx)
+                    .notification
+                    .read(cx)
+                    .notifications()
+                    .is_empty()
+            })
+        });
+        std::fs::write(&path, "# Intro\n\nTarget line\n").unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.open_file_in_editor_at(&path, Some(3), Some(2), window, cx);
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            app.read_with(cx, |app, _| {
+                app.tab_code().is_some_and(|code| !code.files.is_empty())
+            })
+        });
+        app.update_in(&mut vcx, |app, window, cx| {
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(!file.preview);
+            assert!(file.input.focus_handle(cx).is_focused(window));
+            assert_eq!(
+                file.input.read(cx).cursor_position(),
+                Position {
+                    line: 2,
+                    character: 1
+                }
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn markdown_newer_source_request_supersedes_an_inflight_anchor(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guide.md");
+        std::fs::write(&path, "# Intro\n\nTarget line\n").unwrap();
+        let host: SharedHost = tty7_core::host::local::LocalHost::new();
+        // Both requests start before the UI executor can deliver either Host
+        // result. The last click must choose source, regardless of read order.
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_open_markdown_link(host, &path, Some("intro".into()), window, cx);
+            app.open_file_in_editor_at(&path, Some(3), Some(2), window, cx);
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            app.read_with(cx, |app, _| {
+                app.tab_code().is_some_and(|code| !code.files.is_empty())
+            })
+        });
+        app.update_in(&mut vcx, |app, window, cx| {
+            let code = app.tab_code().unwrap();
+            assert_eq!(code.files.len(), 1);
+            let file = code.active_file().unwrap();
+            assert!(!file.preview);
+            assert!(file.input.focus_handle(cx).is_focused(window));
+            assert_eq!(
+                file.input.read(cx).cursor_position(),
+                Position {
+                    line: 2,
+                    character: 1
+                }
+            );
         });
     }
 

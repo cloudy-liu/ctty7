@@ -97,6 +97,23 @@ pub fn image_format(bytes: &[u8]) -> Result<gpui::ImageFormat, String> {
         .starts_with("<svg")
         || (prefix.trim_start().starts_with("<?xml") && prefix.contains("<svg"))
     {
+        // Use the renderer's parser for units, percentages and viewBox sizing.
+        // Dimension validation must not load nested images or local files.
+        let options = resvg::usvg::Options {
+            image_href_resolver: resvg::usvg::ImageHrefResolver {
+                resolve_data: Box::new(|_, _, _| None),
+                resolve_string: Box::new(|_, _| None),
+            },
+            ..Default::default()
+        };
+        let tree = resvg::usvg::Tree::from_data(bytes, &options).map_err(|e| e.to_string())?;
+        // GPUI's render_single_frame(bytes, 1.0) doubles each dimension for
+        // smoothing. Bound the allocated pixels, not just the SVG viewport.
+        let width = (tree.size().width() * 2.0) as u32;
+        let height = (tree.size().height() * 2.0) as u32;
+        if width == 0 || height == 0 || u64::from(width) * u64::from(height) > 32_000_000 {
+            return Err("SVG render exceeds image dimensions limit".into());
+        }
         return Ok(gpui::ImageFormat::Svg);
     }
     let format = image::guess_format(bytes).map_err(|e| e.to_string())?;
@@ -124,6 +141,33 @@ pub fn image_format(bytes: &[u8]) -> Result<gpui::ImageFormat, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_svg_dimensions_bound_the_gpui_render_allocation() {
+        for dimensions in [
+            "width=\"10000\" height=\"10000\"",
+            "viewBox=\"0 0 10000 10000\"",
+            "width=\"4000\" height=\"4000\"",
+            "width=\"100in\" height=\"100in\"",
+            "width=\"1e30\" height=\"1e30\"",
+            "width=\"0\" height=\"16\"",
+        ] {
+            let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" {dimensions}/>");
+            assert!(image_format(svg.as_bytes()).is_err(), "{dimensions}");
+        }
+        for dimensions in [
+            "width=\"16\" height=\"16\"",
+            "viewBox=\"0 0 16 16\"",
+            "width=\"4000\" height=\"2000\"",
+        ] {
+            let svg = format!("<svg xmlns=\"http://www.w3.org/2000/svg\" {dimensions}/>");
+            assert!(
+                matches!(image_format(svg.as_bytes()), Ok(gpui::ImageFormat::Svg)),
+                "{dimensions}"
+            );
+        }
+        assert!(image_format(b"<svg not valid XML").is_err());
+    }
 
     #[test]
     fn markdown_links_keep_the_document_directory_and_decode_fragments() {
