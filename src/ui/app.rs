@@ -268,7 +268,7 @@ const DISCORD_URL: &str = "https://discord.gg/s3dethqz2V";
 const ISSUES_URL: &str = "https://github.com/cloudy-liu/tty7/issues/new";
 
 /// What the window title and the About page call the app. The fork keeps every
-/// identifier upstream ships — binaries, config directories, the AUMID — and
+/// identifier upstream ships — binaries, config directories, the installed AUMID — and
 /// marks itself only where people read the name.
 pub(crate) const DISPLAY_NAME: &str = "tty7 Custom";
 

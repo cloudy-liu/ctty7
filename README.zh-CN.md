@@ -74,7 +74,7 @@ Claude Code 等 coding agent 的状态感知放在同一个应用里。
 | 响铃默认关闭 | 全平台 | fork 默认值 |
 | 更新检查不走 GitHub REST API | 全平台 | 仅限 fork |
 | 客制 `-c` 发布线与更新通道 | 全平台 | 仅限 fork |
-| “Aurora Prompt” 应用图标与 `tty7 Custom` 显示名 **（尚未发布）** | 全平台 | 仅限 fork |
+| “Session Stack” 应用图标与 `tty7 Custom` 显示名 **（尚未发布）** | 全平台 | 仅限 fork |
 
 早期有一项 fork 改动——分屏光标的实时聚焦——已被上游接受为
 [l0ng-ai/tty7#736](https://github.com/l0ng-ai/tty7/pull/736)，因此不再是差异。

@@ -1,14 +1,22 @@
-<svg width="96" height="96" viewBox="194 182 636 636" xmlns="http://www.w3.org/2000/svg">
-  <!-- Template (alpha-only) tray glyph: the terminal window of app-icon.svg,
-       same coordinates, with the viewBox cropped to the window. Template
-       images keep alpha and drop color, so the prompt is knocked out of a
-       solid window instead of drawn over it. -->
+<svg width="96" height="96" viewBox="196 160 632 632" xmlns="http://www.w3.org/2000/svg">
+  <!-- Alpha-only Session Stack for the macOS menu bar. Transparent gaps
+       separate the panes; the prompt is cut out of the front pane. -->
   <defs>
-    <mask id="prompt-cut">
-      <rect x="194" y="182" width="636" height="636" fill="#fff"/>
-      <path d="M300 440 L400 540 L300 640" fill="none" stroke="#000" stroke-width="58" stroke-linecap="round" stroke-linejoin="round"/>
-      <rect x="452" y="590" width="190" height="52" rx="26" fill="#000"/>
+    <mask id="back-cut" maskUnits="userSpaceOnUse" x="196" y="160" width="632" height="632">
+      <rect x="196" y="160" width="632" height="632" fill="#fff"/>
+      <rect x="302" y="306" width="420" height="340" rx="64" fill="#000" stroke="#000" stroke-width="32"/>
+    </mask>
+    <mask id="middle-cut" maskUnits="userSpaceOnUse" x="196" y="160" width="632" height="632">
+      <rect x="196" y="160" width="632" height="632" fill="#fff"/>
+      <rect x="212" y="396" width="420" height="340" rx="64" fill="#000" stroke="#000" stroke-width="32"/>
+    </mask>
+    <mask id="prompt-cut" maskUnits="userSpaceOnUse" x="196" y="160" width="632" height="632">
+      <rect x="196" y="160" width="632" height="632" fill="#fff"/>
+      <path d="M280 498 L348 566 L280 634" fill="none" stroke="#000" stroke-width="44" stroke-linecap="round" stroke-linejoin="round"/>
+      <rect x="390" y="606" width="150" height="40" rx="20" fill="#000"/>
     </mask>
   </defs>
-  <rect x="206" y="250" width="612" height="500" rx="76" fill="#000" mask="url(#prompt-cut)"/>
+  <rect x="392" y="216" width="420" height="340" rx="64" fill="#000" mask="url(#back-cut)"/>
+  <rect x="302" y="306" width="420" height="340" rx="64" fill="#000" mask="url(#middle-cut)"/>
+  <rect x="212" y="396" width="420" height="340" rx="64" fill="#000" mask="url(#prompt-cut)"/>
 </svg>

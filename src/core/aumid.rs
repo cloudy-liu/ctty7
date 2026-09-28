@@ -5,7 +5,8 @@
 //! AUMID when a Start Menu shortcut carries the matching
 //! `System.AppUserModel.ID`, so `init()` — called once at GUI startup — brands
 //! the process and, when nothing else already supplies that shortcut, writes
-//! one.
+//! one. Cargo builds use a separate taskbar identity so their current embedded
+//! icon is not replaced by the installed application's shortcut icon.
 //!
 //! It is deliberately reluctant to write. The installer stamps its own
 //! shortcuts (see `windows-installer.iss`), so the runtime write only has to
@@ -32,6 +33,16 @@ use std::time::{Duration, Instant};
 /// installer shortcuts in `.github/scripts/windows-installer.iss` — a
 /// mismatch silently splits the identity in two (a unit test checks this).
 pub(crate) const AUMID: &str = "com.github.tty7";
+
+const DEV_AUMID: &str = "com.github.tty7.dev";
+
+fn taskbar_app_id(exe: &Path) -> &'static str {
+    if is_build_output(exe) {
+        DEV_AUMID
+    } else {
+        AUMID
+    }
+}
 
 /// How long we keep using the PowerShell identity after writing the shortcut
 /// ourselves. The shell picks a new `.lnk` up asynchronously and silently
@@ -68,11 +79,15 @@ enum Branding {
 
 fn setup() -> Branding {
     use windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID;
+    let process_id = std::env::current_exe()
+        .as_deref()
+        .map(taskbar_app_id)
+        .unwrap_or(AUMID);
     unsafe {
-        // Branding the process is also what groups the taskbar button under
-        // our own identity, and it is safe everywhere — including the build
-        // directories the shortcut half below refuses to touch.
-        let _ = SetCurrentProcessExplicitAppUserModelID(&windows::core::HSTRING::from(AUMID));
+        // A dev window gets its own taskbar group, which uses the icon in this
+        // executable instead of the installed shortcut's cached icon. Toasts
+        // still use the registered AUMID below; no dev shortcut is written.
+        let _ = SetCurrentProcessExplicitAppUserModelID(&windows::core::HSTRING::from(process_id));
     }
     match decide() {
         Ok(Decision::Branded) => Branding::Ready,
@@ -380,6 +395,7 @@ mod tests {
                 super::has_build_layout(Path::new(exe)),
                 "{exe} should look like a build directory"
             );
+            assert_eq!(super::taskbar_app_id(Path::new(exe)), super::DEV_AUMID);
         }
     }
 
@@ -396,6 +412,7 @@ mod tests {
             let exe = Path::new(exe);
             assert!(!super::has_build_layout(exe), "{} misread", exe.display());
             assert!(!super::is_build_output(exe), "{} misread", exe.display());
+            assert_eq!(super::taskbar_app_id(exe), super::AUMID);
         }
     }
 

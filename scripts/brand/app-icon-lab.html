@@ -33,7 +33,7 @@
 </head>
 <body>
 <h1>App Icon Lab</h1>
-<p class="lead">The directions explored for the fork's app icon, drawn with Canvas on the macOS Big Sur icon grid (824 tile @ 1024, radius 185). A shipped: <code>assets/app-icon.svg</code> is its source of truth, and <code>scripts/brand/render.py</code> renders every raster from it.</p>
+<p class="lead">The directions explored for the fork's app icon, drawn with Canvas on the macOS Big Sur icon grid (824 tile @ 1024, radius 185). B is selected: <code>assets/app-icon.svg</code> is its source of truth, and <code>scripts/brand/render.py</code> updates the raster icons and social card tile.</p>
 <div id="variants"></div>
 
 <script>
@@ -103,9 +103,8 @@ function pane(ctx, x, y, w, h, r, fill, shadow) {
 const VARIANTS = [
   {
     id: 'aurora',
-    title: 'A · Aurora Prompt (shipped)',
+    title: 'A · Aurora Prompt',
     note: 'A dark terminal window on a violet→pink→amber tile: traffic-light dots, a mint-to-cyan prompt and a warm white cursor. Reads as a terminal app and stays legible at 16 px.',
-    // Mirrors assets/app-icon.svg. Change the SVG, then this.
     draw(ctx) {
       tile(ctx, linear(ctx, 100, 100, 924, 924, [[0, '#7B61FF'], [0.55, '#FF5FA2'], [1, '#FFB547']]));
       sheen(ctx, 0.22);
@@ -119,8 +118,9 @@ const VARIANTS = [
   },
   {
     id: 'stack',
-    title: 'B · Session Stack',
-    note: 'Upstream\'s "Duo" panes grown to a stack of three: sessions that outlive the window. Too close to upstream\'s icon to tell the fork apart.',
+    title: 'B · Session Stack (selected)',
+    note: 'Three overlapping sessions on a cream tile, with amber and pink back panes and a green prompt. Selected for the fork.',
+    // Mirrors assets/app-icon.svg. Change the SVG, then this.
     draw(ctx) {
       tile(ctx, '#F5F1E8');
       pane(ctx, 392, 216, 420, 340, 64, '#FFB547');
