@@ -675,6 +675,11 @@ fn settings_search_entries() -> &'static [SearchEntry] {
         },
         SearchEntry {
             section: WindowTabs,
+            title: SettingsSidebarAgentStatusText,
+            keywords: SettingsSearchSidebarAgentStatusTextKeywords,
+        },
+        SearchEntry {
+            section: WindowTabs,
             title: SettingsNotifyOnCommandFinish,
             keywords: SettingsSearchNotifyOnCommandFinishKeywords,
         },
@@ -5849,6 +5854,7 @@ impl Tty7App {
             TabBarPosition::Left => 1,
         };
         let sidebar_diff_preview = cfg.sidebar_diff_preview;
+        let sidebar_agent_status_text = cfg.sidebar_agent_status_text;
         let sidebar_grouping_idx = match cfg.sidebar_grouping {
             crate::core::config::SidebarGrouping::Repo => 0,
             crate::core::config::SidebarGrouping::RepoOrDirectory => 1,
@@ -5961,6 +5967,13 @@ impl Tty7App {
             .checked(sidebar_diff_preview)
             .on_click(cx.listener(|this, on: &bool, _w, cx| this.set_sidebar_diff_preview(*on, cx)))
             .into_any_element();
+        let sidebar_agent_status_switch =
+            crate::ui::theme::switch("wt-sidebar-agent-status-text", cx)
+                .checked(sidebar_agent_status_text)
+                .on_click(cx.listener(|this, on: &bool, _w, cx| {
+                    this.set_sidebar_agent_status_text(*on, cx)
+                }))
+                .into_any_element();
         let sidebar_grouping_radio = self.segmented(
             "wt-sidebar-grouping",
             &[
@@ -6030,6 +6043,12 @@ impl Tty7App {
                 t(L10nKey::SettingsDiffPreviewFromCounts),
                 t(L10nKey::SettingsDiffPreviewFromCountsDesc),
                 sidebar_diff_switch,
+                cx,
+            ))
+            .child(self.settings_row(
+                t(L10nKey::SettingsSidebarAgentStatusText),
+                t(L10nKey::SettingsSidebarAgentStatusTextDesc),
+                sidebar_agent_status_switch,
                 cx,
             ))
             .child(self.section_rule(cx))

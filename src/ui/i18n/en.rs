@@ -574,6 +574,10 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsDiffPreviewFromCountsDesc => {
             "Click a row's +N −N to open the working-tree diff in an overlay. Off leaves the counts visible, just not clickable."
         }
+        L10nKey::SettingsSidebarAgentStatusText => "Show agent status text in sidebar",
+        L10nKey::SettingsSidebarAgentStatusTextDesc => {
+            "Display status words like idle or working in tab rows. Off shows status only through the avatar badge."
+        }
         L10nKey::DocumentDock => "Dock beside terminal",
         L10nKey::DocumentFill => "Fill window",
         L10nKey::SettingsNotifications => "Notifications",
@@ -768,6 +772,9 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsSearchDetectUrlsKeywords => "links hyperlink clickable open",
         L10nKey::SettingsSearchDiffPreviewFromCountsKeywords => {
             "diff overlay preview sidebar counts git changes click branch lines"
+        }
+        L10nKey::SettingsSearchSidebarAgentStatusTextKeywords => {
+            "agent status text words idle working badge sidebar"
         }
         L10nKey::SettingsSearchDimInactivePanesKeywords => {
             "fade unfocused inactive split pane focus opacity highlight active dimming"

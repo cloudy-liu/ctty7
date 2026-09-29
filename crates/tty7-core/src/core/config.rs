@@ -206,6 +206,8 @@ pub struct Config {
     pub sidebar_grouping: SidebarGrouping,
     #[serde(default = "default_true")]
     pub sidebar_diff_preview: bool,
+    #[serde(default = "default_true")]
+    pub sidebar_agent_status_text: bool,
     /// Custom sidebar group titles, keyed by the group's root path — `""`
     /// stands for the Scratch group. A group without an entry keeps the name
     /// derived from its path, and an entry is removed (not blanked) when the
@@ -602,6 +604,7 @@ impl Default for Config {
             scm_graph_expanded: false,
             sidebar_grouping: SidebarGrouping::Repo,
             sidebar_diff_preview: true,
+            sidebar_agent_status_text: true,
             sidebar_group_names: BTreeMap::new(),
             notify_on_command_finish: NotifyMode::Unfocused,
             check_for_updates: true,
@@ -1311,6 +1314,27 @@ mod tests {
         assert!(json.contains("\"sidebar_diff_preview\":false"), "persisted");
         let back: Config = serde_json::from_str(&json).unwrap();
         assert!(!back.sidebar_diff_preview);
+    }
+
+    #[test]
+    fn sidebar_agent_status_text_defaults_on_and_round_trips() {
+        assert!(Config::default().sidebar_agent_status_text);
+
+        let old: Config = serde_json::from_str(r#"{"font_size": 15.0}"#).unwrap();
+        assert!(
+            old.sidebar_agent_status_text,
+            "absent key means today's behaviour"
+        );
+
+        let off: Config = serde_json::from_str(r#"{"sidebar_agent_status_text": false}"#).unwrap();
+        assert!(!off.sidebar_agent_status_text);
+        let json = serde_json::to_string(&off).unwrap();
+        assert!(
+            json.contains("\"sidebar_agent_status_text\":false"),
+            "persisted"
+        );
+        let back: Config = serde_json::from_str(&json).unwrap();
+        assert!(!back.sidebar_agent_status_text);
     }
 
     #[test]

@@ -583,6 +583,10 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsDiffPreviewFromCountsDesc => {
             "行の +N −N をクリックすると、オーバーレイでワーキングツリーの Diff を開きます。オフならカウントは表示されたまま、クリックだけできません"
         }
+        L10nKey::SettingsSidebarAgentStatusText => "サイドバーにエージェント状態テキストを表示",
+        L10nKey::SettingsSidebarAgentStatusTextDesc => {
+            "タブの2行目に idle や working などの状態テキストを表示します。オフにするとアバターのバッジのみで表示されます。"
+        }
         L10nKey::DocumentDock => "ターミナルの隣にドック",
         L10nKey::DocumentFill => "ウィンドウ全体",
         L10nKey::SettingsNotifications => "通知",
@@ -795,6 +799,9 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsSearchDiffPreviewFromCountsKeywords => {
             "diff オーバーレイ プレビュー サイドバー カウント git 変更 クリック ブランチ 行数 diff preview overlay sidebar counts git changes"
+        }
+        L10nKey::SettingsSearchSidebarAgentStatusTextKeywords => {
+            "サイドバーにエージェント状態テキストを表示 エージェント 状態 テキスト idle working バッジ サイドバー agent status text words badge sidebar"
         }
         L10nKey::SettingsSearchDimInactivePanesKeywords => {
             "非アクティブ ペイン 暗く フォーカス 分割 fade unfocused inactive split pane focus opacity highlight active dimming"
