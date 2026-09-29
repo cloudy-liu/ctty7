@@ -2776,9 +2776,64 @@ fn is_update_available(latest: &str, current: &str) -> bool {
 mod tests {
     use super::*;
 
+    fn serve_http_response(mut stream: std::net::TcpStream, response: &str) {
+        use std::io::{BufRead, Write};
+        // Windows inherits the listener's nonblocking mode. Wait for the request
+        // instead of treating WouldBlock as EOF and closing a live connection.
+        stream.set_nonblocking(false).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut request = std::io::BufReader::new(&stream);
+        loop {
+            let mut line = String::new();
+            if request.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
+                break;
+            }
+        }
+        let _ = stream.write_all(response.as_bytes());
+    }
+
+    #[test]
+    fn http_fixture_waits_for_complete_request_headers() {
+        use std::io::{Read, Write};
+        use std::sync::mpsc;
+
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        client.write_all(b"GET / HTTP/1.1\r\n").unwrap();
+        let (entered, ready) = mpsc::channel();
+        let (finished, completion) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            entered.send(()).unwrap();
+            serve_http_response(
+                stream,
+                "HTTP/1.1 204 No Content\r\nConnection: close\r\n\r\n",
+            );
+            finished.send(()).unwrap();
+        });
+        ready.recv_timeout(Duration::from_secs(3)).unwrap();
+        let premature = completion.recv_timeout(Duration::from_millis(100)).is_ok();
+        // Finish and join even on failure so the regression leaves no blocked server.
+        let _ = client.write_all(b"Host: localhost\r\n\r\n");
+        client
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut response = String::new();
+        let read = client.read_to_string(&mut response);
+        server.join().unwrap();
+        assert!(
+            !premature,
+            "fixture replied before the request headers were complete"
+        );
+        read.unwrap();
+        assert!(response.starts_with("HTTP/1.1 204 No Content\r\n"));
+    }
+
     // Exercise discovery with real HTTP responses, without GitHub or user settings.
     fn release_from_http(responses: Vec<String>) -> Result<(LatestRelease, String)> {
-        use std::io::{BufRead, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!(
             "http://{}/old/releases/latest",
@@ -2789,7 +2844,7 @@ mod tests {
         let done = stop.clone();
         let server = std::thread::spawn(move || {
             for response in responses {
-                let mut stream = loop {
+                let stream = loop {
                     match listener.accept() {
                         Ok((stream, _)) => break stream,
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -2801,17 +2856,7 @@ mod tests {
                         Err(e) => panic!("{e}"),
                     }
                 };
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(3)))
-                    .unwrap();
-                let mut request = std::io::BufReader::new(&stream);
-                loop {
-                    let mut line = String::new();
-                    if request.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
-                        break;
-                    }
-                }
-                let _ = stream.write_all(response.as_bytes());
+                serve_http_response(stream, &response);
             }
         });
         let client = build_http_client(None).unwrap();
