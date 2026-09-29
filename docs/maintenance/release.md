@@ -1,6 +1,6 @@
 # ctty7 release runbook
 
-The implementation is tracked in cloudy-liu/tty7#48 and its tickets #49–#52.
+The implementation is tracked in cloudy-liu/ctty7#48 and its tickets #49–#52.
 This runbook prepares publication after the migration PR is merged. It does
 not claim that platform installation or published-asset checks have already run.
 
@@ -9,7 +9,7 @@ not claim that platform installation or published-asset checks have already run.
 1. Merge the reviewed migration PR into this fork. Use the current fork main;
    upstream synchronization and Markdown preview are outside this release.
 2. Require successful Windows, macOS and Linux CI. Track an intermittent Windows
-   hang in cloudy-liu/tty7#45 if it recurs; preserve logs rather than hiding it
+   hang in cloudy-liu/ctty7#45 if it recurs; preserve logs rather than hiding it
    behind unconditional retries.
 3. Run the Release workflow manually on the candidate branch. Manual runs build
    the same platform packages but do not create a GitHub Release or tag.
@@ -20,13 +20,13 @@ not claim that platform installation or published-asset checks have already run.
    subsequent official version can update. Record any unavailable checks.
 5. Check CMD and Clink prompt editing/history, Herdr host application avatars
    with nested agents, agent restoration and WSL/SSH connection setup.
-6. Rename the GitHub repository from cloudy-liu/tty7 to cloudy-liu/ctty7,
-   preserving its fork relationship and history. Update only the `fork` remote
-   to `https://github.com/cloudy-liu/ctty7.git`; keep `origin` as upstream.
-   Update AGENTS.md and the issue-tracker configuration to name the renamed
-   fork, retaining the explicit prohibition on upstream PRs. Existing issue
-   and PR numbers remain on this same repository. Pages was disabled at the
-   migration baseline; check its current setting before assuming no action.
+6. The GitHub repository was renamed from cloudy-liu/tty7 to
+   cloudy-liu/ctty7 on 2026-09-29. Its fork relationship and history remain
+   intact. The `fork` remote now uses
+   `https://github.com/cloudy-liu/ctty7.git`; `origin` remains upstream.
+   AGENTS.md and the issue-tracker configuration name the renamed fork and
+   retain the prohibition on upstream PRs. Existing issue and PR numbers stay
+   on this repository. Pages remains disabled.
 7. Verify the new repository links and update/download endpoints resolve.
    Code and metadata target the new address; do not distribute the candidate
    before that address and its verified release are ready.
@@ -48,8 +48,8 @@ Both the release commit body and GitHub Release notes must:
 - state the integrated branch-line and total Git commit counts;
 - describe the problem and result of every commit, including merge/release
   commits, without counting a merge as another copy of the same feature;
-- use qualified issue references such as cloudy-liu/tty7#46, or the renamed
-  repository's equivalent, and distinguish patch-equivalent history syncs;
+- use qualified issue references such as cloudy-liu/ctty7#46 and distinguish
+  patch-equivalent history syncs;
 - describe inherited capabilities separately from this release's changes and
   link the one-time manual migration guide.
 
