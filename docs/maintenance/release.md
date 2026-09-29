@@ -31,31 +31,30 @@ not claim that platform installation or published-asset checks have already run.
    Code and metadata target the new address; do not distribute the candidate
    before that address and its verified release are ready.
 
-## Version and change ledger
+## Version and release notes
 
 Use a strict `vX.Y.Z` tag matching the workspace version and package metadata.
 The first ctty7 release is v0.1.0. Keep all previous tags and Releases.
 There is one official release channel; no rolling or prerelease channel.
 
-At release preparation time, query the latest published custom release again.
-The current baseline is v26.8.3-c.9. Enumerate the entire range from that tag to
-the intended release commit, including merge and release commits. The baseline
-main 1a88670b had ten commits in that range, but this is not the final count.
+At release preparation time, query the latest published custom release again
+and review the full range from that tag to the intended release commit,
+including merge and release commits, so no change is missed.
 
-Both the release commit body and GitHub Release notes must:
+The GitHub Release notes and the release commit body are written in English
+only, following the format in AGENTS.md:
 
-- name the previous and new tags and their comparison range;
-- state the integrated branch-line and total Git commit counts;
-- describe the problem and result of every commit, including merge/release
-  commits, without counting a merge as another copy of the same feature;
-- use qualified issue references such as cloudy-liu/ctty7#46 and distinguish
-  patch-equivalent history syncs;
-- describe inherited capabilities separately from this release's changes and
-  link the one-time manual migration guide.
+- a one-line summary, then an upgrade note when the user must act, `Highlights`,
+  `Changes` (Added / Changed / Fixed / Internal), `Known limitations` and a
+  `Full changelog` compare link to the previous tag;
+- one line per change, ending with a qualified issue or PR reference such as
+  cloudy-liu/ctty7#46, with no per-commit explanation, commit counts or
+  branch-line counts;
+- patch-equivalent history syncs identified in one line under `Internal`;
+- no inherited capabilities presented as new, and no CI run IDs or checksum
+  detail; link the one-time manual migration guide when it applies.
 
-The migration implementation commit is not the final release-ledger commit.
-Prepare the final ledger only once the merge strategy and release commit are
-known, so counts remain accurate. Future releases follow 0.1.1, 0.1.2, etc.
+Future releases follow 0.1.1, 0.1.2, etc.
 
 ## Build, verify, publish
 
