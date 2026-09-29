@@ -52,6 +52,10 @@ It is independently maintained, forked and modified from
   selectable prompts, keyboard shortcuts and Git diff/status views are built in.
   The bell is off by default.
 
+- **Read Markdown in place.** Open Markdown in preview, switch to source to edit,
+  and install [custom reading themes](docs/customization/markdown-themes.mdx).
+  Paperglow follows the app's light and dark appearance. This feature is unreleased.
+
 ## Install
 
 Download the latest **official Release** from
