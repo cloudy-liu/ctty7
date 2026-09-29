@@ -3057,6 +3057,10 @@ impl Tty7App {
         self.update_config(cx, |cfg| cfg.sidebar_diff_preview = on);
     }
 
+    pub(crate) fn set_sidebar_agent_status_text(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.update_config(cx, |cfg| cfg.sidebar_agent_status_text = on);
+    }
+
     pub(crate) fn toggle_tab_sidebar(&mut self, cx: &mut Context<Self>) {
         let next = match cx.global::<Config>().tab_bar_position {
             TabBarPosition::Top => TabBarPosition::Left,

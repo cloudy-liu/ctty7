@@ -510,6 +510,10 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsDiffPreviewFromCountsDesc => {
             "点击行上的 +N −N 在浮层中打开 worktree diff。关闭后计数仍显示，只是不可点击。"
         }
+        L10nKey::SettingsSidebarAgentStatusText => "在侧栏显示 Agent 状态文本",
+        L10nKey::SettingsSidebarAgentStatusTextDesc => {
+            "在侧栏标签页第二行显示 idle、working 等状态文本。关闭时仅通过头像角标指示状态。"
+        }
         L10nKey::DocumentDock => "停靠在终端旁",
         L10nKey::DocumentFill => "铺满窗口",
         L10nKey::SettingsNotifications => "通知",
@@ -702,6 +706,9 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsSearchDiffPreviewFromCountsKeywords => {
             "从侧栏计数打开 diff 预览 diff 预览 侧栏 git diff preview sidebar counts git changes"
+        }
+        L10nKey::SettingsSearchSidebarAgentStatusTextKeywords => {
+            "在侧栏显示 Agent 状态文本 状态 文本 文字 agent status text words idle working badge sidebar"
         }
         L10nKey::SettingsSearchDimInactivePanesKeywords => {
             "调暗 非活动窗格 淡化 未聚焦 分屏 高亮 active dimming pane focus"

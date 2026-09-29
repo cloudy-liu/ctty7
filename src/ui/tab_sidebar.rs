@@ -304,9 +304,14 @@ impl Tty7App {
                 let meta_size = 0.75 * rem;
                 let title_font = if is_active { &title_font_active } else { &font };
                 // An agent row opens its second line with the status, in the
-                // badge's colour, the way herdr writes `idle · codex`. The
-                // word never elides; whatever follows it gives up the room.
-                let status_word = agent_indicator.map(|s| (s.word(), s.color(cx.theme().sidebar)));
+                // badge's colour, when enabled by configuration. The word never
+                // elides; whatever follows it gives up the room.
+                let show_status_text = cx.global::<Config>().sidebar_agent_status_text;
+                let status_word = if show_status_text {
+                    agent_indicator.map(|s| (s.word(), s.color(cx.theme().sidebar)))
+                } else {
+                    None
+                };
                 let status_w = status_word.map_or(0., |(word, _)| {
                     measure_text(&window.text_system(), &font, meta_size, word)
                         + measure_text(&window.text_system(), &font, meta_size, "·")
