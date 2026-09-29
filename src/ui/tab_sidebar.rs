@@ -20,6 +20,7 @@ use crate::ui::hints::tab_badge_label;
 use crate::ui::i18n::{L10nKey, t, t_fmt};
 use crate::ui::reorder::{self, Reorder, Surface};
 use crate::ui::right_panel::RESIZE_HANDLE_WIDTH;
+use crate::ui::status_indicator::StatusIndicator;
 use crate::ui::tab_strip::{
     DragTab, REORDER_SLIDE_MS, TabAvatar, abbreviate_home, elide_keep_edges, elide_label,
     elide_path_keep_tail, measure_text, strip_host_prefix,
@@ -304,23 +305,39 @@ impl Tty7App {
                 let meta_size = 0.75 * rem;
                 let title_font = if is_active { &title_font_active } else { &font };
                 // An agent row opens its second line with the status, in the
-                // badge's colour, the way herdr writes `idle · codex`. The
-                // word never elides; whatever follows it gives up the room.
+                // badge's colour. The word never elides; whatever follows it
+                // gives up the room.
                 let status_word = agent_indicator.map(|s| (s.word(), s.color(cx.theme().sidebar)));
+                let status_unknown = agent_indicator == Some(StatusIndicator::Unknown);
                 let status_w = status_word.map_or(0., |(word, _)| {
                     measure_text(&window.text_system(), &font, meta_size, word)
-                        + measure_text(&window.text_system(), &font, meta_size, "·")
-                        + 2. * row_metrics::META_GAP
+                        + if status_unknown {
+                            row_metrics::META_GAP
+                        } else {
+                            measure_text(&window.text_system(), &font, meta_size, "·")
+                                + 2. * row_metrics::META_GAP
+                        }
                 });
                 // The `·` only separates: with nothing after it, it goes.
                 let status_lead = |followed: bool| {
                     status_word.map(|(word, colour)| {
                         h_flex()
+                            .id(("sidebar-status", i))
                             .flex_shrink_0()
                             .items_center()
                             .gap_1p5()
                             .child(div().text_color(colour).child(word))
-                            .when(followed, |lead| lead.child(div().child("·")))
+                            .when(followed && !status_unknown, |lead| {
+                                lead.child(div().child("·"))
+                            })
+                            .when(status_unknown, |lead| {
+                                lead.tooltip(|window, cx| {
+                                    gpui_component::tooltip::Tooltip::new(t(
+                                        L10nKey::AgentStatusUnknown,
+                                    ))
+                                    .build(window, cx)
+                                })
+                            })
                     })
                 };
                 // Title: elide the *full* label against the row budget, so a
