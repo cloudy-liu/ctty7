@@ -8528,6 +8528,19 @@ fn tabs_from_session(
     (tabs, active, dropped)
 }
 
+/// Whether a native SSH pane can be attached to by its old id: only when the
+/// server lists it. A failed attach falls through to a fresh *local* shell,
+/// and after a server restart that put the user's own machine behind a tab
+/// that had been — and still looked like — a session on another one. Without
+/// a listing the host is dialled again: a second connection is recoverable,
+/// typing into the wrong machine is not.
+fn native_ssh_pane_alive(
+    alive: Option<&std::collections::HashMap<u64, Option<String>>>,
+    id: u64,
+) -> bool {
+    alive.is_some_and(|alive| alive.contains_key(&id))
+}
+
 fn leaf_shares_the_window_daemon(window_is_remote: bool, leaf_is_native_ssh: bool) -> bool {
     !(window_is_remote && leaf_is_native_ssh)
 }
@@ -8560,7 +8573,11 @@ fn session_to_pane(
                 // Not `pane_attachable`: a dead pane's id is what the restore
                 // is keyed on, so it has to survive being dead. The attach is
                 // still attempted first and still gives way to a fresh spawn.
-                false => (*pane_id).filter(|id| same_daemon && pane_free_for(alive, *id, owner)),
+                false => (*pane_id).filter(|id| {
+                    same_daemon
+                        && pane_free_for(alive, *id, owner)
+                        && (ssh_spec.is_none() || native_ssh_pane_alive(alive, *id))
+                }),
             };
             if restore.is_none() {
                 if let Some(spec) = ssh_spec.clone() {
@@ -9319,8 +9336,8 @@ mod tests {
         CloseReason, DOCUMENT_MIN_W, TERMINAL_MIN_W, TITLE_BAR_HEIGHT, TabAgentBadge,
         TabAgentSession, badge_for_focused_pane, clear_window_override_values, close_prompt,
         document_column_px, join_shell_args, leaf_shares_the_window_daemon, most_urgent_agent_row,
-        mru_order, pane_free_for, parse_ssh_connect_input, parse_ssh_option_words, side_panel_max,
-        split_shell_args, strip_band, wd_path_saveable,
+        mru_order, native_ssh_pane_alive, pane_free_for, parse_ssh_connect_input,
+        parse_ssh_option_words, side_panel_max, split_shell_args, strip_band, wd_path_saveable,
     };
     use gpui::{Edges, point, px, size};
 
@@ -9691,6 +9708,21 @@ mod tests {
         assert!(leaf_shares_the_window_daemon(true, false));
         assert!(leaf_shares_the_window_daemon(false, true));
         assert!(leaf_shares_the_window_daemon(false, false));
+    }
+
+    #[test]
+    fn a_native_ssh_pane_the_server_no_longer_has_is_dialled_again() {
+        let mut alive = std::collections::HashMap::new();
+        alive.insert(4u64, None);
+        assert!(native_ssh_pane_alive(Some(&alive), 4));
+        assert!(
+            !native_ssh_pane_alive(Some(&alive), 9),
+            "gone: dial, don't attach"
+        );
+        assert!(
+            !native_ssh_pane_alive(None, 4),
+            "no listing: dial, don't guess"
+        );
     }
 
     #[test]

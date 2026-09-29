@@ -731,6 +731,11 @@ struct PaneState {
     /// record. See [`crate::core::machine::PaneRecord::osc_title`].
     osc_title: Option<String>,
     shell: ShellState,
+    /// A native SSH pane's connection phase, as last sent. Status frames go
+    /// only to whoever is attached at the time, so a window reattaching to a
+    /// live session learned nothing and drew it as an unknown remote — no
+    /// "connected" dot, and no warning before closing it.
+    ssh_phase: Option<crate::daemon::protocol::SshPhase>,
     /// What this pane is running, for the machine tree to record. Distinct from
     /// `shell` above, which is the shell-integration state.
     shell_spec: Option<ShellSpec>,
@@ -1465,6 +1470,7 @@ impl DaemonPane {
                 cwd: spawn.initial_cwd,
                 osc_title: restored_title,
                 shell: ShellState::default(),
+                ssh_phase: None,
                 shell_spec: spawn.shell.clone(),
                 remote: spawn.remote.clone(),
                 agent: None,
@@ -1699,6 +1705,7 @@ impl DaemonPane {
                     last_exit_code: carried.last_exit,
                     command: None,
                 },
+                ssh_phase: None,
                 remote: carried.remote,
                 agent: carried.agent,
                 foreground_app: carried.foreground_app,
@@ -1752,6 +1759,7 @@ impl DaemonPane {
             cwd: None,
             osc_title: None,
             shell: ShellState::default(),
+            ssh_phase: None,
             remote: Some(remote),
             agent: None,
             foreground_app: None,
@@ -1769,7 +1777,11 @@ impl DaemonPane {
         let broker = {
             let state = state.clone();
             crate::daemon::ssh::PromptBroker::new(Box::new(move |msg: DaemonMsg| {
-                match &state.lock().unwrap().subscriber {
+                let mut st = state.lock().unwrap();
+                if let DaemonMsg::SshStatus { phase } = &msg {
+                    st.ssh_phase = Some(phase.clone());
+                }
+                match &st.subscriber {
                     Some(sub) => sub.send(msg).is_ok(),
                     None => false,
                 }
@@ -2711,6 +2723,11 @@ fn replay_state(st: &PaneState, subscriber: &Sender<DaemonMsg>) {
     }
     if st.remote.is_some() {
         let _ = subscriber.send(DaemonMsg::RemoteContext(st.remote.clone()));
+    }
+    if let Some(phase) = &st.ssh_phase {
+        let _ = subscriber.send(DaemonMsg::SshStatus {
+            phase: phase.clone(),
+        });
     }
     if st.agent.is_some() {
         let _ = subscriber.send(DaemonMsg::Agent(st.agent));
@@ -5176,6 +5193,25 @@ mod tests {
     }
 
     #[test]
+    fn a_window_reattaching_to_an_ssh_pane_learns_it_is_connected() {
+        use crate::daemon::protocol::SshPhase;
+        let mut st = test_state(true);
+        st.ssh_phase = Some(SshPhase::Connected);
+        let (tx, rx) = std::sync::mpsc::channel();
+        replay_state(&st, &tx);
+        drop(tx);
+        assert!(
+            rx.iter().any(|m| matches!(
+                m,
+                DaemonMsg::SshStatus {
+                    phase: SshPhase::Connected
+                }
+            )),
+            "the replay must carry the connection phase"
+        );
+    }
+
+    #[test]
     fn a_title_is_kept_until_it_changes_and_a_reset_clears_it() {
         let mut st = test_state(true);
         apply_signals(
@@ -5888,6 +5924,7 @@ mod tests {
             cwd: None,
             osc_title: None,
             shell: ShellState::default(),
+            ssh_phase: None,
             remote: None,
             agent: None,
             foreground_app: None,
