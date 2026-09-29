@@ -95,15 +95,15 @@ impl StatusIndicator {
     /// for, for a mark that has to bring its own.
     pub const DARK_SURFACE: u32 = 0x1E1E2E;
 
-    /// The word the sidebar writes ahead of a row's second line — herdr's own
-    /// English words in every locale, the way herdr writes them. Herdr writes
-    /// "idle" for unknown too, and leaves the colour to tell them apart.
+    /// The short text before a sidebar row's branch or working directory.
+    /// A missing status gets a neutral mark instead of claiming the agent is idle.
     pub fn word(self) -> &'static str {
         match self {
             StatusIndicator::Blocked => "blocked",
             StatusIndicator::Working => "working",
             StatusIndicator::Done => "done",
-            StatusIndicator::Idle | StatusIndicator::Unknown => "idle",
+            StatusIndicator::Idle => "idle",
+            StatusIndicator::Unknown => "—",
         }
     }
 
@@ -178,8 +178,8 @@ mod tests {
     }
 
     #[test]
-    fn the_sidebar_words_are_herdrs() {
+    fn the_sidebar_distinguishes_unknown_from_idle() {
         let words: Vec<&str> = StatusIndicator::ALL.iter().map(|s| s.word()).collect();
-        assert_eq!(words, ["blocked", "working", "done", "idle", "idle"]);
+        assert_eq!(words, ["blocked", "working", "done", "idle", "—"]);
     }
 }
