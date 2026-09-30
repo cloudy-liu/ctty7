@@ -40,6 +40,9 @@ ctty7 将持久终端会话、本地与远程工作区、Git 操作和编程 Age
 - **日常终端操作。** 内置 Git 状态与差异查看、主题、字体、快捷键、可选择提示符文字和适配主题的
   Agent 头像，默认关闭响铃。
 
+- **直接阅读 Markdown。** 默认打开预览，可切换源码编辑，并安装
+  [自定义阅读主题](docs/customization/markdown-themes.mdx)。Paperglow 跟随应用深浅模式，此功能尚未发布。
+
 ## 下载与安装
 
 从 [cloudy-liu/ctty7 Releases](https://github.com/cloudy-liu/ctty7/releases/latest)

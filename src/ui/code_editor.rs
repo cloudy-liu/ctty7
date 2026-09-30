@@ -42,11 +42,7 @@ pub(crate) struct OpenFile {
     pub(crate) conflict: bool,
     pub(crate) preview: bool,
     pub(crate) wrap: bool,
-    /// The rendered-Markdown pane's own scroll. Per file, so switching away
-    /// and back lands where you were reading — and so the pane can carry the
-    /// scrollbar every other scrolling surface in tty7 has. The editor itself
-    /// gets one from `Input`.
-    pub(crate) preview_scroll: gpui::ScrollHandle,
+    pub(crate) reading: Option<Entity<crate::ui::markdown_preview::MarkdownPreview>>,
     _sub: Subscription,
     _observe: Subscription,
 }
@@ -87,12 +83,15 @@ impl TabCode {
     }
 }
 
+enum EditorNavigation {
+    Source { line: u32, column: u32 },
+    PreviewAnchor(String),
+}
+
 pub(crate) struct EditorPanelState {
-    /// Where to put the cursor once a particular file is on screen, for a
-    /// `file.rs:120:3` that has to load first. Carried rather than applied at
-    /// the call site because opening is asynchronous: the click is long over
-    /// by the time there is a buffer to put a cursor in.
-    pending_cursor: Option<(PathBuf, u32, u32)>,
+    /// Only the latest open request may install a file or move focus. Its
+    /// navigation target travels with the request and is dropped on failure.
+    open_seq: u64,
     watch: Option<Arc<WatchSub>>,
     watch_host: Option<SharedHost>,
     watch_opening: bool,
@@ -127,7 +126,7 @@ impl EditorPanelState {
         })
         .detach();
         Self {
-            pending_cursor: None,
+            open_seq: 0,
             watch: None,
             watch_host: None,
             watch_opening: false,
@@ -441,51 +440,76 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.editor.pending_cursor =
-            line.map(|line| (path.to_path_buf(), line, column.unwrap_or(1)));
-        self.open_file_in_editor(path, window, cx);
+        let Some(host) = self.active_host(cx) else {
+            return;
+        };
+        self.editor_open_with_navigation(
+            host,
+            path,
+            line.map(|line| EditorNavigation::Source {
+                line,
+                column: column.unwrap_or(1),
+            }),
+            window,
+            cx,
+        );
     }
 
-    /// Moves the cursor to the position a link asked for, if the file it asked
-    /// about is the one that just opened. Anything else — a different file
-    /// opened in between, a file that never arrived — drops the request rather
-    /// than throwing the cursor somewhere it was never meant to go.
-    fn apply_pending_cursor(
+    fn apply_editor_navigation(
         &mut self,
         host: HostId,
-        requested: &Path,
         opened: &Path,
+        navigation: Option<EditorNavigation>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        // Peeked before it is taken: another file opening in the meantime must
-        // not swallow a request that was never about it.
-        if self
-            .editor
-            .pending_cursor
-            .as_ref()
-            .is_none_or(|(wanted, ..)| wanted != requested)
-        {
-            return;
-        }
-        let Some((_, line, column)) = self.editor.pending_cursor.take() else {
+        let Some(navigation) = navigation else {
             return;
         };
-        let Some(file) = self.tab_code().and_then(|c| {
+        let Some(file) = self.tab_code_mut().and_then(|c| {
             c.files
-                .iter()
+                .iter_mut()
                 .find(|f| f.host.id() == host && f.path == *opened)
         }) else {
             return;
         };
-        let input = file.input.clone();
-        // The grid counts from one and `Position` counts from zero, and a
-        // compiler that says "line 1" means the first line either way.
-        let position = Position {
-            line: line.saturating_sub(1),
-            character: column.saturating_sub(1),
-        };
-        place_cursor(input, position, CURSOR_SCROLL_ATTEMPTS, window, cx);
+        match navigation {
+            EditorNavigation::Source { line, column } => {
+                let input = file.input.clone();
+                file.preview = false;
+                input.update(cx, |input, cx| input.focus(window, cx));
+                // File links count from one; Position counts from zero.
+                let position = Position {
+                    line: line.saturating_sub(1),
+                    character: column.saturating_sub(1),
+                };
+                place_cursor(input, position, CURSOR_SCROLL_ATTEMPTS, window, cx);
+            }
+            EditorNavigation::PreviewAnchor(anchor) => {
+                if let Some(preview) = &file.reading {
+                    file.preview = true;
+                    preview.update(cx, |preview, cx| preview.navigate_anchor(anchor, cx));
+                    window.focus(&preview.focus_handle(cx), cx);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn editor_open_markdown_link(
+        &mut self,
+        host: SharedHost,
+        path: &Path,
+        fragment: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.editor_open_with_navigation(
+            host,
+            path,
+            fragment.map(EditorNavigation::PreviewAnchor),
+            window,
+            cx,
+        );
     }
 
     pub(crate) fn open_file_in_editor(
@@ -509,16 +533,29 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.editor_open_with_navigation(host, path, None, window, cx);
+    }
+
+    fn editor_open_with_navigation(
+        &mut self,
+        host: SharedHost,
+        path: &Path,
+        navigation: Option<EditorNavigation>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.editor.open_seq = self.editor.open_seq.wrapping_add(1);
+        let open_seq = self.editor.open_seq;
         if self.tabs.get(self.active).is_none() {
             return;
         }
         self.raise_code_overlay();
         if self.editor_activate_open(host.id(), path, window, cx) {
+            self.apply_editor_navigation(host.id(), path, navigation, window, cx);
             return;
         }
         let host_id = host.id();
         let p = path.to_path_buf();
-        let requested = p.clone();
         HostOps::run_in(
             host.clone(),
             window,
@@ -566,15 +603,19 @@ impl Tty7App {
                 })?;
                 Ok((path, text, meta.mtime))
             },
-            move |app, opened, window, cx| match opened {
-                Ok((path, text, mtime)) => {
-                    app.editor_install_file(host, path.clone(), text, mtime, window, cx);
-                    // Against `requested`, not `path`: the host canonicalised
-                    // it on the way through, and a link that named a symlink
-                    // would otherwise lose the line it asked for.
-                    app.apply_pending_cursor(host_id, &requested, &path, window, cx);
+            move |app, opened, window, cx| {
+                if app.editor.open_seq != open_seq {
+                    return;
                 }
-                Err(message) => window.push_notification(message, cx),
+                match opened {
+                    Ok((path, text, mtime)) => {
+                        app.editor_install_file(host, path.clone(), text, mtime, window, cx);
+                        // Apply this request to the canonical path returned by
+                        // its Host, including when the link named a symlink.
+                        app.apply_editor_navigation(host_id, &path, navigation, window, cx);
+                    }
+                    Err(message) => window.push_notification(message, cx),
+                }
             },
         );
     }
@@ -601,7 +642,6 @@ impl Tty7App {
         code.files.insert(0, f);
         code.active = 0;
         self.focus_editor(window, cx);
-        self.apply_pending_cursor(host, path, path, window, cx);
         cx.notify();
         true
     }
@@ -657,6 +697,18 @@ impl Tty7App {
                 }
             }
         });
+        let app = cx.weak_entity();
+        let reading = (language == "markdown").then(|| {
+            cx.new(|cx| {
+                crate::ui::markdown_preview::MarkdownPreview::new(
+                    input.clone(),
+                    host.clone(),
+                    path.clone(),
+                    app,
+                    cx,
+                )
+            })
+        });
         let tab = self
             .tabs
             .get_mut(self.active)
@@ -677,9 +729,9 @@ impl Tty7App {
                 save_then_close: false,
                 reload_seq: 0,
                 conflict: false,
-                preview: false,
+                preview: reading.is_some(),
                 wrap: false,
-                preview_scroll: gpui::ScrollHandle::new(),
+                reading,
                 _sub: sub,
                 _observe: observe,
             },
@@ -741,8 +793,25 @@ impl Tty7App {
 
     fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(f) = self.tab_code().and_then(|c| c.active_file()) {
-            f.input.update(cx, |input, cx| input.focus(window, cx));
+            if f.preview
+                && let Some(reading) = &f.reading
+            {
+                reading.read(cx).focus_handle(cx).focus(window, cx);
+            } else {
+                f.input.update(cx, |input, cx| input.focus(window, cx));
+            }
         }
+    }
+
+    pub(crate) fn editor_toggle_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(code) = self.tab_code_mut() {
+            let ix = code.active;
+            if let Some(file) = code.files.get_mut(ix).filter(|f| f.reading.is_some()) {
+                file.preview = !file.preview;
+            }
+        }
+        self.focus_editor(window, cx);
+        cx.notify();
     }
 
     pub(crate) fn editor_has_focus(&self, window: &Window, cx: &Context<Self>) -> bool {
@@ -751,10 +820,19 @@ impl Tty7App {
                 .tab_code()
                 .and_then(|c| c.active_file())
                 .is_some_and(|f| {
-                    f.input
-                        .read(cx)
-                        .focus_handle(cx)
-                        .contains_focused(window, cx)
+                    if f.preview {
+                        f.reading.as_ref().is_some_and(|reading| {
+                            reading
+                                .read(cx)
+                                .focus_handle(cx)
+                                .contains_focused(window, cx)
+                        })
+                    } else {
+                        f.input
+                            .read(cx)
+                            .focus_handle(cx)
+                            .contains_focused(window, cx)
+                    }
                 })
     }
 
@@ -1093,31 +1171,10 @@ impl Tty7App {
         let body = match self.tab_code().and_then(|c| c.active_file()) {
             None => self.render_editor_empty(cx).into_any_element(),
             Some(f) if f.preview => {
-                let markdown = f.input.read(cx).text().to_string();
-                let scroll = f.preview_scroll.clone();
-                // The bar's wrapper takes its height from `flex_1`, so it needs
-                // a column with a definite height to grow inside — hand it one
-                // rather than dropping it straight into the overlay, or the
-                // pane sizes to its content and there is nothing left to
-                // scroll.
-                v_flex()
-                    .size_full()
-                    .child(crate::ui::scrollbar::with_vertical_scrollbar(
-                        "editor-md-preview-scrollbar",
-                        div()
-                            .id("editor-md-preview")
-                            .size_full()
-                            .overflow_y_scroll()
-                            .track_scroll(&scroll)
-                            .px_4()
-                            .py_3()
-                            .child(gpui_component::text::TextView::markdown(
-                                "editor-md-preview-body",
-                                markdown,
-                            )),
-                        &scroll,
-                    ))
-                    .into_any_element()
+                let reading = f.reading.as_ref().expect("Markdown preview state").clone();
+                let revision = f.edit_seq;
+                reading.update(cx, |reading, cx| reading.sync(revision, cx));
+                reading.into_any_element()
             }
             Some(f) => {
                 let input = f.input.clone();
@@ -1296,7 +1353,7 @@ impl Tty7App {
             }
         });
         let active = code.and_then(|c| c.active_file());
-        let cursor: Option<SharedString> = active.map(|f| {
+        let cursor: Option<SharedString> = active.filter(|f| !f.preview).map(|f| {
             let pos = f.input.read(cx).cursor_position();
             t_fmt(
                 L10nKey::EditorLnCol,
@@ -1307,7 +1364,7 @@ impl Tty7App {
             )
             .into()
         });
-        let wrap: Option<bool> = active.map(|f| f.wrap);
+        let wrap: Option<bool> = active.filter(|f| !f.preview).map(|f| f.wrap);
         let is_markdown = active.is_some_and(|f| language_for_path(&f.path) == "markdown");
         let preview = active.is_some_and(|f| f.preview);
 
@@ -1336,14 +1393,8 @@ impl Tty7App {
                         })
                         .custom(crate::ui::tab_strip::chrome_tile_variant(cx))
                         .xsmall()
-                        .on_click(cx.listener(|this, _, _w, cx| {
-                            if let Some(code) = this.tab_code_mut() {
-                                let ix = code.active;
-                                if let Some(f) = code.files.get_mut(ix) {
-                                    f.preview = !f.preview;
-                                    cx.notify();
-                                }
-                            }
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.editor_toggle_preview(window, cx)
                         })),
                 )
             })
@@ -1440,6 +1491,531 @@ impl Tty7App {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::{TestAppContext, VisualTestContext};
+
+    fn markdown_window(cx: &mut TestAppContext) -> (Entity<Tty7App>, VisualTestContext) {
+        let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
+        app.update_in(&mut vcx, |app, _, cx| {
+            crate::ui::markdown_preview::init(Default::default(), cx);
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = app.tabs.len() - 1;
+            cx.notify();
+        });
+        (app, vcx)
+    }
+
+    fn wait_for_markdown(
+        vcx: &mut VisualTestContext,
+        mut ready: impl FnMut(&mut VisualTestContext) -> bool,
+    ) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            vcx.run_until_parked();
+            if ready(vcx) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "Markdown operation did not settle"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn markdown_opens_in_preview_and_preserves_edit_undo_save_and_focus(cx: &mut TestAppContext) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("README.MARKDOWN");
+        let original = "# Reading\n\nThe source buffer owns this text.\n";
+        std::fs::write(&path, original).unwrap();
+        let host: SharedHost = tty7_core::host::local::LocalHost::new();
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_open_on_host(host, &path, window, cx)
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            app.read_with(cx, |app, _| {
+                app.tab_code().is_some_and(|code| !code.files.is_empty())
+            })
+        });
+        let (input, reading) = app.update_in(&mut vcx, |app, window, cx| {
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(file.preview);
+            assert!(!file.dirty);
+            assert!(
+                file.reading
+                    .as_ref()
+                    .unwrap()
+                    .focus_handle(cx)
+                    .is_focused(window)
+            );
+            assert!(!file.input.focus_handle(cx).is_focused(window));
+            (file.input.clone(), file.reading.clone().unwrap())
+        });
+        vcx.simulate_keystrokes("x backspace secondary-v secondary-z");
+        assert_eq!(
+            input.read_with(&vcx, |input, _| input.text().to_string()),
+            original
+        );
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_toggle_preview(window, cx)
+        });
+        vcx.simulate_keystrokes("x");
+        let edited = input.read_with(&vcx, |input, _| input.text().to_string());
+        assert_ne!(edited, original);
+        let cursor = input.read_with(&vcx, |input, _| input.cursor_position());
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_toggle_preview(window, cx)
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        reading.read_with(&vcx, |preview, cx| {
+            assert_eq!(preview.text.read(cx).source().as_ref(), edited)
+        });
+        app.read_with(&vcx, |app, _| {
+            assert!(app.tab_code().unwrap().active_file().unwrap().dirty)
+        });
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            original,
+            "mode switches must not save"
+        );
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_toggle_preview(window, cx)
+        });
+        assert_eq!(
+            input.read_with(&vcx, |input, _| input.cursor_position()),
+            cursor
+        );
+        vcx.simulate_keystrokes("secondary-z");
+        assert_eq!(
+            input.read_with(&vcx, |input, _| input.text().to_string()),
+            original,
+            "undo must survive the preview round trip"
+        );
+        vcx.simulate_keystrokes("y");
+        let saved = input.read_with(&vcx, |input, _| input.text().to_string());
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_toggle_preview(window, cx)
+        });
+        vcx.simulate_keystrokes("secondary-s");
+        wait_for_markdown(&mut vcx, |cx| {
+            app.read_with(cx, |app, _| {
+                app.tab_code()
+                    .unwrap()
+                    .active_file()
+                    .is_some_and(|file| !file.dirty && file.saving.is_none())
+            })
+        });
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+        app.update_in(&mut vcx, |app, window, cx| {
+            assert!(app.editor_close_active_if_focused(window, cx));
+            assert!(app.tab_code().unwrap().files.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn markdown_reactivation_keeps_mode_but_explicit_line_navigation_opens_source(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, mut vcx) = markdown_window(cx);
+        let host: SharedHost = tty7_core::host::local::LocalHost::new();
+        let path = PathBuf::from("/markdown-tests/first.md");
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                host.clone(),
+                path.clone(),
+                "# First\n\nText\n".into(),
+                None,
+                window,
+                cx,
+            );
+            app.editor_toggle_preview(window, cx);
+            app.editor_install_file(
+                host.clone(),
+                "/markdown-tests/source.rs".into(),
+                "fn main() {}".into(),
+                None,
+                window,
+                cx,
+            );
+            assert!(!app.tab_code().unwrap().active_file().unwrap().preview);
+            assert!(app.editor_activate_open(host.id(), &path, window, cx));
+            assert!(!app.tab_code().unwrap().active_file().unwrap().preview);
+            app.editor_toggle_preview(window, cx);
+            app.open_file_in_editor_at(&path, Some(3), Some(2), window, cx);
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(!file.preview);
+            assert!(file.input.focus_handle(cx).is_focused(window));
+            app.editor_close_file(0, window, cx);
+            app.editor_install_file(host, path, "# Reopened".into(), None, window, cx);
+            assert!(app.tab_code().unwrap().active_file().unwrap().preview);
+        });
+    }
+
+    #[gpui::test]
+    fn markdown_failed_anchor_does_not_override_later_source_navigation(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guide.md");
+        let host: SharedHost = tty7_core::host::local::LocalHost::new();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_open_markdown_link(host, &path, Some("intro".into()), window, cx);
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            cx.update(|window, cx| {
+                !gpui_component::Root::read(window, cx)
+                    .notification
+                    .read(cx)
+                    .notifications()
+                    .is_empty()
+            })
+        });
+        std::fs::write(&path, "# Intro\n\nTarget line\n").unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.open_file_in_editor_at(&path, Some(3), Some(2), window, cx);
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            app.read_with(cx, |app, _| {
+                app.tab_code().is_some_and(|code| !code.files.is_empty())
+            })
+        });
+        app.update_in(&mut vcx, |app, window, cx| {
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(!file.preview);
+            assert!(file.input.focus_handle(cx).is_focused(window));
+            assert_eq!(
+                file.input.read(cx).cursor_position(),
+                Position {
+                    line: 2,
+                    character: 1
+                }
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn markdown_newer_source_request_supersedes_an_inflight_anchor(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guide.md");
+        std::fs::write(&path, "# Intro\n\nTarget line\n").unwrap();
+        let host: SharedHost = tty7_core::host::local::LocalHost::new();
+        // Both requests start before the UI executor can deliver either Host
+        // result. The last click must choose source, regardless of read order.
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_open_markdown_link(host, &path, Some("intro".into()), window, cx);
+            app.open_file_in_editor_at(&path, Some(3), Some(2), window, cx);
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            app.read_with(cx, |app, _| {
+                app.tab_code().is_some_and(|code| !code.files.is_empty())
+            })
+        });
+        app.update_in(&mut vcx, |app, window, cx| {
+            let code = app.tab_code().unwrap();
+            assert_eq!(code.files.len(), 1);
+            let file = code.active_file().unwrap();
+            assert!(!file.preview);
+            assert!(file.input.focus_handle(cx).is_focused(window));
+            assert_eq!(
+                file.input.read(cx).cursor_position(),
+                Position {
+                    line: 2,
+                    character: 1
+                }
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn markdown_platform_keys_scroll_without_changing_source(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let content = "# Heading\n\nParagraph.\n\n".repeat(80);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/markdown-tests/keys.md".into(),
+                content.clone(),
+                None,
+                window,
+                cx,
+            );
+        });
+        for _ in 0..3 {
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        }
+        let reading = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .clone()
+                .unwrap()
+        });
+        let (end, home) = if cfg!(target_os = "macos") {
+            ("cmd-down", "cmd-up")
+        } else {
+            ("ctrl-end", "ctrl-home")
+        };
+        vcx.simulate_keystrokes(end);
+        reading.read_with(&vcx, |reading, _| {
+            assert!(reading.scroll.max_offset().y > px(0.));
+            assert_eq!(reading.scroll.offset().y, -reading.scroll.max_offset().y);
+        });
+        vcx.simulate_keystrokes(home);
+        assert_eq!(
+            reading.read_with(&vcx, |reading, _| reading.scroll.offset().y),
+            px(0.)
+        );
+        vcx.simulate_keystrokes("pagedown");
+        assert!(reading.read_with(&vcx, |reading, _| reading.scroll.offset().y) < px(0.));
+        vcx.simulate_keystrokes("secondary-a secondary-c");
+        reading.read_with(&vcx, |reading, cx| {
+            assert!(reading.text.read(cx).selected_text().contains("Paragraph."));
+        });
+        app.read_with(&vcx, |app, cx| {
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(!file.dirty);
+            assert_eq!(file.input.read(cx).text().to_string(), content);
+        });
+    }
+
+    #[gpui::test]
+    fn markdown_theme_reload_preserves_document_selection_and_scroll(cx: &mut TestAppContext) {
+        use crate::core::{config::Config, markdown_theme};
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let theme_path = dir.path().join("study.yaml");
+        let yaml = "schema_version: 1\nid: study\nname: Study\nlight: {link: '#123456'}\ndark: {link: '#654321'}\n";
+        std::fs::write(&theme_path, yaml).unwrap();
+        let host: SharedHost = tty7_core::host::local::LocalHost::new();
+        let content = (0..80)
+            .map(|n| format!("## Section {n}\n\nReading paragraph {n}.\n\n"))
+            .collect::<String>();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.set_theme_follow_system(false, window, cx);
+            app.set_preset("light", window, cx);
+            crate::ui::markdown_preview::apply_snapshot(markdown_theme::scan(Some(dir.path())), cx);
+            app.editor_install_file(
+                host,
+                "/markdown-tests/theme.md".into(),
+                content.clone(),
+                None,
+                window,
+                cx,
+            );
+        });
+        vcx.run_until_parked();
+        let reading = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .clone()
+                .unwrap()
+        });
+        let text = reading.read_with(&vcx, |reading, _| reading.text.clone());
+        // The first frame measures the viewport; the next applies its compact
+        // or wide layout. Establish selection only after that resize, as a
+        // user does in an already visible document.
+        for _ in 0..2 {
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            vcx.run_until_parked();
+        }
+        text.update(&mut vcx, |text, cx| text.select_all(cx));
+        reading.update(&mut vcx, |reading, cx| {
+            reading.scroll.set_offset(gpui::point(px(0.), px(-300.)));
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let selected = text.read_with(&vcx, |text, cx| {
+            assert_eq!(
+                cx.global::<gpui_component::Theme>().mode,
+                gpui_component::ThemeMode::Light
+            );
+            let selected = text.selected_text();
+            assert!(selected.contains("Section 79"));
+            selected
+        });
+        let before = reading.read_with(&vcx, |reading, _| reading.scroll.offset());
+        assert!(before.y < px(0.));
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.set_markdown_theme("study", cx);
+            app.set_preset("dark", window, cx);
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(
+            reading.read_with(&vcx, |reading, _| reading.scroll.offset()),
+            before
+        );
+        text.read_with(&vcx, |text, cx| {
+            assert_eq!(
+                cx.global::<gpui_component::Theme>().mode,
+                gpui_component::ThemeMode::Dark
+            );
+            assert_eq!(text.source().as_ref(), content);
+            assert_eq!(text.selected_text(), selected);
+        });
+        std::fs::write(&theme_path, "invalid: [").unwrap();
+        vcx.update(|_, cx| {
+            crate::ui::markdown_preview::apply_snapshot(markdown_theme::scan(Some(dir.path())), cx);
+            assert_eq!(cx.global::<Config>().markdown_theme, "study");
+            assert_eq!(crate::ui::markdown_preview::current(cx).theme.id, "study");
+        });
+        std::fs::write(&theme_path, yaml.replace("#654321", "#abcdef")).unwrap();
+        vcx.update(|_, cx| {
+            crate::ui::markdown_preview::apply_snapshot(markdown_theme::scan(Some(dir.path())), cx)
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(
+            reading.read_with(&vcx, |reading, _| reading.scroll.offset()),
+            before
+        );
+        text.read_with(&vcx, |text, _| {
+            assert_eq!(text.source().as_ref(), content);
+            assert_eq!(text.selected_text(), selected);
+        });
+        app.read_with(&vcx, |app, _| {
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert_eq!(
+                file.reading.as_ref().unwrap().entity_id(),
+                reading.entity_id()
+            );
+            assert!(file.preview);
+            assert!(!file.dirty);
+        });
+    }
+
+    #[gpui::test]
+    fn markdown_document_links_scroll_to_the_requested_heading_and_keep_reading_position(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("guide.md");
+        let content = (0..80)
+            .map(|n| format!("## Section {n}\n\nReading paragraph {n}.\n\n"))
+            .collect::<String>();
+        std::fs::write(&path, &content).unwrap();
+        let host: SharedHost = tty7_core::host::local::LocalHost::new();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_open_markdown_link(
+                host.clone(),
+                &path,
+                Some("section-30".into()),
+                window,
+                cx,
+            )
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            app.read_with(cx, |app, _| {
+                app.tab_code().is_some_and(|code| !code.files.is_empty())
+            })
+        });
+        for _ in 0..4 {
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            vcx.run_until_parked();
+        }
+        let reading = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .clone()
+                .unwrap()
+        });
+        reading.read_with(&vcx, |reading, cx| {
+            let target = reading.text.read(cx).anchor_bounds("section-30").unwrap();
+            assert!(
+                (target.top() - reading.scroll.bounds().top() - px(12.)).abs() < px(1.),
+                "anchor should be at the top of the reading viewport: {target:?}, viewport {:?}, offset {:?}", reading.scroll.bounds(), reading.scroll.offset()
+            );
+            assert!(reading.scroll.offset().y < px(-300.));
+        });
+
+        // A package that changes typography should retain the visible paragraph,
+        // even though its absolute pixel offset changes after layout.
+        let position = reading.read_with(&vcx, |reading, cx| {
+            reading
+                .text
+                .read(cx)
+                .reading_position(reading.scroll.bounds().top())
+                .unwrap()
+        });
+        std::fs::write(dir.path().join("large.yaml"), "schema_version: 1\nid: large\nname: Large\ntypography: {font_size: 22, heading_sizes: [42, 36, 30, 27, 24, 22]}\nlight: {}\ndark: {}\n").unwrap();
+        app.update_in(&mut vcx, |app, _, cx| {
+            crate::ui::markdown_preview::apply_snapshot(
+                crate::core::markdown_theme::scan(Some(dir.path())),
+                cx,
+            );
+            app.set_markdown_theme("large", cx);
+        });
+        for _ in 0..4 {
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            vcx.run_until_parked();
+        }
+        let updated = reading.read_with(&vcx, |reading, cx| {
+            reading
+                .text
+                .read(cx)
+                .reading_position(reading.scroll.bounds().top())
+                .unwrap()
+        });
+        assert_eq!(updated.0, position.0);
+        assert!((updated.1 - position.1).abs() < px(1.));
+
+        // A fragment can also bring an already-open source editor back to its
+        // existing preview, without creating a second source buffer.
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_toggle_preview(window, cx);
+            app.editor_open_markdown_link(host, &path, Some("section-10".into()), window, cx);
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            app.read_with(cx, |app, _| {
+                app.tab_code().unwrap().active_file().unwrap().preview
+            })
+        });
+        for _ in 0..4 {
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            vcx.run_until_parked();
+        }
+        app.read_with(&vcx, |app, _| {
+            assert_eq!(app.tab_code().unwrap().files.len(), 1)
+        });
+        reading.read_with(&vcx, |reading, cx| {
+            let target = reading.text.read(cx).anchor_bounds("section-10").unwrap();
+            assert!((target.top() - reading.scroll.bounds().top() - px(12.)).abs() < px(1.));
+        });
+    }
 
     #[test]
     fn language_map_covers_common_extensions() {
@@ -1452,6 +2028,9 @@ mod tests {
             ("CMakeLists.txt", "cmake"),
             (".zshrc", "bash"),
             ("notes.md", "markdown"),
+            ("notes.MD", "markdown"),
+            ("notes.markdown", "markdown"),
+            ("notes.MARKDOWN", "markdown"),
             ("query.SQL", "sql"),
             ("unknown.xyz", "text"),
             ("no_ext", "text"),
