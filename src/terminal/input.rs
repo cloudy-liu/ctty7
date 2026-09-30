@@ -173,8 +173,29 @@ fn encode_kitty(ks: &gpui::Keystroke, kitty: KeyFlags) -> Option<Vec<u8>> {
         return Some(csi_u(code, mods, None));
     }
 
+    // F3 is the one function key the kitty protocol does not share with
+    // terminfo. Its first version allowed both `CSI R` and `CSI 13~`, then
+    // dropped the letter form outright: `CSI 1;2R` is also a Cursor Position
+    // Report for row 1, column 2, so a client that negotiated the protocol
+    // cannot tell Shift+F3 from an answer to its own DSR. The table gives F3
+    // as `CSI 13~` alone -- the VT220 `kf3` -- so that is what an app that
+    // asked for the protocol is told, while the legacy path below keeps the
+    // `\EOR` our `$TERM` spells.
+    if ks.key.as_str() == "f3" {
+        let s = if mods == 1 {
+            "\x1b[13~".to_string()
+        } else {
+            format!("\x1b[13;{mods}~")
+        };
+        return Some(s.into_bytes());
+    }
+
     if let Some(seq) = functional_key(ks.key.as_str(), mods, kitty.app_cursor()) {
         return Some(seq);
+    }
+
+    if let Some(code) = kitty_function_key(ks.key.as_str()) {
+        return Some(csi_u(code, mods, None));
     }
 
     let modified = m.control || m.alt;
@@ -281,6 +302,8 @@ enum FunctionKey {
 /// A physical F13 therefore has no encoding of its own under this `$TERM`;
 /// sending the VT220 `\E[25~` for it would hand ncurses a sequence its own
 /// table reads back as Shift+F1, which is worse than sending nothing.
+/// `kitty_function_key` picks them up for the one protocol that *can* name
+/// them without that clash.
 fn function_key(key: &str) -> Option<FunctionKey> {
     Some(match key {
         "f1" => FunctionKey::Ss3('P'),
@@ -299,11 +322,24 @@ fn function_key(key: &str) -> Option<FunctionKey> {
     })
 }
 
-/// Whether a key name is one `functional_key` turns into a function-key
-/// sequence. The inline editor asks this to know a keystroke it holds no
-/// meaning for but the shell does.
+/// `f13`..`f24`, encodable only once the kitty protocol is negotiated. Kitty
+/// gives them codepoints of its own in the private use area — `CSI 57376 u` is
+/// F13, up to `CSI 57387 u` for F24 — so the ambiguity that stops
+/// `function_key` at F12 does not arise: nothing else in that protocol spells
+/// 57376. An app that never asked for the protocol still gets nothing, because
+/// there is nothing in `xterm-256color` to send it.
+fn kitty_function_key(key: &str) -> Option<u32> {
+    let n: u32 = key.strip_prefix('f')?.parse().ok()?;
+    (13..=24).contains(&n).then(|| 57376 + (n - 13))
+}
+
+/// Whether a key name is one of the function keys — the range that means
+/// nothing to a text editor and everything to a shell. The inline editor asks
+/// this to know a keystroke it holds no meaning for but the shell does; it
+/// still only hands over what actually encodes, which for F13 and up is the
+/// kitty path alone.
 pub(crate) fn is_function_key(key: &str) -> bool {
-    function_key(key).is_some()
+    function_key(key).is_some() || kitty_function_key(key).is_some()
 }
 
 fn text_key_code(ks: &gpui::Keystroke) -> Option<u32> {
@@ -858,23 +894,106 @@ mod tests {
     /// The `mods` parameter is what makes F13 onwards ambiguous: in
     /// `xterm-256color` those capability names are already spoken for by the
     /// modified F1..F8, so a physical F13 has no sequence of its own to send.
+    ///
+    /// The kitty protocol has no such clash — it puts F13..F24 in the private
+    /// use area, `CSI 57376 u` upwards — so a client that negotiated it does
+    /// get those keys, and only those twelve: F25 is past the end of the range
+    /// gpui names.
     #[test]
-    fn function_keys_stop_at_f12() {
+    fn terminfo_stops_at_f12_and_kitty_carries_on_to_f24() {
         let none = Modifiers::default();
+        let shift = Modifiers {
+            shift: true,
+            ..Default::default()
+        };
         let ctrl = Modifiers {
             control: true,
             ..Default::default()
         };
-        for key in ["f13", "f14", "f20", "f24"] {
-            assert_eq!(legacy(&ks(none, key, None)), None, "{key} is unencodable");
+        let kitty_cases: &[(&str, &[u8])] = &[
+            ("f13", b"\x1b[57376u"),
+            ("f14", b"\x1b[57377u"),
+            ("f20", b"\x1b[57383u"),
+            ("f24", b"\x1b[57387u"),
+        ];
+        for (key, seq) in kitty_cases {
             assert_eq!(
-                keystroke_to_bytes(&ks(none, key, None), kitty()),
+                legacy(&ks(none, key, None)),
                 None,
-                "{key} is unencodable under kitty too"
+                "{key} has no terminfo capability"
             );
+            assert_eq!(
+                keystroke_to_bytes(&ks(none, key, None), kitty()).as_deref(),
+                Some(*seq),
+                "{key} under kitty"
+            );
+            assert_eq!(
+                keystroke_to_bytes(&ks(none, key, None), kitty().with_win32_input(true)).as_deref(),
+                Some(*seq),
+                "{key} under kitty with ConPTY win32 input enabled"
+            );
+            assert_eq!(keystroke_to_bytes(&ks(none, key, None), win32()), None);
         }
+        assert_eq!(
+            keystroke_to_bytes(&ks(shift, "f13", None), kitty()),
+            Some(b"\x1b[57376;2u".to_vec())
+        );
         // Ctrl+F13 must not fold into a C0 byte on its first letter either.
         assert_eq!(legacy(&ks(ctrl, "f13", None)), None);
+        // And the range ends where gpui's names do.
+        assert_eq!(keystroke_to_bytes(&ks(none, "f25", None), kitty()), None);
+        assert_eq!(legacy(&ks(none, "f25", None)), None);
+    }
+
+    /// The one function key where the two protocols disagree. Kitty's spec
+    /// allowed `CSI R` for F3 in its first version and then removed it,
+    /// because `CSI 1;2R` is also a Cursor Position Report for row 1, column
+    /// 2 — so a client that negotiated the protocol is given `CSI 13~`, the
+    /// VT220 `kf3`, while `$TERM`'s own `kf3=\EOR` still goes to everyone
+    /// else. alacritty draws the same line.
+    #[test]
+    fn kitty_spells_f3_thirteen_because_csi_r_is_a_cursor_report() {
+        let none = Modifiers::default();
+        let shift = Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        let ctrl = Modifiers {
+            control: true,
+            ..Default::default()
+        };
+        assert_eq!(legacy(&ks(none, "f3", None)), Some(b"\x1bOR".to_vec()));
+        assert_eq!(legacy(&ks(shift, "f3", None)), Some(b"\x1b[1;2R".to_vec()));
+        let full = KeyFlags {
+            disambiguate: true,
+            report_all_keys: true,
+            report_text: true,
+            ..Default::default()
+        };
+        for flags in [kitty(), full, kitty().with_win32_input(true)] {
+            assert_eq!(
+                keystroke_to_bytes(&ks(none, "f3", None), flags),
+                Some(b"\x1b[13~".to_vec())
+            );
+            assert_eq!(
+                keystroke_to_bytes(&ks(shift, "f3", None), flags),
+                Some(b"\x1b[13;2~".to_vec())
+            );
+            assert_eq!(
+                keystroke_to_bytes(&ks(ctrl, "f3", None), flags),
+                Some(b"\x1b[13;5~".to_vec())
+            );
+        }
+        // Cmd is not a kitty modifier either, and the platform key sends the
+        // keystroke down the legacy path in the first place.
+        let cmd = Modifiers {
+            platform: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            keystroke_to_bytes(&ks(cmd, "f3", None), kitty()),
+            Some(b"\x1bOR".to_vec())
+        );
     }
 
     /// Cmd is not an xterm modifier, so it must not turn a bare F-key into a
@@ -1250,7 +1369,9 @@ mod tests {
     /// The kitty encoder shares `functional_key`, so the F keys have to come
     /// out of it byte-identical to the legacy path — kitty's own spec keeps
     /// the legacy CSI/SS3 forms for F1..F12 and only appends the modifier
-    /// parameter, which is what that shared table already does.
+    /// parameter, which is what that shared table already does. F3 is the sole
+    /// exception and has a test of its own:
+    /// `kitty_spells_f3_thirteen_because_csi_r_is_a_cursor_report`.
     ///
     /// `report_all_keys` changes nothing here either: the F keys are already
     /// escape sequences, so there is no bare byte for it to promote.
@@ -1271,7 +1392,7 @@ mod tests {
             report_text: true,
             ..Default::default()
         };
-        for key in ["f1", "f2", "f3", "f4", "f5", "f7", "f10", "f11", "f12"] {
+        for key in ["f1", "f2", "f4", "f5", "f7", "f10", "f11", "f12"] {
             for mods in [none, shift, ctrl] {
                 let want = legacy(&ks(mods, key, None));
                 assert!(want.is_some(), "{key} encodes on the legacy path");
