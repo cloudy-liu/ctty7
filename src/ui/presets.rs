@@ -653,7 +653,7 @@ fn legible_accent(bg: u32, accent: u32) -> u32 {
     legible_ink(bg, accent, ACCENT_FLOOR)
 }
 
-fn legible_foreground(bg: u32, fg: u32) -> u32 {
+pub(crate) fn legible_foreground(bg: u32, fg: u32) -> u32 {
     if contrast(bg, fg) >= 4.5 {
         return fg;
     }
