@@ -158,6 +158,15 @@ impl Tty7App {
         document_column_px(self.document_body_px(window, cx), self.document_ratio.get())
     }
 
+    /// macOS's docked title bar belongs to the terminal column, so its chrome
+    /// would move by the document's width when filling. Give both layouts the
+    /// same window corner; other platforms already span the docked title bar.
+    pub(crate) fn document_chrome_in_corner(&self, window: &Window, cx: &gpui::App) -> bool {
+        self.document_front().is_some()
+            && !self.right_panel_open(cx)
+            && (cfg!(target_os = "macos") || self.document_dock_px(window, cx).is_none())
+    }
+
     /// With a narrow workspace, the document actions and window controls
     /// cannot share one row. Keep the document header below the window chrome
     /// rather than hide its controls or collapse the session sidebar.
@@ -961,6 +970,10 @@ mod gpui_tests {
             let entry = vcx
                 .debug_bounds("titlebar-right-panel")
                 .expect("the original entry is visible");
+            assert!(
+                entry.left() >= px(1600. - crate::ui::tab_strip::trailing_chrome_w()),
+                "the panel entry stays in the window corner, outside the terminal column"
+            );
             let fill = vcx
                 .debug_bounds("document-fill-toggle")
                 .expect("both document headers have fill");

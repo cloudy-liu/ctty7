@@ -7410,14 +7410,10 @@ impl Render for Tty7App {
         let bg_image = window_background_image_layer(cx);
         let settings_bg = crate::ui::theme::overlay_background(cx);
 
-        // A filled document covers the underlying title bar. Keep its existing
-        // right-panel entry, app menu, and window controls above that document,
-        // at their usual window-relative position. With the panel open, this
-        // corner already sits outside the document overlay.
-        let document_corner = (self.document_front().is_some()
-            && document_dock_px.is_none()
-            && !self.right_panel_open(cx))
-        .then(|| {
+        // Keep the existing chrome above filled documents, and outside macOS's
+        // terminal-only title bar when docked, at one window-relative position.
+        // An open panel already owns the chrome outside the document.
+        let document_corner = self.document_chrome_in_corner(window, cx).then(|| {
             div()
                 .absolute()
                 .top_0()

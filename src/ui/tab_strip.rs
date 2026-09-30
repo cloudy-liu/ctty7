@@ -1859,9 +1859,7 @@ impl Tty7App {
         });
 
         let panel_open = self.right_panel_open(cx);
-        let document_corner = !panel_open
-            && self.document_front().is_some()
-            && self.document_dock_px(window, cx).is_none();
+        let document_corner = self.document_chrome_in_corner(window, cx);
         let right_chrome = (!document_corner && (!panel_open || !cfg!(target_os = "macos")))
             .then(|| self.window_chrome(window, cx));
 

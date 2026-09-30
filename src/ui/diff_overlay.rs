@@ -529,7 +529,7 @@ impl Tty7App {
             .pl(px(lead))
             .pr(px(crate::ui::app::tile_trailing_inset()))
             .when(
-                !chrome.is_dock() && !self.right_panel_open(cx) && !below_chrome,
+                chrome.renders_own_header() && !self.right_panel_open(cx) && !below_chrome,
                 |row| {
                     row.pr(px(crate::ui::app::tile_trailing_inset()
                         + crate::ui::tab_strip::trailing_chrome_w()))
