@@ -20,7 +20,6 @@ use crate::ui::hints::tab_badge_label;
 use crate::ui::i18n::{L10nKey, t, t_fmt};
 use crate::ui::reorder::{self, Reorder, Surface};
 use crate::ui::right_panel::RESIZE_HANDLE_WIDTH;
-use crate::ui::status_indicator::StatusIndicator;
 use crate::ui::tab_strip::{
     DragTab, REORDER_SLIDE_MS, TabAvatar, abbreviate_home, elide_keep_edges, elide_label,
     elide_path_keep_tail, measure_text, strip_host_prefix,
@@ -309,20 +308,15 @@ impl Tty7App {
                 // elides; whatever follows it gives up the room.
                 let show_status_text = cx.global::<Config>().sidebar_agent_status_text;
                 let status_word = if show_status_text {
-                    agent_indicator.map(|s| (s.word(), s.color(cx.theme().sidebar)))
+                    agent_indicator
+                        .and_then(|s| s.word().map(|word| (word, s.color(cx.theme().sidebar))))
                 } else {
                     None
                 };
-                let status_unknown =
-                    show_status_text && agent_indicator == Some(StatusIndicator::Unknown);
                 let status_w = status_word.map_or(0., |(word, _)| {
                     measure_text(&window.text_system(), &font, meta_size, word)
-                        + if status_unknown {
-                            row_metrics::META_GAP
-                        } else {
-                            measure_text(&window.text_system(), &font, meta_size, "·")
-                                + 2. * row_metrics::META_GAP
-                        }
+                        + measure_text(&window.text_system(), &font, meta_size, "·")
+                        + 2. * row_metrics::META_GAP
                 });
                 // The `·` only separates: with nothing after it, it goes.
                 let status_lead = |followed: bool| {
@@ -333,17 +327,7 @@ impl Tty7App {
                             .items_center()
                             .gap_1p5()
                             .child(div().text_color(colour).child(word))
-                            .when(followed && !status_unknown, |lead| {
-                                lead.child(div().child("·"))
-                            })
-                            .when(status_unknown, |lead| {
-                                lead.tooltip(|window, cx| {
-                                    gpui_component::tooltip::Tooltip::new(t(
-                                        L10nKey::AgentStatusUnknown,
-                                    ))
-                                    .build(window, cx)
-                                })
-                            })
+                            .when(followed, |lead| lead.child(div().child("·")))
                     })
                 };
                 // Title: elide the *full* label against the row budget, so a
@@ -545,8 +529,8 @@ impl Tty7App {
                                 != full.as_ref()
                         });
                 }
-                // Outside a repo an agent row still owes its status a line,
-                // even when the cwd was dropped as a copy of the title.
+                // Outside a repo a known status still gets a line, even when
+                // the cwd was dropped as a copy of the title.
                 let cwd_line = git_line
                     .is_none()
                     .then(|| {
