@@ -1,3 +1,4 @@
+mod adaptive_colors;
 pub(crate) mod agent_marks;
 mod agent_restore;
 mod boxdraw;

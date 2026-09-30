@@ -508,7 +508,7 @@ fn channel_distance(a: u32, b: u32) -> u32 {
     d(16).max(d(8)).max(d(0))
 }
 
-fn contrast(a: u32, b: u32) -> f32 {
+pub(crate) fn contrast(a: u32, b: u32) -> f32 {
     let (l1, l2) = (relative_luminance(a), relative_luminance(b));
     let (hi, lo) = if l1 >= l2 { (l1, l2) } else { (l2, l1) };
     (hi + 0.05) / (lo + 0.05)

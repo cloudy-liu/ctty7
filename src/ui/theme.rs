@@ -578,7 +578,6 @@ pub(crate) fn apply_theme(mut window: Option<&mut Window>, cx: &mut App) {
     let surfaces = theme.surfaces();
     let sem = theme.semantics();
     let active = theme.active_palette(config.theme_legible_palette);
-
     let backdrop = config.window_backdrop;
 
     if let Some(window) = window.as_deref_mut() {

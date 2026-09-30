@@ -18,7 +18,7 @@ use gpui_component::ActiveTheme as _;
 use super::view::{TerminalView, should_show_context_menu};
 use crate::core::config::Config;
 
-const DIM_OPACITY: f32 = 0.66;
+pub(super) const DIM_OPACITY: f32 = 0.66;
 
 #[derive(Clone, Copy, PartialEq, Default, Debug)]
 enum UnderlineKind {
@@ -171,7 +171,19 @@ fn snapshot_cell(
 
     let inverse = flags.contains(Flags::INVERSE);
     let (mut fgc, _) = resolve(cell.fg, palette, colors.fg_rgb, colors.bg_rgb);
-    let (bgc, bg_default) = resolve(cell.bg, palette, colors.fg_rgb, colors.bg_rgb);
+    let (mut bgc, bg_default) = resolve(cell.bg, palette, colors.fg_rgb, colors.bg_rgb);
+    if let Some(adapter) = &colors.adaptive {
+        if !bg_default {
+            bgc = unpack_rgb(adapter.background(pack_rgb(bgc)));
+        }
+        if !flags.contains(Flags::HIDDEN) {
+            fgc = unpack_rgb(adapter.foreground(
+                pack_rgb(fgc),
+                pack_rgb(bgc),
+                flags.contains(Flags::DIM),
+            ));
+        }
+    }
     let (fgc, bgc, draw_bg) = if inverse {
         (bgc, fgc, true)
     } else {
@@ -275,6 +287,7 @@ fn match_tint(cx: &gpui::App) -> u32 {
 }
 
 struct PaintColors {
+    adaptive: Option<std::rc::Rc<super::adaptive_colors::AdaptiveColors>>,
     default_fg: Hsla,
     default_bg: Hsla,
     caret: Hsla,
@@ -414,6 +427,10 @@ impl PaintColors {
             current_target,
         )));
         Self {
+            adaptive: cx
+                .global::<Config>()
+                .theme_legible_palette
+                .then(|| std::rc::Rc::new(super::adaptive_colors::AdaptiveColors::new(bg_packed))),
             default_fg,
             default_bg,
             caret,
@@ -436,6 +453,7 @@ impl PaintColors {
     /// dim the named colours twice.
     fn dimmed(&self, dim: f32, under: Rgba) -> Self {
         Self {
+            adaptive: self.adaptive.clone(),
             default_fg: blend_toward(self.default_fg, dim, under),
             default_bg: blend_toward(self.default_bg, dim, under),
             caret: blend_toward(self.caret, dim, under),
@@ -2135,6 +2153,7 @@ mod tests {
 
     fn caret_colors() -> PaintColors {
         PaintColors {
+            adaptive: None,
             default_fg: to_hsla(Rgb {
                 r: 17,
                 g: 17,
@@ -3070,6 +3089,7 @@ mod tests {
             c
         };
         PaintColors {
+            adaptive: None,
             default_fg: to_hsla(fg),
             default_bg: to_hsla(bg),
             caret: to_hsla(fg),
@@ -3079,6 +3099,200 @@ mod tests {
             fg_rgb: fg,
             bg_rgb: bg,
         }
+    }
+
+    #[gpui::test]
+    fn cached_terminal_fills_follow_theme_without_an_agent(cx: &mut gpui::TestAppContext) {
+        crate::core::config::pin_test_config_dir();
+        let mut term = alacritty_terminal::Term::new(
+            alacritty_terminal::term::Config::default(),
+            &crate::terminal::size::TermSize::new(80, 24),
+            alacritty_terminal::event::VoidListener,
+        );
+        let mut parser: alacritty_terminal::vte::ansi::Processor =
+            alacritty_terminal::vte::ansi::Processor::new();
+        // Actual Cursor Agent and Codex fills, plus colors neither emits.
+        parser.advance(&mut term, b"\x1b[39;48;2;242;242;242mC\x1b[48;2;244;244;244mO\x1b[48;2;241;245;249mX\x1b[48;5;255mI");
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            let mut config = Config::default();
+            config.theme_preset = "one_dark_pro".into();
+            cx.set_global(config);
+            crate::ui::theme::apply_theme(None, cx);
+            let palette = super::super::palette::build();
+            let colors = PaintColors::resolve(cx.theme(), cx);
+            for col in 0..4 {
+                let point = AlacPoint::new(AlacLine(0), AlacColumn(col));
+                let rc = snapshot_cell(&term.grid()[point], point, &palette, &colors, None);
+                assert!(
+                    Rgba::from(rc.bg).r < 0.5,
+                    "unidentified app cell {col} retained a light fill"
+                );
+                assert!(painted_contrast(&rc) >= 4.45);
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn terminal_theme_round_trips_cover_rgb_indexed_dim_and_syntax(cx: &mut gpui::TestAppContext) {
+        crate::core::config::pin_test_config_dir();
+        let mut term = alacritty_terminal::Term::new(
+            alacritty_terminal::term::Config::default(),
+            &crate::terminal::size::TermSize::new(80, 24),
+            alacritty_terminal::event::VoidListener,
+        );
+        let mut parser: alacritty_terminal::vte::ansi::Processor =
+            alacritty_terminal::vte::ansi::Processor::new();
+        // Cursor and Codex captures, arbitrary surfaces, ANSI/indexed fills,
+        // faint placeholders, and explicit syntax ink in one unchanged grid.
+        parser.advance(&mut term, b"\x1b[39;48;2;242;242;242mC\x1b[48;2;244;244;244mO\x1b[48;2;241;245;249mX\x1b[48;5;255mI\r\n\
+            \x1b[39;48;2;65;69;76mD\x1b[48;5;236mI\x1b[40mN\x1b[47mW\r\n\
+            \x1b[39;48;2;242;242;242m\x1b[2mA\x1b[48;2;65;69;76mB\x1b[22m\
+            \x1b[38;2;77;118;111;48;2;218;251;225mG\x1b[38;2;104;109;124;48;2;255;235;233mR");
+        let palette = super::super::palette::build();
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(Config::default());
+            let mut snapshots = Vec::new();
+            for id in ["one_dark_pro", "light", "one_dark_pro"] {
+                cx.global_mut::<Config>().theme_preset = id.into();
+                crate::ui::theme::apply_theme(None, cx);
+                let colors = PaintColors::resolve(cx.theme(), cx);
+                let dark = id == "one_dark_pro";
+                let mut snapshot = Vec::new();
+                for row in 0..3 {
+                    for col in 0..4 {
+                        let point = AlacPoint::new(AlacLine(row), AlacColumn(col));
+                        let rc = snapshot_cell(&term.grid()[point], point, &palette, &colors, None);
+                        assert_eq!(
+                            Rgba::from(rc.bg).r < 0.5,
+                            dark,
+                            "{id} cell {row}:{col} has stale fill"
+                        );
+                        assert!(
+                            painted_contrast(&rc) >= 4.45,
+                            "{id} cell {row}:{col} has unreadable text: {}",
+                            painted_contrast(&rc)
+                        );
+                        snapshot.push((rc.fg, rc.bg));
+                    }
+                }
+                snapshots.push(snapshot);
+            }
+            assert_eq!(
+                snapshots[0], snapshots[2],
+                "round trips must not accumulate color drift"
+            );
+        });
+        assert_eq!(
+            term.grid()[AlacPoint::new(AlacLine(0), AlacColumn(0))].bg,
+            AnsiColor::Spec(unpack_rgb(0xf2f2f2)),
+            "rendering must not rewrite terminal output"
+        );
+    }
+
+    fn painted_contrast(cell: &RenderCell) -> f32 {
+        let fg = Rgba::from(cell.fg);
+        let bg = Rgba::from(cell.bg);
+        let luminance = |rgb: [f32; 3]| {
+            let c = rgb.map(|v| {
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            });
+            c[0] * 0.2126 + c[1] * 0.7152 + c[2] * 0.0722
+        };
+        let ink = luminance([
+            fg.r * fg.a + bg.r * (1.0 - fg.a),
+            fg.g * fg.a + bg.g * (1.0 - fg.a),
+            fg.b * fg.a + bg.b * (1.0 - fg.a),
+        ]);
+        let fill = luminance([bg.r, bg.g, bg.b]);
+        (ink.max(fill) + 0.05) / (ink.min(fill) + 0.05)
+    }
+
+    #[gpui::test]
+    fn terminal_color_correction_can_be_disabled_and_preserves_cell_semantics(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        crate::core::config::pin_test_config_dir();
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            let mut config = Config::default();
+            config.theme_preset = "one_dark_pro".into();
+            config.theme_legible_palette = false;
+            cx.set_global(config);
+            crate::ui::theme::apply_theme(None, cx);
+            let palette = super::super::palette::build();
+            let point = AlacPoint::new(AlacLine(0), AlacColumn(0));
+            let literal = PaintColors::resolve(cx.theme(), cx);
+            for bg in [
+                AnsiColor::Spec(unpack_rgb(0xf2f2f2)),
+                AnsiColor::Spec(unpack_rgb(0x123456)),
+                AnsiColor::Indexed(255),
+                AnsiColor::Named(NamedColor::White),
+            ] {
+                let cell = Cell {
+                    c: 'x',
+                    fg: AnsiColor::Spec(unpack_rgb(0x111111)),
+                    bg,
+                    ..Cell::default()
+                };
+                let rc = snapshot_cell(&cell, point, &palette, &literal, None);
+                assert_eq!(rc.fg, to_hsla(unpack_rgb(0x111111)));
+                assert_eq!(
+                    rc.bg,
+                    to_hsla(resolve(bg, &palette, literal.fg_rgb, literal.bg_rgb).0)
+                );
+                let default_ink = Cell {
+                    fg: AnsiColor::Named(NamedColor::Foreground),
+                    ..cell
+                };
+                let rc = snapshot_cell(&default_ink, point, &palette, &literal, None);
+                assert_eq!(
+                    rc.fg,
+                    to_hsla(literal.fg_rgb),
+                    "literal mode must bypass default-ink correction too"
+                );
+            }
+            cx.global_mut::<Config>().theme_legible_palette = true;
+            crate::ui::theme::apply_theme(None, cx);
+            let colors = PaintColors::resolve(cx.theme(), cx);
+            let mut cell = Cell {
+                c: 'x',
+                bg: AnsiColor::Spec(unpack_rgb(0xf2f2f2)),
+                ..Cell::default()
+            };
+            let normal = snapshot_cell(&cell, point, &palette, &colors, None);
+            cell.flags = Flags::INVERSE;
+            let inverse = snapshot_cell(&cell, point, &palette, &colors, None);
+            assert_eq!((inverse.fg, inverse.bg), (normal.bg, normal.fg));
+            cell.flags = Flags::HIDDEN;
+            let hidden = snapshot_cell(&cell, point, &palette, &colors, None);
+            assert_eq!(hidden.fg, hidden.bg);
+            cell.flags = Flags::empty();
+            let range = SelectionRange::new(point, point, false);
+            let selected = snapshot_cell(&cell, point, &palette, &colors, Some(&range));
+            assert!(selected.selected);
+            assert_eq!((selected.fg, selected.bg), (normal.fg, normal.bg));
+            let dimmed = snapshot_cell(
+                &cell,
+                point,
+                &palette,
+                &colors.dimmed(0.5, Rgba::default()),
+                None,
+            );
+            assert_eq!(
+                (dimmed.fg, dimmed.bg),
+                (normal.fg, normal.bg),
+                "pane dimming must happen after cell resolution"
+            );
+            cell.bg = AnsiColor::Named(NamedColor::Background);
+            let default = snapshot_cell(&cell, point, &palette, &colors, None);
+            assert!(!default.draw_bg);
+        });
     }
 
     #[test]
