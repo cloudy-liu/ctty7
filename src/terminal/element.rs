@@ -177,6 +177,17 @@ fn snapshot_cell(
     } else {
         if flags.contains(Flags::HIDDEN) {
             fgc = bgc;
+        } else if cell.fg == AnsiColor::Named(NamedColor::Foreground)
+            && matches!(cell.bg, AnsiColor::Spec(_))
+        {
+            // TUIs can cache a theme-derived RGB fill across a theme change
+            // while leaving their text on SGR 39 (the live default). Resolve
+            // that terminal-owned ink against the fill actually being painted.
+            // Explicit foregrounds, inverse and concealed cells stay literal.
+            fgc = unpack_rgb(crate::ui::presets::legible_foreground(
+                pack_rgb(bgc),
+                pack_rgb(fgc),
+            ));
         }
         (fgc, bgc, !bg_default)
     };
@@ -3068,6 +3079,125 @@ mod tests {
             fg_rgb: fg,
             bg_rgb: bg,
         }
+    }
+
+    #[test]
+    fn codex_cached_background_keeps_default_prompt_text_readable() {
+        let mut term = alacritty_terminal::Term::new(
+            alacritty_terminal::term::Config::default(),
+            &crate::terminal::size::TermSize::new(80, 24),
+            alacritty_terminal::event::VoidListener,
+        );
+        let mut parser: alacritty_terminal::vte::ansi::Processor =
+            alacritty_terminal::vte::ansi::Processor::new();
+        // Captured from the reported Codex 0.159.2 pane: default foreground,
+        // cached One Dark Pro composer background, and a dim placeholder.
+        parser.advance(&mut term, b"\x1b[39;48;2;65;69;76m\x1b[2mAsk Codex");
+        let point = AlacPoint::new(AlacLine(0), AlacColumn(0));
+        let colors = test_colors();
+        let rc = snapshot_cell(
+            &term.grid()[point],
+            point,
+            &super::super::palette::build(),
+            &colors,
+            None,
+        );
+        assert_eq!(rc.c, 'A');
+        assert_eq!(
+            rc.bg,
+            to_hsla(Rgb {
+                r: 65,
+                g: 69,
+                b: 76
+            })
+        );
+        assert_eq!(rc.fg.a, DIM_OPACITY);
+        let fg = Rgba::from(rc.fg);
+        let bg = Rgba::from(rc.bg);
+        let luminance = |rgb: [f32; 3]| {
+            let linear = rgb.map(|v| {
+                if v <= 0.04045 {
+                    v / 12.92
+                } else {
+                    ((v + 0.055) / 1.055).powf(2.4)
+                }
+            });
+            linear[0] * 0.2126 + linear[1] * 0.7152 + linear[2] * 0.0722
+        };
+        let ink = luminance([
+            fg.r * fg.a + bg.r * (1.0 - fg.a),
+            fg.g * fg.a + bg.g * (1.0 - fg.a),
+            fg.b * fg.a + bg.b * (1.0 - fg.a),
+        ]);
+        let surface = luminance([bg.r, bg.g, bg.b]);
+        let contrast = (ink.max(surface) + 0.05) / (ink.min(surface) + 0.05);
+        assert!(
+            contrast >= 4.5,
+            "dim composer text contrast is {contrast}:1"
+        );
+    }
+
+    #[test]
+    fn default_ink_adapts_in_both_theme_directions_but_authored_colors_do_not() {
+        let palette = super::super::palette::build();
+        let point = AlacPoint::new(AlacLine(0), AlacColumn(0));
+        let mut colors = test_colors();
+        let dark = Rgb {
+            r: 65,
+            g: 69,
+            b: 76,
+        };
+        let light = Rgb {
+            r: 244,
+            g: 244,
+            b: 244,
+        };
+        let mut cell = Cell {
+            c: 'x',
+            bg: AnsiColor::Spec(light),
+            ..Cell::default()
+        };
+        let render =
+            |cell: &Cell, colors: &PaintColors| snapshot_cell(cell, point, &palette, colors, None);
+        assert_eq!(
+            render(&cell, &colors).fg,
+            colors.default_fg,
+            "readable light theme is unchanged"
+        );
+        colors.fg_rgb = Rgb {
+            r: 240,
+            g: 240,
+            b: 240,
+        };
+        assert_eq!(
+            render(&cell, &colors).fg,
+            to_hsla(Rgb { r: 0, g: 0, b: 0 }),
+            "cached light fill on a dark theme gets dark ink"
+        );
+        cell.bg = AnsiColor::Spec(dark);
+        assert_eq!(
+            render(&cell, &colors).fg,
+            to_hsla(colors.fg_rgb),
+            "readable dark theme is unchanged"
+        );
+        colors = test_colors();
+        for fg in [AnsiColor::Spec(colors.fg_rgb), AnsiColor::Indexed(0)] {
+            cell.fg = fg;
+            assert_eq!(
+                render(&cell, &colors).fg,
+                to_hsla(resolve(fg, &palette, colors.fg_rgb, colors.bg_rgb).0),
+                "authored ink stays literal"
+            );
+        }
+        cell.fg = AnsiColor::Named(NamedColor::Foreground);
+        cell.flags = Flags::HIDDEN;
+        assert_eq!(render(&cell, &colors).fg, render(&cell, &colors).bg);
+        cell.flags = Flags::INVERSE;
+        assert_eq!(render(&cell, &colors).fg, to_hsla(dark));
+        assert_eq!(render(&cell, &colors).bg, colors.default_fg);
+        cell.flags = Flags::empty();
+        cell.bg = AnsiColor::Named(NamedColor::Background);
+        assert_eq!(render(&cell, &colors).fg, colors.default_fg);
     }
 
     #[test]
