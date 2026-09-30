@@ -468,7 +468,9 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSyncWithSystem => "跟随系统",
         L10nKey::SettingsSyncWithSystemDesc => "跟随操作系统外观，并分别使用浅色与深色主题。",
         L10nKey::SettingsLegiblePalette => "低对比度颜色纠偏",
-        L10nKey::SettingsLegiblePaletteDesc => "自动把主题背景上对比度不足的颜色调整到可读级别。",
+        L10nKey::SettingsLegiblePaletteDesc => {
+            "让终端底色跟随深浅主题，并保持文字可读。关闭后保留程序原色。"
+        }
         L10nKey::SettingsChangeTheme => "更换主题",
         L10nKey::SettingsThemes => "主题",
         L10nKey::SettingsThemesCloseTooltip => "关闭主题面板 (Esc)",

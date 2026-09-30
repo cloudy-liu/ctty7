@@ -579,10 +579,6 @@ pub(crate) fn apply_theme(mut window: Option<&mut Window>, cx: &mut App) {
     let sem = theme.semantics();
     let active = theme.active_palette(config.theme_legible_palette);
     let backdrop = config.window_backdrop;
-    cx.set_global(crate::terminal::codex_colors::CodexPalette::new(
-        presets::all(cx).into_iter().map(|t| t.background_color()),
-        m.background,
-    ));
 
     if let Some(window) = window.as_deref_mut() {
         let appearance = resolved_background_appearance(backdrop, blur);

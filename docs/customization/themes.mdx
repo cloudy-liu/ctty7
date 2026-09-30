@@ -29,12 +29,23 @@ the OS live — no restart, no reload.
 }
 ```
 
-## Legible bright colours
+## Readable terminal colours
 
-Some palettes put a bright ANSI colour so close to their own background that it
-disappears. **Legible bright colors** (on by default) brightens or darkens those
-just enough to be readable. Turn it off with `theme_legible_palette: false` if
-you want the palette exactly as authored.
+**Readable terminal colors** is on by default. It keeps text readable on its
+painted background and adapts terminal fills whose light/dark appearance
+conflicts with the current theme. This also handles applications that cache
+RGB or indexed colours when they start, including programs inside a host
+application. It does not depend on agent detection.
+
+Same-appearance fills retain their colour. Opposite-appearance soft fills move
+near the theme background while retaining their hue and chroma; saturated
+colours are constrained by the RGB gamut. Dim text is included in the contrast
+calculation. Already readable text retains its colour.
+
+Explicit terminal colours carry no indication of whether they are cached UI
+colours or deliberate artwork. Turn this off with `theme_legible_palette: false`
+when exact application colours matter. The underlying terminal output and
+scrollback are never rewritten.
 
 ## Transparency
 

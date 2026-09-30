@@ -527,9 +527,9 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsSyncWithSystemDesc => {
             "Follow the OS appearance with separate light and dark themes."
         }
-        L10nKey::SettingsLegiblePalette => "Legible bright colors",
+        L10nKey::SettingsLegiblePalette => "Readable terminal colors",
         L10nKey::SettingsLegiblePaletteDesc => {
-            "Automatically brighten or darken bright ANSI colors that would be unreadable on the theme background."
+            "Adapt terminal backgrounds to light/dark themes and keep text readable. Turn off to preserve application colors."
         }
         L10nKey::SettingsChangeTheme => "Change theme",
         L10nKey::SettingsThemes => "Themes",
