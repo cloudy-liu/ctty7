@@ -8,8 +8,9 @@
 //! the highest-priority rule that matches names the state.
 //!
 //! The manifests in `assets/agent-detection/` are herdr's own, copied without
-//! changes (Apache-2.0; see the README there). The matcher and region
-//! functions below follow herdr's `src/detect/manifest.rs`, because a manifest
+//! changes except for tty7's Codex ready-prompt rule (Apache-2.0; see the
+//! README there). The matcher and region functions below follow herdr's
+//! `src/detect/manifest.rs`, because a manifest
 //! means only what its engine makes it mean.
 
 use std::sync::OnceLock;
@@ -123,8 +124,7 @@ fn hooks_are_authority(agent: CLIAgent) -> bool {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct ScreenStatus {
     /// `None` is herdr's unknown: the screen is up, but nothing on it names a
-    /// state. Codex at its prompt reads this way, since its manifest has no
-    /// idle rule.
+    /// state. A Codex screen without a recognizable prompt/footer reads this way.
     pub(crate) status: Option<AgentStatus>,
     /// A rule backed the reading, rather than herdr's default for a screen
     /// with nothing on it the manifest recognises.
@@ -736,6 +736,55 @@ mod tests {
     }
 
     #[test]
+    fn codex_159_visible_prompt_is_idle_and_finishes_work() {
+        let prompt = "› Ask Codex to do anything\n\n  GPT-6-Astra xhigh · D:\\gh-prj\\tty7 · Context 4% used · Fast on\n  ← for agents · ? for shortcuts\n";
+        let ready = screen(CLIAgent::Codex, prompt);
+        assert_eq!(ready.state, ScreenState::Idle);
+        assert!(ready.visible_idle);
+        let mut tracker = Tracker::default();
+        tracker.apply(screen(
+            CLIAgent::Codex,
+            "• Working (2s • esc to interrupt)\n› \n",
+        ));
+        assert_eq!(tracker.status().unwrap().status, Some(AgentStatus::Working));
+        tracker.apply(screen(
+            CLIAgent::Codex,
+            &format!("• Result\n\n  Worked for 52s • 14:19\n\n{prompt}"),
+        ));
+        assert_eq!(tracker.status().unwrap().status, Some(AgentStatus::Done));
+    }
+
+    #[test]
+    fn codex_ready_footer_does_not_override_work_or_approval() {
+        let prompt = "›\n  ? for shortcuts\n";
+        assert_eq!(screen(CLIAgent::Codex, prompt).state, ScreenState::Idle);
+        assert_eq!(
+            screen(
+                CLIAgent::Codex,
+                &format!("• Working (2s • esc to interrupt)\n{prompt}")
+            )
+            .state,
+            ScreenState::Working
+        );
+        assert_eq!(
+            screen(CLIAgent::Codex, &format!("{prompt}allow command?\n")).state,
+            ScreenState::Blocked
+        );
+        assert_eq!(
+            screen(
+                CLIAgent::Codex,
+                "› old prompt\n• Response still streaming\n  ? for shortcuts\n"
+            )
+            .state,
+            ScreenState::Unknown
+        );
+        assert_eq!(
+            screen(CLIAgent::Codex, "  ? for shortcuts\n").state,
+            ScreenState::Unknown
+        );
+    }
+
+    #[test]
     fn every_manifest_parses_and_compiles() {
         for agent in CLIAgent::ALL {
             if let Some(source) = manifest_source(agent) {
@@ -841,7 +890,7 @@ mod tests {
         }
     }
 
-    /// Codex's prompt: no rule matches, and its fallback is unknown.
+    /// An incomplete Codex prompt without the ready footer has no matching rule.
     const CODEX_PROMPT: Reading = Reading {
         state: ScreenState::Unknown,
         matched: false,
@@ -960,9 +1009,9 @@ mod tests {
     }
 
     #[test]
-    fn codex_back_at_its_prompt_reads_unknown_as_herdr_shows_it() {
+    fn codex_incomplete_prompt_remains_unknown() {
         // Codex boots behind a spinner in its title, then sits at a prompt that
-        // its manifest has no rule for.
+        // lacks enough evidence for the ready-prompt rule.
         let mut t = Tracker::default();
         t.apply(reading(ScreenState::Working, false));
         t.apply(CODEX_PROMPT);

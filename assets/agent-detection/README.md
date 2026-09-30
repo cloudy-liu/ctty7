@@ -2,8 +2,10 @@
 
 These TOML files come from [herdr](https://github.com/herdrdev/herdr)
 (`src/detect/manifests/`, commit `c411883ec639`), licensed under the Apache
-License 2.0. They are copied without changes, so updating them means copying
-them again. `copilot.toml` is herdr's `github-copilot.toml`, renamed after
+License 2.0. `codex.toml` adds tty7's `ready_prompt` rule for the visible
+input prompt and shortcuts footer; preserve this extension when updating
+the upstream rules. The other manifests are copied unchanged.
+`copilot.toml` is herdr's `github-copilot.toml`, renamed after
 tty7's slug.
 
 Each file lists rules that classify a coding agent's pane as `working`,
