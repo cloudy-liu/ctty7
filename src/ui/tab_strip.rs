@@ -989,36 +989,40 @@ impl Tty7App {
             .pr(px(tile_trailing_inset()))
             .when(!cfg!(target_os = "macos"), |this| this.pr_1())
             .child(
-                div().occlude().flex_shrink_0().child(
-                    chrome_tile(
-                        Button::new("titlebar-right-panel")
-                            .icon(Icon::empty().path("icons/panel-right.svg")),
-                        false,
-                        cx,
-                    )
-                    .rounded_lg()
-                    .tooltip(chord_hint(
-                        match panel_open {
-                            true => t(L10nKey::TabTooltipHideDetailPanel),
-                            false => t(L10nKey::TabTooltipShowDetailPanel),
-                        },
-                        "ToggleRightPanel",
-                        cx,
-                    ))
-                    // On macOS this tile is drawn inside the panel's own
-                    // titlebar while the panel is open, so closing from it
-                    // destroys the element holding the focus — and a keymap
-                    // scoped to a focused thing goes quiet with it, leaving the
-                    // ⌘J that would undo this doing nothing. Hand the terminal
-                    // back what it lost, the same way the tab tiles below do.
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        let closing = this.right_panel_open(cx);
-                        this.toggle_right_panel(cx);
-                        if closing {
-                            this.focus_active(window, cx);
-                        }
-                    })),
-                ),
+                div()
+                    .debug_selector(|| "titlebar-right-panel".into())
+                    .occlude()
+                    .flex_shrink_0()
+                    .child(
+                        chrome_tile(
+                            Button::new("titlebar-right-panel")
+                                .icon(Icon::empty().path("icons/panel-right.svg")),
+                            false,
+                            cx,
+                        )
+                        .rounded_lg()
+                        .tooltip(chord_hint(
+                            match panel_open {
+                                true => t(L10nKey::TabTooltipHideDetailPanel),
+                                false => t(L10nKey::TabTooltipShowDetailPanel),
+                            },
+                            "ToggleRightPanel",
+                            cx,
+                        ))
+                        // On macOS this tile is drawn inside the panel's own
+                        // titlebar while the panel is open, so closing from it
+                        // destroys the element holding the focus — and a keymap
+                        // scoped to a focused thing goes quiet with it, leaving the
+                        // ⌘J that would undo this doing nothing. Hand the terminal
+                        // back what it lost, the same way the tab tiles below do.
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            let closing = this.right_panel_open(cx);
+                            this.toggle_right_panel(cx);
+                            if closing {
+                                this.focus_active(window, cx);
+                            }
+                        })),
+                    ),
             )
             .child(self.app_menu_tile(window, cx))
     }
@@ -1855,8 +1859,11 @@ impl Tty7App {
         });
 
         let panel_open = self.right_panel_open(cx);
-        let right_chrome =
-            (!panel_open || !cfg!(target_os = "macos")).then(|| self.window_chrome(window, cx));
+        let document_corner = !panel_open
+            && self.document_front().is_some()
+            && self.document_dock_px(window, cx).is_none();
+        let right_chrome = (!document_corner && (!panel_open || !cfg!(target_os = "macos")))
+            .then(|| self.window_chrome(window, cx));
 
         h_flex()
             .id("tab-strip")

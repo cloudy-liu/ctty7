@@ -7410,6 +7410,31 @@ impl Render for Tty7App {
         let bg_image = window_background_image_layer(cx);
         let settings_bg = crate::ui::theme::overlay_background(cx);
 
+        // A filled document covers the underlying title bar. Keep its existing
+        // right-panel entry, app menu, and window controls above that document,
+        // at their usual window-relative position. With the panel open, this
+        // corner already sits outside the document overlay.
+        let document_corner = (self.document_front().is_some()
+            && document_dock_px.is_none()
+            && !self.right_panel_open(cx))
+        .then(|| {
+            div()
+                .absolute()
+                .top_0()
+                .right_0()
+                .w(px(crate::ui::tab_strip::trailing_chrome_w()))
+                .h(px(TITLE_BAR_HEIGHT))
+                .occlude()
+                .child(
+                    TitleBar::new()
+                        .h(px(TITLE_BAR_HEIGHT))
+                        .pl_0()
+                        .bg(crate::ui::theme::workspace_surface_color(cx))
+                        .border_color(cx.theme().transparent)
+                        .child(self.window_chrome(window, cx)),
+                )
+        });
+
         let settings_overlay = self.settings.is_some().then(|| {
             div()
                 .absolute()
@@ -7745,6 +7770,7 @@ impl Render for Tty7App {
                 .on_action(cx.listener(|_, _: &ReportIssue, _window, cx| cx.open_url(ISSUES_URL)))
                 .children(bg_image)
                 .child(main_layout)
+                .children(document_corner)
                 // Window-level because the strip lives in the title bar and the
                 // sidebar down the side: the caret between two tabs is in
                 // neither of the boxes the rest of the drag feedback is drawn

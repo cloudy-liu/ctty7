@@ -529,6 +529,8 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::DocumentDock => "停靠在终端旁",
         L10nKey::DocumentFill => "铺满窗口",
+        L10nKey::DocumentFillTooltip => "铺满主工作区",
+        L10nKey::DocumentRestoreTooltip => "还原分屏布局",
         L10nKey::SettingsNotifications => "通知",
         L10nKey::SettingsNotifyOnCommandFinish => "命令完成时通知",
         L10nKey::SettingsNotifyOnCommandFinishDesc => "较长的前台命令完成后发出桌面提醒。",
@@ -1142,6 +1144,8 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::DiffUntrackedSummary => "{count} 个未跟踪",
         L10nKey::DiffViewSplit => "并排",
         L10nKey::DiffViewUnified => "统一",
+        L10nKey::DiffViewSplitTooltip => "切换到并排差异视图",
+        L10nKey::DiffViewUnifiedTooltip => "切换到统一差异视图",
         L10nKey::PendingConnecting => "正在连接 {machine}…",
         L10nKey::PendingUnreachable => "无法连接到 {machine}",
         L10nKey::WorktreePromptNeedsName => "worktree 需要一个名称",

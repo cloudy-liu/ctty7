@@ -1224,6 +1224,7 @@ impl Tty7App {
             });
 
         div()
+            .debug_selector(|| "session-sidebar".into())
             .relative()
             .flex_shrink_0()
             .w(px(width))

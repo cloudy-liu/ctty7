@@ -591,6 +591,8 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         }
         L10nKey::DocumentDock => "Dock beside terminal",
         L10nKey::DocumentFill => "Fill window",
+        L10nKey::DocumentFillTooltip => "Fill workspace",
+        L10nKey::DocumentRestoreTooltip => "Restore split layout",
         L10nKey::SettingsNotifications => "Notifications",
         L10nKey::SettingsNotifyOnCommandFinish => "Notify on command finish",
         L10nKey::SettingsNotifyOnCommandFinishDesc => {
@@ -1202,6 +1204,8 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::DiffUntrackedSummary => "{count} untracked",
         L10nKey::DiffViewSplit => "Side by Side",
         L10nKey::DiffViewUnified => "Unified",
+        L10nKey::DiffViewSplitTooltip => "Switch to side-by-side diff",
+        L10nKey::DiffViewUnifiedTooltip => "Switch to unified diff",
         L10nKey::PendingConnecting => "Connecting to {machine}…",
         L10nKey::PendingUnreachable => "Could not reach {machine}",
         L10nKey::WorktreePromptNeedsName => "The worktree needs a name",

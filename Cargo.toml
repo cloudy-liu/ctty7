@@ -277,17 +277,18 @@ version = "0.1.0"
 
 [workspace.dependencies]
 # The maintenance fork retains tty7's existing menu, button and input changes
-# and adds instance-scoped Markdown styles, highlighting and document resources.
+# and adds instance-scoped Markdown styles, highlighting, document resources,
+# and selection snapshots for toolbar-driven layout changes.
 # Both packages use the same commit, also recorded in Cargo.lock.
 # For co-developing the UI crate, point these back at a sibling
 # checkout: `path = "../gpui-component/crates/{ui,assets}"` — but never commit
 # that, since a path dependency can't resolve on CI.
 #
 # `tree-sitter-languages` compiles the grammars the code editor highlights with.
-gpui-component = { git = "https://github.com/cloudy-liu/gpui-component", rev = "2ebbed0674739b5fc56f71bef1b4a436b08321e7", version = "0.5.2", features = [
+gpui-component = { git = "https://github.com/cloudy-liu/gpui-component", rev = "39061d56eef21b9b62f37a1589b0bfc21022a643", version = "0.5.2", features = [
     "tree-sitter-languages",
 ] }
-gpui-component-assets = { git = "https://github.com/cloudy-liu/gpui-component", rev = "2ebbed0674739b5fc56f71bef1b4a436b08321e7", version = "0.5.1" }
+gpui-component-assets = { git = "https://github.com/cloudy-liu/gpui-component", rev = "39061d56eef21b9b62f37a1589b0bfc21022a643", version = "0.5.1" }
 
 gpui = { git = "https://github.com/zed-industries/zed", rev = "1d217ee39d381ac101b7cf49d3d22451ac1093fe" }
 # Base features are cross-platform (`font-kit`, `runtime_shaders` only map to the

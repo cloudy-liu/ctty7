@@ -352,6 +352,7 @@ impl Tty7App {
         Some(
             v_flex()
                 .id("right-panel")
+                .debug_selector(|| "right-panel".into())
                 .relative()
                 .flex_none()
                 .w(px(width))
