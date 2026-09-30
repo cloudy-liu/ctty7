@@ -96,15 +96,15 @@ impl StatusIndicator {
     pub const DARK_SURFACE: u32 = 0x1E1E2E;
 
     /// The short text before a sidebar row's branch or working directory.
-    /// A missing status gets a neutral mark instead of claiming the agent is idle.
-    pub fn word(self) -> &'static str {
-        match self {
+    /// Missing status has no text; the tab avatar still carries its neutral mark.
+    pub fn word(self) -> Option<&'static str> {
+        Some(match self {
             StatusIndicator::Blocked => "blocked",
             StatusIndicator::Working => "working",
             StatusIndicator::Done => "done",
             StatusIndicator::Idle => "idle",
-            StatusIndicator::Unknown => "—",
-        }
+            StatusIndicator::Unknown => return None,
+        })
     }
 
     /// The words behind the symbol, for a tooltip.
@@ -178,8 +178,17 @@ mod tests {
     }
 
     #[test]
-    fn the_sidebar_distinguishes_unknown_from_idle() {
-        let words: Vec<&str> = StatusIndicator::ALL.iter().map(|s| s.word()).collect();
-        assert_eq!(words, ["blocked", "working", "done", "idle", "—"]);
+    fn the_sidebar_omits_unknown_text_but_keeps_known_status_words() {
+        let words: Vec<_> = StatusIndicator::ALL.iter().map(|s| s.word()).collect();
+        assert_eq!(
+            words,
+            [
+                Some("blocked"),
+                Some("working"),
+                Some("done"),
+                Some("idle"),
+                None
+            ]
+        );
     }
 }

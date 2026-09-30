@@ -76,8 +76,8 @@ A finished turn keeps its check until you look at the pane, then reads as idle.
 
 A sidebar row also writes the state at the start of its second line, in the same
 colour: `working · main`. The words are herdr's, in English whatever the
-interface language, and like herdr the sidebar writes an unknown state as a grey
-`idle`.
+interface language. Unknown status adds no text or separator to this line;
+the tab avatar keeps its grey status symbol and hover explanation.
 
 The hooks' three turn states are what `tty7 agents` reports as `working` /
 `waiting` / `done`, and what [`tty7 wait`](/agents/orchestration) blocks on.
