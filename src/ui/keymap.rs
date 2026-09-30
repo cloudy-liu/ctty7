@@ -352,6 +352,15 @@ pub(crate) fn default_bindings() -> Vec<(&'static str, &'static str)> {
             per_platform("secondary-shift-t", "alt-shift-t"),
         ),
         ("ToggleMaximizePane", "secondary-shift-enter"),
+        // The one default that sits on a bare function key, and it stays
+        // there: F11 is the fullscreen chord Windows Terminal, GNOME Terminal
+        // and konsole all train their users on, and no shell binds it — the
+        // keys PSReadLine actually wants are F3, F7 and F8. gpui matches this
+        // binding before the pane's key handler runs, so the terminal never
+        // sees a bare F11; Shift/Ctrl/Alt+F11 are not bound and still reach
+        // the PTY as `\E[23;<mods>~`, and the whole chord is one line of
+        // config away from being retired. See
+        // `f11_is_the_only_default_on_a_bare_function_key`.
         ("ToggleFullscreen", per_platform("secondary-enter", "f11")),
         ("ToggleTabSidebar", ""),
         (
@@ -1600,6 +1609,52 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// F1..F12 now encode (#834), so a default sitting on one takes it away
+    /// from the shell the same way a Ctrl binding takes a control code: gpui
+    /// matches bindings before the pane's key handler runs, so a bound
+    /// function key never reaches the PTY at all.
+    ///
+    /// The three that do are named here rather than left to be discovered,
+    /// and each answers for the shell key it stands on:
+    ///
+    /// * F11 keeps fullscreen outright. It is the chord Windows Terminal,
+    ///   GNOME Terminal and konsole all use, and no shell binds it —
+    ///   PSReadLine's F keys are F3, F7 and F8.
+    /// * F3 and Shift+F3 are Find Next / Previous, and they fall through:
+    ///   with no find bar open the listener in `terminal::view` calls
+    ///   `cx.propagate()`, so PSReadLine's CharacterSearch still gets the key.
+    ///
+    /// A fourth needs a fall-through of its own to join them.
+    #[test]
+    fn f11_is_the_only_default_on_a_bare_function_key() {
+        let mut bound = Vec::new();
+        for (action, spec) in default_bindings() {
+            for chord in spec.split_whitespace() {
+                let ks = Keystroke::parse(chord).expect("default chords parse");
+                if crate::terminal::input::is_function_key(&ks.key) {
+                    bound.push((action, chord));
+                }
+            }
+        }
+        let expected: &[(&str, &str)] = if cfg!(target_os = "macos") {
+            &[]
+        } else {
+            &[
+                ("FindNext", "f3"),
+                ("FindPrevious", "shift-f3"),
+                ("ToggleFullscreen", "f11"),
+            ]
+        };
+        bound.sort();
+        let mut expected = expected.to_vec();
+        expected.sort();
+        assert_eq!(
+            bound, expected,
+            "a default on a function key hides it from the shell; \
+             PSReadLine wants F3, F7 and F8, readline's `bind -x` any of them"
+        );
     }
 
     #[test]
