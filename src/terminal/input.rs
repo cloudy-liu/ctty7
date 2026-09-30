@@ -202,7 +202,7 @@ fn csi_u(code: u32, mods: u32, text: Option<&[u32]>) -> Vec<u8> {
     s.into_bytes()
 }
 
-/// The cursor and editing keys, encoded the way `xterm-256color`'s terminfo
+/// The cursor, editing and function keys, encoded the way `xterm-256color`'s terminfo
 /// says they are — which is what we advertise in `$TERM`, and what ncurses
 /// matches against byte for byte.
 ///
@@ -228,6 +228,19 @@ fn functional_key(key: &str, mods: u32, app_cursor: bool) -> Option<Vec<u8>> {
         };
         return Some(s.into_bytes());
     }
+    if let Some(form) = function_key(key) {
+        let s = match form {
+            // `kf1=\EOP` .. `kf4=\EOS`, and modified the `CSI 1;<mods>` form
+            // the cursor keys use — terminfo spells Shift+F1 `kf13=\E[1;2P`.
+            // DECCKM has no say here: unlike `kcuu1`, `kf1` is SS3 under both
+            // `smkx` and `rmkx`.
+            FunctionKey::Ss3(l) if mods == 1 => format!("\x1bO{l}"),
+            FunctionKey::Ss3(l) => format!("\x1b[1;{mods}{l}"),
+            FunctionKey::Tilde(n) if mods == 1 => format!("\x1b[{n}~"),
+            FunctionKey::Tilde(n) => format!("\x1b[{n};{mods}~"),
+        };
+        return Some(s.into_bytes());
+    }
     let num = match key {
         "insert" => Some(2u32),
         "delete" => Some(3),
@@ -244,6 +257,53 @@ fn functional_key(key: &str, mods: u32, app_cursor: bool) -> Option<Vec<u8>> {
         return Some(s.into_bytes());
     }
     None
+}
+
+/// The two shapes `xterm-256color` gives a function key.
+enum FunctionKey {
+    /// `SS3 <letter>` unmodified, `CSI 1;<mods> <letter>` with a modifier.
+    Ss3(char),
+    /// `CSI <n> ~`, or `CSI <n>;<mods> ~` with a modifier.
+    Tilde(u32),
+}
+
+/// `f1`..`f12` — the name gpui gives these keys on all three platforms, and
+/// the range `xterm-256color` gives a key of its own.
+///
+/// The numbering is the PC-style table xterm has used since patch #94 and the
+/// one `kf5`..`kf12` spell: it starts at 15 and skips both 16 and 22, because
+/// those two were DEC's "do" and "help" on the VT220 keypad. Guessing a
+/// contiguous run here is the classic way to make F6 arrive as F5.
+///
+/// This deliberately stops at F12. In the entry we advertise, `kf13` onwards
+/// are not further keys — they are the *modified* forms of F1..F8 (`kf13` is
+/// `\E[1;2P`, Shift+F1), which the `mods` parameter above already produces.
+/// A physical F13 therefore has no encoding of its own under this `$TERM`;
+/// sending the VT220 `\E[25~` for it would hand ncurses a sequence its own
+/// table reads back as Shift+F1, which is worse than sending nothing.
+fn function_key(key: &str) -> Option<FunctionKey> {
+    Some(match key {
+        "f1" => FunctionKey::Ss3('P'),
+        "f2" => FunctionKey::Ss3('Q'),
+        "f3" => FunctionKey::Ss3('R'),
+        "f4" => FunctionKey::Ss3('S'),
+        "f5" => FunctionKey::Tilde(15),
+        "f6" => FunctionKey::Tilde(17),
+        "f7" => FunctionKey::Tilde(18),
+        "f8" => FunctionKey::Tilde(19),
+        "f9" => FunctionKey::Tilde(20),
+        "f10" => FunctionKey::Tilde(21),
+        "f11" => FunctionKey::Tilde(23),
+        "f12" => FunctionKey::Tilde(24),
+        _ => return None,
+    })
+}
+
+/// Whether a key name is one `functional_key` turns into a function-key
+/// sequence. The inline editor asks this to know a keystroke it holds no
+/// meaning for but the shell does.
+pub(crate) fn is_function_key(key: &str) -> bool {
+    function_key(key).is_some()
 }
 
 fn text_key_code(ks: &gpui::Keystroke) -> Option<u32> {
@@ -711,10 +771,142 @@ mod tests {
         }
     }
 
+    /// Issue #834: the function keys produced no bytes at all, on any
+    /// platform. PSReadLine puts CharacterSearch on F3 and HistorySearch on
+    /// F8, so on Windows this took part of the shell's normal editing surface
+    /// away.
+    ///
+    /// The table is `xterm-256color`'s `kf1`..`kf12` verbatim, gaps included:
+    /// F5 is 15 and F6 is 17, F10 is 21 and F11 is 23.
+    #[test]
+    fn keystroke_to_bytes_encodes_f1_through_f12_like_terminfo() {
+        let none = Modifiers::default();
+        let cases: &[(&str, &[u8])] = &[
+            ("f1", b"\x1bOP"),
+            ("f2", b"\x1bOQ"),
+            ("f3", b"\x1bOR"),
+            ("f4", b"\x1bOS"),
+            ("f5", b"\x1b[15~"),
+            ("f6", b"\x1b[17~"),
+            ("f7", b"\x1b[18~"),
+            ("f8", b"\x1b[19~"),
+            ("f9", b"\x1b[20~"),
+            ("f10", b"\x1b[21~"),
+            ("f11", b"\x1b[23~"),
+            ("f12", b"\x1b[24~"),
+        ];
+        for (key, seq) in cases {
+            assert_eq!(
+                legacy(&ks(none, key, None)).as_deref(),
+                Some(*seq),
+                "{key} unmodified"
+            );
+            // gpui hands a function key over with no `key_char`, but the
+            // Windows backend has been known to attach an empty one; neither
+            // may reach the `key_char` fallback and send nothing.
+            assert_eq!(
+                legacy(&ks(none, key, Some(""))).as_deref(),
+                Some(*seq),
+                "{key} with an empty key_char"
+            );
+        }
+    }
+
+    /// The modified forms are the same ones terminfo lists under `kf13`
+    /// onwards: `kf13=\E[1;2P` is Shift+F1, `kf17=\E[15;2~` is Shift+F5,
+    /// `kf25=\E[1;5P` is Ctrl+F1. Alt is xterm's 3, which PSReadLine wants for
+    /// Alt+F7 (ClearHistory).
+    #[test]
+    fn keystroke_to_bytes_modifies_function_keys_like_terminfo() {
+        let shift = Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        let alt = Modifiers {
+            alt: true,
+            ..Default::default()
+        };
+        let ctrl = Modifiers {
+            control: true,
+            ..Default::default()
+        };
+        let ctrl_shift = Modifiers {
+            control: true,
+            shift: true,
+            ..Default::default()
+        };
+        // kf13, kf16
+        assert_eq!(legacy(&ks(shift, "f1", None)), Some(b"\x1b[1;2P".to_vec()));
+        assert_eq!(legacy(&ks(shift, "f4", None)), Some(b"\x1b[1;2S".to_vec()));
+        // kf25
+        assert_eq!(legacy(&ks(ctrl, "f1", None)), Some(b"\x1b[1;5P".to_vec()));
+        // kf37
+        assert_eq!(
+            legacy(&ks(ctrl_shift, "f1", None)),
+            Some(b"\x1b[1;6P".to_vec())
+        );
+        // kf49
+        assert_eq!(legacy(&ks(alt, "f1", None)), Some(b"\x1b[1;3P".to_vec()));
+        // kf20 -- Shift+F8, PSReadLine's HistorySearchForward
+        assert_eq!(legacy(&ks(shift, "f8", None)), Some(b"\x1b[19;2~".to_vec()));
+        // kf55 -- Alt+F7, PSReadLine's ClearHistory
+        assert_eq!(legacy(&ks(alt, "f7", None)), Some(b"\x1b[18;3~".to_vec()));
+        // kf35 -- Ctrl+F11
+        assert_eq!(legacy(&ks(ctrl, "f11", None)), Some(b"\x1b[23;5~".to_vec()));
+    }
+
+    /// The `mods` parameter is what makes F13 onwards ambiguous: in
+    /// `xterm-256color` those capability names are already spoken for by the
+    /// modified F1..F8, so a physical F13 has no sequence of its own to send.
+    #[test]
+    fn function_keys_stop_at_f12() {
+        let none = Modifiers::default();
+        let ctrl = Modifiers {
+            control: true,
+            ..Default::default()
+        };
+        for key in ["f13", "f14", "f20", "f24"] {
+            assert_eq!(legacy(&ks(none, key, None)), None, "{key} is unencodable");
+            assert_eq!(
+                keystroke_to_bytes(&ks(none, key, None), kitty()),
+                None,
+                "{key} is unencodable under kitty too"
+            );
+        }
+        // Ctrl+F13 must not fold into a C0 byte on its first letter either.
+        assert_eq!(legacy(&ks(ctrl, "f13", None)), None);
+    }
+
+    /// Cmd is not an xterm modifier, so it must not turn a bare F-key into a
+    /// modified one — and on macOS Cmd+F-keys belong to the window anyway.
+    #[test]
+    fn cmd_does_not_modify_a_function_key() {
+        let cmd = Modifiers {
+            platform: true,
+            ..Default::default()
+        };
+        assert_eq!(legacy(&ks(cmd, "f5", None)), Some(b"\x1b[15~".to_vec()));
+    }
+
     fn app_cursor() -> KeyFlags {
         KeyFlags {
             app_cursor: true,
             ..Default::default()
+        }
+    }
+
+    /// DECCKM governs `kcuu1` and friends, not `kf1`: terminfo spells `kf1`
+    /// `\EOP` under both `smkx` and `rmkx`, so the F keys must not move when
+    /// an ncurses app turns application cursor keys on.
+    #[test]
+    fn app_cursor_mode_leaves_the_function_keys_alone() {
+        let none = Modifiers::default();
+        for key in ["f1", "f4", "f5", "f12"] {
+            assert_eq!(
+                keystroke_to_bytes(&ks(none, key, None), app_cursor()),
+                legacy(&ks(none, key, None)),
+                "{key} does not follow DECCKM"
+            );
         }
     }
 
@@ -830,9 +1022,11 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(legacy(&ks(alt, "b", Some("b"))), Some(b"\x1bb".to_vec()));
+        // `f13` stands in for "a named key with nothing behind it" — it used
+        // to be `f7`, back when no function key encoded at all (#834).
         let none = Modifiers::default();
-        assert_eq!(legacy(&ks(none, "f7", Some(""))), None);
-        assert_eq!(legacy(&ks(none, "f7", None)), None);
+        assert_eq!(legacy(&ks(none, "f13", Some(""))), None);
+        assert_eq!(legacy(&ks(none, "f13", None)), None);
     }
 
     #[test]
@@ -1050,6 +1244,58 @@ mod tests {
         assert_eq!(
             keystroke_to_bytes(&ks(shift, "delete", None), kitty()),
             Some(b"\x1b[3;2~".to_vec())
+        );
+    }
+
+    /// The kitty encoder shares `functional_key`, so the F keys have to come
+    /// out of it byte-identical to the legacy path — kitty's own spec keeps
+    /// the legacy CSI/SS3 forms for F1..F12 and only appends the modifier
+    /// parameter, which is what that shared table already does.
+    ///
+    /// `report_all_keys` changes nothing here either: the F keys are already
+    /// escape sequences, so there is no bare byte for it to promote.
+    #[test]
+    fn kitty_encodes_function_keys_like_the_legacy_path() {
+        let none = Modifiers::default();
+        let shift = Modifiers {
+            shift: true,
+            ..Default::default()
+        };
+        let ctrl = Modifiers {
+            control: true,
+            ..Default::default()
+        };
+        let full = KeyFlags {
+            disambiguate: true,
+            report_all_keys: true,
+            report_text: true,
+            ..Default::default()
+        };
+        for key in ["f1", "f2", "f3", "f4", "f5", "f7", "f10", "f11", "f12"] {
+            for mods in [none, shift, ctrl] {
+                let want = legacy(&ks(mods, key, None));
+                assert!(want.is_some(), "{key} encodes on the legacy path");
+                assert_eq!(
+                    keystroke_to_bytes(&ks(mods, key, None), kitty()),
+                    want,
+                    "{key} under kitty disambiguate"
+                );
+                assert_eq!(
+                    keystroke_to_bytes(&ks(mods, key, None), full),
+                    want,
+                    "{key} under kitty report-all-keys"
+                );
+            }
+        }
+        // Spot-check the actual bytes, so a change to `legacy` cannot quietly
+        // move both sides at once.
+        assert_eq!(
+            keystroke_to_bytes(&ks(none, "f7", None), full),
+            Some(b"\x1b[18~".to_vec())
+        );
+        assert_eq!(
+            keystroke_to_bytes(&ks(shift, "f1", None), full),
+            Some(b"\x1b[1;2P".to_vec())
         );
     }
 
