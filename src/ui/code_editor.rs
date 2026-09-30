@@ -1208,7 +1208,9 @@ impl Tty7App {
         // repainting the theme image the root's copy now sits under; docking
         // means sitting in the same plane as the right panel, which the column
         // wrapper has already painted.
-        let shell = v_flex().id("code-panel");
+        let shell = v_flex()
+            .id("code-panel")
+            .debug_selector(|| "code-panel".into());
         let shell = match chrome {
             DocumentChrome::Fill => shell
                 .absolute()
@@ -1225,6 +1227,10 @@ impl Tty7App {
                 .children(crate::ui::app::overlay_surface_layers(cx)),
             DocumentChrome::Dock | DocumentChrome::DockHoisted => shell.size_full().min_w_0(),
         };
+        let shell = shell.when(
+            !chrome.is_dock() && self.document_header_below_chrome(window, cx),
+            |shell| shell.pt(px(crate::ui::app::TITLE_BAR_HEIGHT)),
+        );
         Some(
             shell
                 .on_key_down(cx.listener(|this, ev: &gpui::KeyDownEvent, window, cx| {
@@ -1266,8 +1272,9 @@ impl Tty7App {
         } else {
             crate::ui::app::TITLE_BAR_LEAD
         };
+        let below_chrome = !chrome.is_dock() && self.document_header_below_chrome(window, cx);
         let row = h_flex().id("editor-header");
-        let row = if chrome.header_is_title_strip() {
+        let row = if chrome.header_is_title_strip() && !below_chrome {
             crate::ui::app::title_bar_drag(row, "editor-header", window, cx)
         } else {
             row
@@ -1279,6 +1286,13 @@ impl Tty7App {
             .gap_1p5()
             .pl(px(lead))
             .pr(px(crate::ui::app::tile_trailing_inset()))
+            .when(
+                chrome.renders_own_header() && !self.right_panel_open(cx) && !below_chrome,
+                |row| {
+                    row.pr(px(crate::ui::app::tile_trailing_inset()
+                        + crate::ui::tab_strip::trailing_chrome_w()))
+                },
+            )
             .border_b_1()
             .border_color(cx.theme().border)
             .child(
@@ -1303,6 +1317,7 @@ impl Tty7App {
                         .bg(cx.theme().warning),
                 )
             })
+            .child(self.document_fill_button(cx))
             .child(
                 div().occlude().flex_shrink_0().child(
                     crate::ui::tab_strip::chrome_tile_sized(
@@ -1568,6 +1583,29 @@ mod tests {
         let edited = input.read_with(&vcx, |input, _| input.text().to_string());
         assert_ne!(edited, original);
         let cursor = input.read_with(&vcx, |input, _| input.cursor_position());
+        for _ in 0..2 {
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            let control = vcx
+                .debug_bounds("document-fill-toggle")
+                .expect("the editor offers fill and restore");
+            vcx.simulate_click(control.center(), gpui::Modifiers::none());
+            vcx.run_until_parked();
+            app.read_with(&vcx, |app, _| {
+                let file = app.tab_code().unwrap().active_file().unwrap();
+                assert_eq!(file.input.entity_id(), input.entity_id());
+                assert!(file.dirty, "layout switches keep unsaved edits");
+            });
+            assert_eq!(
+                input.read_with(&vcx, |input, _| input.text().to_string()),
+                edited
+            );
+            assert_eq!(
+                input.read_with(&vcx, |input, _| input.cursor_position()),
+                cursor
+            );
+        }
         app.update_in(&mut vcx, |app, window, cx| {
             app.editor_toggle_preview(window, cx)
         });
@@ -1855,6 +1893,34 @@ mod tests {
         });
         let before = reading.read_with(&vcx, |reading, _| reading.scroll.offset());
         assert!(before.y < px(0.));
+        for _ in 0..2 {
+            let control = vcx
+                .debug_bounds("document-fill-toggle")
+                .expect("Markdown offers fill and restore");
+            vcx.simulate_click(control.center(), gpui::Modifiers::none());
+            vcx.run_until_parked();
+            text.read_with(&vcx, |text, _| {
+                assert_eq!(text.source().as_ref(), content);
+                assert_eq!(text.selected_text(), selected);
+            });
+            app.read_with(&vcx, |app, _| {
+                assert_eq!(
+                    app.tab_code()
+                        .unwrap()
+                        .active_file()
+                        .unwrap()
+                        .reading
+                        .as_ref()
+                        .unwrap()
+                        .entity_id(),
+                    reading.entity_id()
+                );
+            });
+        }
+        assert_eq!(
+            reading.read_with(&vcx, |reading, _| reading.scroll.offset()),
+            before
+        );
         app.update_in(&mut vcx, |app, window, cx| {
             app.set_markdown_theme("study", cx);
             app.set_preset("dark", window, cx);

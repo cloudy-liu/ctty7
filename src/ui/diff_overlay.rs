@@ -434,7 +434,7 @@ impl Tty7App {
             .then(|| self.diff_header(overlay, chrome, window, cx));
         let focus_handle = overlay.focus_handle.clone();
 
-        let shell = v_flex();
+        let shell = v_flex().debug_selector(|| "diff-panel".into());
         let shell = match chrome {
             DocumentChrome::Fill => shell
                 .absolute()
@@ -456,6 +456,10 @@ impl Tty7App {
             // it needs stopping.
             DocumentChrome::Dock | DocumentChrome::DockHoisted => shell.size_full().min_w_0(),
         };
+        let shell = shell.when(
+            !chrome.is_dock() && self.document_header_below_chrome(window, cx),
+            |shell| shell.pt(px(crate::ui::app::TITLE_BAR_HEIGHT)),
+        );
         Some(
             shell
                 .text_color(cx.theme().foreground)
@@ -513,8 +517,9 @@ impl Tty7App {
         let subject_takes_the_slack =
             chrome.is_dock() && !subject.is_rev && subject.label.is_none();
         let menu_app = cx.entity().downgrade();
+        let below_chrome = !chrome.is_dock() && self.document_header_below_chrome(window, cx);
         let row = h_flex().id("diff-overlay-header");
-        let row = if chrome.header_is_title_strip() {
+        let row = if chrome.header_is_title_strip() && !below_chrome {
             crate::ui::app::title_bar_drag(row, "diff-overlay-header", window, cx)
         } else {
             row
@@ -523,177 +528,179 @@ impl Tty7App {
             .h(px(crate::ui::app::TITLE_BAR_HEIGHT))
             .pl(px(lead))
             .pr(px(crate::ui::app::tile_trailing_inset()))
+            .when(
+                chrome.renders_own_header() && !self.right_panel_open(cx) && !below_chrome,
+                |row| {
+                    row.pr(px(crate::ui::app::tile_trailing_inset()
+                        + crate::ui::tab_strip::trailing_chrome_w()))
+                },
+            )
             .gap_2()
             .items_center()
             .border_b_1()
             .border_color(cx.theme().border)
             .child(
-                gpui::svg()
-                    .path(subject.icon)
-                    .flex_shrink_0()
-                    .size(px(13.))
-                    .text_color(cx.theme().muted_foreground),
-            )
-            .child(if subject.is_rev {
-                // A revision is an identifier, not a name: it belongs in the
-                // same monospace the patch below it is set in.
-                div()
-                    .flex_shrink_0()
-                    .text_size(px(13.))
-                    .font_family(self.font_family.clone())
-                    .child(subject.text)
-                    .into_any_element()
-            } else {
-                // Docked, this is the name that gives: the header has a
-                // column's width rather than a window's, and a branch name that
-                // refused to yield any of it pushed the view toggle and the
-                // close tile off the end. It takes the slack the spacer below
-                // would otherwise have — the same trade the label branch makes,
-                // and for the same reason two `flex_1` siblings would split the
-                // line and truncate the name with empty space beside it.
-                div()
-                    .when(subject_takes_the_slack, |d| d.flex_1().min_w_0().truncate())
-                    .when(!subject_takes_the_slack, |d| d.flex_shrink_0())
-                    .text_sm()
-                    .font_weight(FontWeight::MEDIUM)
-                    .child(subject.text)
-                    .into_any_element()
-            })
-            .when_some(subject.chip, |bar, text| {
-                bar.child(info_chip(
-                    text,
-                    cx.theme().accent.opacity(0.16),
-                    cx.theme().foreground,
-                    &mono,
-                ))
-            })
-            // The subject takes the slack the spacer below would otherwise
-            // have, which is why that one is skipped when a label is present:
-            // two `flex_1` siblings split the line in half and the subject
-            // would truncate with empty space beside it.
-            .when_some(subject.label.as_ref(), |bar, label| {
-                bar.child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_sm()
-                        .child(SharedString::from(label.subject.clone())),
-                )
-                .child(
-                    div()
-                        .flex_shrink_0()
-                        .text_xs()
-                        .text_color(cx.theme().muted_foreground)
-                        .child(label_byline(label, now_unix())),
-                )
-            })
-            .when_some(focused_name(overlay), |bar, name| {
-                bar.child(
-                    div().occlude().flex_shrink_0().child(
-                        h_flex()
-                            .id("diff-overlay-unfocus")
-                            .items_center()
-                            .gap_1()
-                            .px_1p5()
-                            .py_0p5()
-                            .rounded_md()
-                            .cursor_pointer()
-                            .hover(|s| s.bg(cx.theme().list_hover))
-                            .on_click(cx.listener(|this, _, _window, cx| {
-                                let active = this.active;
-                                if let Some(overlay) = this
-                                    .tabs
-                                    .get_mut(active)
-                                    .and_then(|t| t.diff_overlay.as_mut())
-                                {
-                                    overlay.focus = None;
-                                    cx.notify();
-                                }
-                            }))
-                            .child(
-                                Icon::new(IconName::ChevronLeft)
-                                    .small()
-                                    .text_color(cx.theme().muted_foreground),
-                            )
-                            .child(
-                                div()
-                                    .text_xs()
-                                    .font_family(self.font_family.clone())
-                                    .child(name),
-                            ),
-                    ),
-                )
-            })
-            .when(
-                matches!(overlay.load, DiffLoad::Ready(_)) && overlay.focus.is_none(),
-                |bar| {
-                    let mut summary = t_plural(L10nKey::DiffChangedFiles, files, &[]);
-                    if untracked > 0 {
-                        summary.push_str(&t_plural(L10nKey::DiffUntrackedCount, untracked, &[]));
-                    }
-                    // The file count is the first thing a column drops: the
-                    // same number is one line down, at the top of the list.
-                    // The totals stay — they have no second home.
-                    bar.when(!chrome.is_dock(), |bar| {
+                h_flex()
+                    .flex_1()
+                    .min_w_0()
+                    .overflow_hidden()
+                    .items_center()
+                    .gap_2()
+                    .child(
+                        gpui::svg()
+                            .path(subject.icon)
+                            .flex_shrink_0()
+                            .size(px(13.))
+                            .text_color(cx.theme().muted_foreground),
+                    )
+                    .child(if subject.is_rev {
+                        // A revision is an identifier, not a name: it belongs in the
+                        // same monospace the patch below it is set in.
+                        div()
+                            .flex_shrink_0()
+                            .text_size(px(13.))
+                            .font_family(self.font_family.clone())
+                            .child(subject.text)
+                            .into_any_element()
+                    } else {
+                        // Docked, this is the name that gives: the header has a
+                        // column's width rather than a window's, and a branch name that
+                        // refused to yield any of it pushed the view toggle and the
+                        // close tile off the end. It takes the slack the spacer below
+                        // would otherwise have — the same trade the label branch makes,
+                        // and for the same reason two `flex_1` siblings would split the
+                        // line and truncate the name with empty space beside it.
+                        div()
+                            .when(subject_takes_the_slack, |d| d.flex_1().min_w_0().truncate())
+                            .when(!subject_takes_the_slack, |d| d.flex_shrink_0())
+                            .text_sm()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(subject.text)
+                            .into_any_element()
+                    })
+                    .when_some(subject.chip, |bar, text| {
+                        bar.child(info_chip(
+                            text,
+                            cx.theme().accent.opacity(0.16),
+                            cx.theme().foreground,
+                            &mono,
+                        ))
+                    })
+                    // The subject takes the slack the spacer below would otherwise
+                    // have, which is why that one is skipped when a label is present:
+                    // two `flex_1` siblings split the line in half and the subject
+                    // would truncate with empty space beside it.
+                    .when_some(subject.label.as_ref(), |bar, label| {
                         bar.child(
                             div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .text_sm()
+                                .child(SharedString::from(label.subject.clone())),
+                        )
+                        .child(
+                            div()
+                                .flex_shrink_0()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(summary),
+                                .child(label_byline(label, now_unix())),
                         )
                     })
-                    .when(added > 0, |bar| {
+                    .when_some(focused_name(overlay), |bar, name| {
                         bar.child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().success)
-                                .child(format!("+{added}")),
+                            div().occlude().flex_shrink_0().child(
+                                h_flex()
+                                    .id("diff-overlay-unfocus")
+                                    .items_center()
+                                    .gap_1()
+                                    .px_1p5()
+                                    .py_0p5()
+                                    .rounded_md()
+                                    .cursor_pointer()
+                                    .hover(|s| s.bg(cx.theme().list_hover))
+                                    .on_click(cx.listener(|this, _, _window, cx| {
+                                        let active = this.active;
+                                        if let Some(overlay) = this
+                                            .tabs
+                                            .get_mut(active)
+                                            .and_then(|t| t.diff_overlay.as_mut())
+                                        {
+                                            overlay.focus = None;
+                                            cx.notify();
+                                        }
+                                    }))
+                                    .child(
+                                        Icon::new(IconName::ChevronLeft)
+                                            .small()
+                                            .text_color(cx.theme().muted_foreground),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_xs()
+                                            .font_family(self.font_family.clone())
+                                            .child(name),
+                                    ),
+                            ),
                         )
                     })
-                    .when(removed > 0, |bar| {
-                        bar.child(
-                            div()
-                                .text_xs()
-                                .text_color(cx.theme().danger)
-                                .child(format!("−{removed}")),
-                        )
-                    })
-                },
-            )
-            .when(
-                overlay.loading && matches!(overlay.load, DiffLoad::Ready(_)),
-                |bar| {
-                    bar.child(
-                        div()
-                            .text_xs()
-                            .text_color(cx.theme().muted_foreground)
-                            .child(t(L10nKey::Refreshing)),
+                    .when(
+                        matches!(overlay.load, DiffLoad::Ready(_)) && overlay.focus.is_none(),
+                        |bar| {
+                            let mut summary = t_plural(L10nKey::DiffChangedFiles, files, &[]);
+                            if untracked > 0 {
+                                summary.push_str(&t_plural(
+                                    L10nKey::DiffUntrackedCount,
+                                    untracked,
+                                    &[],
+                                ));
+                            }
+                            // The file count is the first thing a column drops: the
+                            // same number is one line down, at the top of the list.
+                            // The totals stay — they have no second home.
+                            bar.when(!chrome.is_dock(), |bar| {
+                                bar.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(summary),
+                                )
+                            })
+                            .when(added > 0, |bar| {
+                                bar.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().success)
+                                        .child(format!("+{added}")),
+                                )
+                            })
+                            .when(removed > 0, |bar| {
+                                bar.child(
+                                    div()
+                                        .text_xs()
+                                        .text_color(cx.theme().danger)
+                                        .child(format!("−{removed}")),
+                                )
+                            })
+                        },
                     )
-                },
+                    .when(
+                        overlay.loading && matches!(overlay.load, DiffLoad::Ready(_)),
+                        |bar| {
+                            bar.child(
+                                div()
+                                    .text_xs()
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(t(L10nKey::Refreshing)),
+                            )
+                        },
+                    )
+                    .when(subject.label.is_none() && !subject_takes_the_slack, |bar| {
+                        bar.child(div().flex_1())
+                    }),
             )
-            .when(subject.label.is_none() && !subject_takes_the_slack, |bar| {
-                bar.child(div().flex_1())
-            })
-            .child(div().occlude().flex_shrink_0().child({
-                let sf = cx.global::<crate::ui::presets::Surfaces>().window;
-                let selected = usize::from(view_mode(cx) == DiffViewMode::Unified);
-                self.segmented_on(
-                    sf,
-                    "diff-overlay-view",
-                    &[t(L10nKey::DiffViewSplit), t(L10nKey::DiffViewUnified)],
-                    selected,
-                    cx,
-                    |this, index, _window, cx| {
-                        let mode = if index == 0 {
-                            DiffViewMode::Split
-                        } else {
-                            DiffViewMode::Unified
-                        };
-                        this.update_config(cx, |cfg| cfg.diff_view = mode);
-                    },
-                )
-            }))
+            .child(self.diff_view_button(cx))
+            .child(self.document_fill_button(cx))
             .child(
                 div().occlude().flex_shrink_0().child(
                     crate::ui::tab_strip::chrome_tile_sized(
@@ -1101,6 +1108,47 @@ impl Tty7App {
             card = card.child(body);
         }
         card.into_any_element()
+    }
+
+    /// Show the current arrangement and name the destination in the tooltip.
+    /// Switching reuses the existing preference without replacing the overlay.
+    fn diff_view_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        let split = view_mode(cx) == DiffViewMode::Split;
+        let icon = div()
+            .size(px(crate::ui::app::TILE_GLYPH_LINE))
+            .flex()
+            .when(split, |icon| icon.flex_row())
+            .when(!split, |icon| icon.flex_col())
+            .gap(px(2.))
+            .p(px(2.))
+            .border_1()
+            .border_color(cx.theme().muted_foreground)
+            .rounded_sm()
+            .children(
+                [cx.theme().danger, cx.theme().success]
+                    .map(|color| div().flex_1().min_w_0().min_h_0().bg(color.opacity(0.65))),
+            );
+        div()
+            .debug_selector(|| "diff-view-toggle".into())
+            .occlude()
+            .flex_shrink_0()
+            .child(
+                crate::ui::tab_strip::chrome_tile_sized(
+                    Button::new("diff-view-toggle").child(icon),
+                    crate::ui::app::TILE_SIZE,
+                    crate::ui::app::TILE_GLYPH_LINE,
+                    false,
+                    cx,
+                )
+                .rounded_lg()
+                .tooltip(t(if split {
+                    L10nKey::DiffViewUnifiedTooltip
+                } else {
+                    L10nKey::DiffViewSplitTooltip
+                }))
+                .on_click(cx.listener(|this, _, _, cx| this.toggle_diff_view_mode(cx))),
+            )
+            .into_any_element()
     }
 
     fn diff_split_row(&self, row: &SplitRow, closes_card: bool, cx: &Context<Self>) -> AnyElement {

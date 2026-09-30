@@ -600,6 +600,8 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::DocumentDock => "ターミナルの隣にドック",
         L10nKey::DocumentFill => "ウィンドウ全体",
+        L10nKey::DocumentFillTooltip => "ワークスペース全体に表示",
+        L10nKey::DocumentRestoreTooltip => "分割レイアウトに戻す",
         L10nKey::SettingsNotifications => "通知",
         L10nKey::SettingsNotifyOnCommandFinish => "コマンド終了時に通知",
         L10nKey::SettingsNotifyOnCommandFinishDesc => {
@@ -1268,6 +1270,8 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::DiffUntrackedSummary => "未追跡 {count}",
         L10nKey::DiffViewSplit => "左右分割",
         L10nKey::DiffViewUnified => "統合",
+        L10nKey::DiffViewSplitTooltip => "左右分割の差分表示に切り替え",
+        L10nKey::DiffViewUnifiedTooltip => "統合差分表示に切り替え",
         L10nKey::PendingConnecting => "{machine} に接続中…",
         L10nKey::PendingUnreachable => "{machine} に到達できませんでした",
         L10nKey::WorktreePromptNeedsName => "ワークツリーには名前が必要です",

@@ -7410,6 +7410,27 @@ impl Render for Tty7App {
         let bg_image = window_background_image_layer(cx);
         let settings_bg = crate::ui::theme::overlay_background(cx);
 
+        // Keep the existing chrome above filled documents, and outside macOS's
+        // terminal-only title bar when docked, at one window-relative position.
+        // An open panel already owns the chrome outside the document.
+        let document_corner = self.document_chrome_in_corner(window, cx).then(|| {
+            div()
+                .absolute()
+                .top_0()
+                .right_0()
+                .w(px(crate::ui::tab_strip::trailing_chrome_w()))
+                .h(px(TITLE_BAR_HEIGHT))
+                .occlude()
+                .child(
+                    TitleBar::new()
+                        .h(px(TITLE_BAR_HEIGHT))
+                        .pl_0()
+                        .bg(crate::ui::theme::workspace_surface_color(cx))
+                        .border_color(cx.theme().transparent)
+                        .child(self.window_chrome(window, cx)),
+                )
+        });
+
         let settings_overlay = self.settings.is_some().then(|| {
             div()
                 .absolute()
@@ -7745,6 +7766,7 @@ impl Render for Tty7App {
                 .on_action(cx.listener(|_, _: &ReportIssue, _window, cx| cx.open_url(ISSUES_URL)))
                 .children(bg_image)
                 .child(main_layout)
+                .children(document_corner)
                 // Window-level because the strip lives in the title bar and the
                 // sidebar down the side: the caret between two tabs is in
                 // neither of the boxes the rest of the drag feedback is drawn

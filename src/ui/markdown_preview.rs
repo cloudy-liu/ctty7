@@ -252,6 +252,7 @@ pub(crate) struct MarkdownPreview {
     pub(crate) text: Entity<TextViewState>,
     pub(crate) scroll: ScrollHandle,
     revision: u64,
+    layout_selection: Option<gpui_component::text::TextViewSelectionSnapshot>,
     width: Pixels,
     style_key: Option<(String, u64, bool, u32, SharedString)>,
     style: TextViewStyle,
@@ -293,6 +294,7 @@ impl MarkdownPreview {
             text,
             scroll: ScrollHandle::new(),
             revision: 0,
+            layout_selection: None,
             width: px(0.),
             style_key: None,
             style: TextViewStyle::default(),
@@ -319,6 +321,21 @@ impl MarkdownPreview {
         self.text
             .update(cx, |state, cx| state.set_text(&content, cx));
         cx.notify();
+    }
+
+    pub(crate) fn remember_layout_selection(
+        &mut self,
+        snapshot: Option<gpui_component::text::TextViewSelectionSnapshot>,
+    ) {
+        self.layout_selection = snapshot;
+    }
+
+    pub(crate) fn restore_layout_selection(&mut self, cx: &mut Context<Self>) {
+        if let Some(snapshot) = self.layout_selection.take() {
+            self.text.update(cx, |text, cx| {
+                text.restore_selection(snapshot, cx);
+            });
+        }
     }
 
     pub(crate) fn navigate_anchor(&mut self, anchor: String, cx: &mut Context<Self>) {

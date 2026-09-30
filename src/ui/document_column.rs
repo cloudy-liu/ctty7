@@ -18,8 +18,9 @@
 //! saved.
 
 use gpui::{AnyElement, Context, Window, div, prelude::*, px};
+use gpui_component::button::Button;
 use gpui_component::menu::{PopupMenu, PopupMenuItem};
-use gpui_component::{ActiveTheme as _, InteractiveElementExt as _, v_flex};
+use gpui_component::{ActiveTheme as _, Icon, IconName, InteractiveElementExt as _, v_flex};
 use std::cell::Cell as StdCell;
 use std::rc::Rc;
 
@@ -157,6 +158,25 @@ impl Tty7App {
         document_column_px(self.document_body_px(window, cx), self.document_ratio.get())
     }
 
+    /// macOS's docked title bar belongs to the terminal column, so its chrome
+    /// would move by the document's width when filling. Give both layouts the
+    /// same window corner; other platforms already span the docked title bar.
+    pub(crate) fn document_chrome_in_corner(&self, window: &Window, cx: &gpui::App) -> bool {
+        self.document_front().is_some()
+            && !self.right_panel_open(cx)
+            && (cfg!(target_os = "macos") || self.document_dock_px(window, cx).is_none())
+    }
+
+    /// With a narrow workspace, the document actions and window controls
+    /// cannot share one row. Keep the document header below the window chrome
+    /// rather than hide its controls or collapse the session sidebar.
+    pub(crate) fn document_header_below_chrome(&self, window: &Window, cx: &gpui::App) -> bool {
+        let actions = 3. * crate::ui::app::TILE_SIZE + 6. * crate::ui::app::CONTENT_INSET;
+        !self.right_panel_open(cx)
+            && self.document_body_px(window, cx)
+                < crate::ui::tab_strip::trailing_chrome_w() + actions
+    }
+
     /// Fill ↔ dock, for the active tab. One of the two writers of the layout;
     /// the narrow window fallback is not, on purpose — running this while the
     /// fallback is showing is the user saying they meant the overlay, and that
@@ -203,16 +223,66 @@ impl Tty7App {
         cx.notify();
     }
 
-    /// What right-clicking a document's header offers: where it sits.
-    ///
-    /// On the header rather than in Settings because this is where the question
-    /// comes up — the moment a file covers the terminal is the moment you want
-    /// it not to, and a preference three pages into a settings panel is not an
-    /// answer to that. On the header rather than on a tile beside the close
-    /// button because the row already carries a file name, a dirty dot and, for
-    /// a diff, a view toggle; a fifth control in a column's width is one too
-    /// many for something you set once.
-    ///
+    /// A shared, visible layout action for code and diff headers. The saved
+    /// preference drives it; a temporary narrow-window fallback is not a new
+    /// preference and must not change what another tab or a wider window does.
+    pub(crate) fn document_fill_button(&self, cx: &mut Context<Self>) -> AnyElement {
+        // Root clears reading selections before button mouse-down handlers.
+        // Capture during render, then remember that snapshot on the press so
+        // a redraw between mouse-down and mouse-up cannot replace it.
+        let selection = (self.document_front() == Some(OverlayTop::Code))
+            .then(|| self.tab_code()?.active_file()?.reading.clone())
+            .flatten()
+            .map(|reading| {
+                let snapshot = reading.read(cx).text.read(cx).selection_snapshot();
+                (reading, snapshot)
+            });
+        let filled = self.document_layout(cx) == DocumentLayout::Fill;
+        let (icon, tooltip) = if filled {
+            (IconName::Minimize, L10nKey::DocumentRestoreTooltip)
+        } else {
+            (IconName::Maximize, L10nKey::DocumentFillTooltip)
+        };
+        div()
+            .debug_selector(|| "document-fill-toggle".into())
+            .occlude()
+            .flex_shrink_0()
+            .on_mouse_down(
+                gpui::MouseButton::Left,
+                cx.listener(move |_, _, _, cx| {
+                    if let Some((reading, snapshot)) = &selection {
+                        reading.update(cx, |reading, _| {
+                            reading.remember_layout_selection(snapshot.clone())
+                        });
+                    }
+                }),
+            )
+            .child(
+                crate::ui::tab_strip::chrome_tile_sized(
+                    Button::new("document-fill-toggle").icon(Icon::new(icon)),
+                    crate::ui::app::TILE_SIZE,
+                    crate::ui::app::TILE_GLYPH_LINE,
+                    false,
+                    cx,
+                )
+                .rounded_lg()
+                .tooltip(t(tooltip))
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.toggle_document_fill(cx);
+                    if this.document_front() == Some(OverlayTop::Code)
+                        && let Some(reading) = this
+                            .tab_code()
+                            .and_then(|code| code.active_file())
+                            .and_then(|file| file.reading.clone())
+                    {
+                        reading.update(cx, |reading, cx| reading.restore_layout_selection(cx));
+                    }
+                })),
+            )
+            .into_any_element()
+    }
+
+    /// Explicit layout choices remain available alongside the visible toggle.
     pub(crate) fn document_header_menu(
         menu: PopupMenu,
         app: &gpui::WeakEntity<Self>,
@@ -619,6 +689,319 @@ mod gpui_tests {
     /// What the active tab is actually doing.
     fn tab_layout(app: &Entity<Tty7App>, vcx: &mut VisualTestContext) -> DocumentLayout {
         app.update_in(vcx, |app, _, cx| app.document_layout(cx))
+    }
+
+    #[gpui::test]
+    fn visible_fill_buttons_preserve_sidebars_and_restore_width(cx: &mut TestAppContext) {
+        let (app, mut vcx) = window(cx, 1600.);
+        vcx.update(|_, cx| {
+            cx.global_mut::<Config>().tab_bar_position = crate::core::config::TabBarPosition::Left;
+        });
+        app.update_in(&mut vcx, |app, _, cx| {
+            app.sidebar_collapsed = false;
+            app.sidebar_width.set(210.);
+            app.right_panel_visible = true;
+            app.right_panel_width.set(240.);
+            app.right_panel_tab = crate::core::config::RightPanelTab::Files;
+            app.set_document_ratio(0.57, cx);
+        });
+        for front in [OverlayTop::Code, OverlayTop::Diff] {
+            app.update_in(&mut vcx, |app, window, cx| match front {
+                OverlayTop::Code => app.toggle_code_panel(window, cx),
+                OverlayTop::Diff => app.open_diff_overlay(
+                    crate::ui::host_ops::HostId::LOCAL,
+                    std::path::PathBuf::from("/no/such/tty7/repo"),
+                    crate::terminal::git_diff::DiffSource::Head,
+                    None,
+                    window,
+                    cx,
+                ),
+            });
+            for theme in [
+                gpui_component::ThemeMode::Light,
+                gpui_component::ThemeMode::Dark,
+            ] {
+                vcx.update(|window, cx| gpui_component::Theme::change(theme, Some(window), cx));
+                vcx.run_until_parked();
+                let surface = match front {
+                    OverlayTop::Code => "code-panel",
+                    OverlayTop::Diff => "diff-panel",
+                };
+
+                let fill = vcx
+                    .debug_bounds("document-fill-toggle")
+                    .expect("fill is visible without a menu");
+                let before = vcx.debug_bounds(surface).expect("the document is drawn");
+                let sidebar = vcx
+                    .debug_bounds("session-sidebar")
+                    .expect("the session sidebar is drawn");
+                let files = vcx
+                    .debug_bounds("right-panel")
+                    .expect("the file tree is drawn");
+                vcx.simulate_click(fill.center(), gpui::Modifiers::none());
+                vcx.run_until_parked();
+
+                let filled = vcx
+                    .debug_bounds(surface)
+                    .expect("the document remains open");
+                assert_eq!(vcx.debug_bounds("session-sidebar"), Some(sidebar));
+                assert_eq!(vcx.debug_bounds("right-panel"), Some(files));
+                assert_eq!(
+                    filled.left(),
+                    sidebar.right(),
+                    "fill starts after the session sidebar"
+                );
+                assert_eq!(
+                    filled.right(),
+                    files.left(),
+                    "the open file tree stays available"
+                );
+                assert!(
+                    filled.size.width > before.size.width,
+                    "code covers the agent area"
+                );
+
+                let restore = vcx
+                    .debug_bounds("document-fill-toggle")
+                    .expect("restore remains visible");
+                vcx.simulate_click(restore.center(), gpui::Modifiers::none());
+                vcx.run_until_parked();
+                assert_eq!(
+                    vcx.debug_bounds(surface),
+                    Some(before),
+                    "restore keeps the chosen split"
+                );
+            }
+            app.update_in(&mut vcx, |app, window, cx| match front {
+                OverlayTop::Code => app.toggle_code_panel(window, cx),
+                OverlayTop::Diff => app.close_diff_overlay(window, cx),
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn compact_diff_button_preserves_the_focused_patch_and_switches_both_ways(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::core::config::DiffViewMode;
+        use crate::terminal::git_diff::{
+            DiffLine, DiffSnapshot, DiffSource, FileDiff, FileStatus, Hunk, LineKind,
+        };
+        use crate::ui::diff_overlay::DiffLoad;
+        use std::sync::Arc;
+
+        let (app, mut vcx) = window(cx, 1600.);
+        let cwd = std::path::PathBuf::from("/no/such/tty7/repo");
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.open_diff_overlay(
+                crate::ui::host_ops::HostId::LOCAL,
+                cwd.clone(),
+                DiffSource::Head,
+                Some("a.rs".into()),
+                window,
+                cx,
+            );
+        });
+        // The real background probe must finish before installing this patch;
+        // parking the GPUI executor alone does not wait for its Git process.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            vcx.run_until_parked();
+            if app.update_in(&mut vcx, |app, _, _| {
+                !app.tabs[app.active].diff_overlay.as_ref().unwrap().loading
+            }) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "diff probe did not finish"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let snapshot = Arc::new(DiffSnapshot {
+            root: cwd,
+            source: DiffSource::Head,
+            files: vec![FileDiff {
+                path: "a.rs".into(),
+                old_path: None,
+                status: FileStatus::Modified,
+                added: 1,
+                removed: 1,
+                binary: false,
+                truncated: None,
+                hunks: vec![Hunk {
+                    header: "@@ -1 +1 @@".into(),
+                    lines: vec![
+                        DiffLine {
+                            kind: LineKind::Removed,
+                            old_no: Some(1),
+                            new_no: None,
+                            text: "old".into(),
+                        },
+                        DiffLine {
+                            kind: LineKind::Added,
+                            old_no: None,
+                            new_no: Some(1),
+                            text: "new".into(),
+                        },
+                    ],
+                }],
+            }],
+            ..Default::default()
+        });
+        app.update_in(&mut vcx, |app, _, cx| {
+            let overlay = app.tabs[app.active].diff_overlay.as_mut().unwrap();
+            overlay.load = DiffLoad::Ready(snapshot.clone());
+            overlay.loading = false;
+            overlay.expanded.insert("a.rs".into(), true);
+            cx.notify();
+        });
+        for expected in [DiffViewMode::Unified, DiffViewMode::Split] {
+            vcx.run_until_parked();
+            let button = vcx
+                .debug_bounds("diff-view-toggle")
+                .expect("one visible diff layout button");
+            assert_eq!(button.size.width, px(crate::ui::app::TILE_SIZE));
+            vcx.simulate_click(button.center(), gpui::Modifiers::none());
+            vcx.run_until_parked();
+            app.update_in(&mut vcx, |app, _, cx| {
+                assert_eq!(cx.global::<Config>().diff_view, expected);
+                let overlay = app.tabs[app.active].diff_overlay.as_ref().unwrap();
+                assert_eq!(overlay.focus.as_deref(), Some("a.rs"));
+                assert_eq!(overlay.expanded.get("a.rs"), Some(&true));
+                let DiffLoad::Ready(current) = &overlay.load else {
+                    panic!("the patch remains loaded")
+                };
+                assert!(Arc::ptr_eq(current, &snapshot));
+            });
+        }
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.close_diff_overlay(window, cx);
+            app.toggle_code_panel(window, cx);
+        });
+        vcx.run_until_parked();
+        assert!(vcx.debug_bounds("document-fill-toggle").is_some());
+        assert!(
+            vcx.debug_bounds("diff-view-toggle").is_none(),
+            "ordinary files have no diff control"
+        );
+    }
+
+    #[gpui::test]
+    fn document_controls_remain_clickable_in_narrow_windows(cx: &mut TestAppContext) {
+        let (app, mut vcx) = window(cx, 560.);
+        for front in [OverlayTop::Code, OverlayTop::Diff] {
+            app.update_in(&mut vcx, |app, window, cx| {
+                match front {
+                    OverlayTop::Code => app.toggle_code_panel(window, cx),
+                    OverlayTop::Diff => app.open_diff_overlay(
+                        crate::ui::host_ops::HostId::LOCAL,
+                        std::path::PathBuf::from("/no/such/tty7/repo"),
+                        crate::terminal::git_diff::DiffSource::Head,
+                        None,
+                        window,
+                        cx,
+                    ),
+                }
+                app.right_panel_visible = false;
+                cx.notify();
+            });
+            for width in [560., 360.] {
+                vcx.simulate_resize(size(px(width), px(900.)));
+                vcx.run_until_parked();
+                for expected in [DocumentLayout::Fill, DocumentLayout::Dock] {
+                    let button = vcx
+                        .debug_bounds("document-fill-toggle")
+                        .expect("layout control stays visible");
+                    assert!(
+                        button.left() >= px(0.) && button.right() <= px(width),
+                        "layout control fits inside the window: {button:?}"
+                    );
+                    vcx.simulate_click(button.center(), gpui::Modifiers::none());
+                    vcx.run_until_parked();
+                    assert_eq!(
+                        tab_layout(&app, &mut vcx),
+                        expected,
+                        "{front:?} at {width}px, button={button:?}"
+                    );
+                }
+                if front == OverlayTop::Diff {
+                    let button = vcx
+                        .debug_bounds("diff-view-toggle")
+                        .expect("diff control stays visible");
+                    let before = vcx.update(|_, cx| cx.global::<Config>().diff_view);
+                    assert!(button.left() >= px(0.) && button.right() <= px(width));
+                    vcx.simulate_click(button.center(), gpui::Modifiers::none());
+                    vcx.run_until_parked();
+                    assert_ne!(vcx.update(|_, cx| cx.global::<Config>().diff_view), before);
+                }
+            }
+            app.update_in(&mut vcx, |app, window, cx| match front {
+                OverlayTop::Code => app.toggle_code_panel(window, cx),
+                OverlayTop::Diff => app.close_diff_overlay(window, cx),
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn the_existing_panel_entry_remains_clickable_while_documents_fill(cx: &mut TestAppContext) {
+        let (app, mut vcx) = window(cx, 1600.);
+        for front in [OverlayTop::Code, OverlayTop::Diff] {
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.set_document_layout(DocumentLayout::Dock, cx);
+                match front {
+                    OverlayTop::Code => app.toggle_code_panel(window, cx),
+                    OverlayTop::Diff => app.open_diff_overlay(
+                        crate::ui::host_ops::HostId::LOCAL,
+                        std::path::PathBuf::from("/no/such/tty7/repo"),
+                        crate::terminal::git_diff::DiffSource::Head,
+                        None,
+                        window,
+                        cx,
+                    ),
+                }
+                // Opening code makes the Files panel visible. Hide it only
+                // after opening the document to exercise the covered entry.
+                app.right_panel_visible = false;
+                cx.notify();
+            });
+            vcx.run_until_parked();
+            assert!(!app.update_in(&mut vcx, |app, _, cx| app.right_panel_open(cx)));
+            let entry = vcx
+                .debug_bounds("titlebar-right-panel")
+                .expect("the original entry is visible");
+            assert!(
+                entry.left() >= px(1600. - crate::ui::tab_strip::trailing_chrome_w()),
+                "the panel entry stays in the window corner, outside the terminal column"
+            );
+            let fill = vcx
+                .debug_bounds("document-fill-toggle")
+                .expect("both document headers have fill");
+            vcx.simulate_click(fill.center(), gpui::Modifiers::none());
+            vcx.run_until_parked();
+            assert_eq!(
+                vcx.debug_bounds("titlebar-right-panel"),
+                Some(entry),
+                "the original entry stays put"
+            );
+            vcx.simulate_mouse_move(entry.center(), None, gpui::Modifiers::none());
+            vcx.simulate_click(entry.center(), gpui::Modifiers::none());
+            vcx.run_until_parked();
+            assert!(
+                app.update_in(&mut vcx, |app, _, cx| app.right_panel_open(cx)),
+                "fill must not cover the original entry"
+            );
+            let restore = vcx
+                .debug_bounds("document-fill-toggle")
+                .expect("restore remains reachable beside the panel");
+            vcx.simulate_click(restore.center(), gpui::Modifiers::none());
+            vcx.run_until_parked();
+            assert_eq!(tab_layout(&app, &mut vcx), DocumentLayout::Dock);
+            app.update_in(&mut vcx, |app, window, cx| match front {
+                OverlayTop::Code => app.toggle_code_panel(window, cx),
+                OverlayTop::Diff => app.close_diff_overlay(window, cx),
+            });
+        }
     }
 
     /// Fill is one tab's answer, not the window's. Reading a long file in one
