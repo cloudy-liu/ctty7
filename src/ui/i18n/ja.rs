@@ -547,9 +547,9 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSyncWithSystemDesc => {
             "OS の外観に従い、ライトとダークのテーマを別々に使用する"
         }
-        L10nKey::SettingsLegiblePalette => "明色の可読性",
+        L10nKey::SettingsLegiblePalette => "端末の色の可読性",
         L10nKey::SettingsLegiblePaletteDesc => {
-            "テーマ背景でコントラスト不足の明色を自動調整して、可読性を確保します。"
+            "端末の背景色をテーマの明暗に合わせ、文字を読みやすくします。オフにするとアプリの元の色を保持します。"
         }
         L10nKey::SettingsChangeTheme => "テーマを変更",
         L10nKey::SettingsThemes => "テーマ一覧",
