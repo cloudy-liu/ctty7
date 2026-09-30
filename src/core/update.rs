@@ -2778,7 +2778,6 @@ mod tests {
 
     // Exercise discovery with real HTTP responses, without GitHub or user settings.
     fn release_from_http(responses: Vec<String>) -> Result<(LatestRelease, String)> {
-        use std::io::{BufRead, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let endpoint = format!(
             "http://{}/old/releases/latest",
@@ -2789,7 +2788,7 @@ mod tests {
         let done = stop.clone();
         let server = std::thread::spawn(move || {
             for response in responses {
-                let mut stream = loop {
+                let stream = loop {
                     match listener.accept() {
                         Ok((stream, _)) => break stream,
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -2801,17 +2800,7 @@ mod tests {
                         Err(e) => panic!("{e}"),
                     }
                 };
-                stream
-                    .set_read_timeout(Some(Duration::from_secs(3)))
-                    .unwrap();
-                let mut request = std::io::BufReader::new(&stream);
-                loop {
-                    let mut line = String::new();
-                    if request.read_line(&mut line).unwrap_or(0) == 0 || line == "\r\n" {
-                        break;
-                    }
-                }
-                let _ = stream.write_all(response.as_bytes());
+                serve_release_response(stream, &response);
             }
         });
         let client = build_http_client(None).unwrap();
@@ -2828,10 +2817,67 @@ mod tests {
         result
     }
 
+    fn serve_release_response(mut stream: std::net::TcpStream, response: &str) {
+        use std::io::{BufRead, Write};
+        // Windows inherits the listener's nonblocking mode on accepted sockets.
+        // Wait for the request instead of treating WouldBlock as an empty one.
+        stream.set_nonblocking(false).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut request = std::io::BufReader::new(&stream);
+        loop {
+            let mut line = String::new();
+            let read = request
+                .read_line(&mut line)
+                .expect("read fixture request headers");
+            assert_ne!(
+                read, 0,
+                "client closed before fixture request headers ended"
+            );
+            if line == "\r\n" {
+                break;
+            }
+        }
+        stream
+            .write_all(response.as_bytes())
+            .expect("write fixture response");
+    }
+
     fn redirect(location: &str) -> String {
         format!(
             "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
         )
+    }
+
+    #[test]
+    fn release_http_fixture_waits_for_request_headers() {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        client
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let (stream, _) = listener.accept().unwrap();
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let expected = redirect("/releases/tag/v0.1.1");
+        let response = expected.clone();
+        let server = std::thread::spawn(move || {
+            ready_tx.send(()).unwrap();
+            serve_release_response(stream, &response);
+        });
+        ready_rx.recv().unwrap();
+        // Make the server read before the request arrives, as a busy runner can.
+        std::thread::sleep(Duration::from_millis(50));
+        let result = (|| -> std::io::Result<String> {
+            client.write_all(b"GET /old/releases/latest HTTP/1.1\r\nHost: localhost\r\n\r\n")?;
+            let mut response = String::new();
+            client.read_to_string(&mut response)?;
+            Ok(response)
+        })();
+        server.join().unwrap();
+        assert_eq!(result.unwrap(), expected);
     }
 
     #[test]

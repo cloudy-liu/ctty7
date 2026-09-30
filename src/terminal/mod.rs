@@ -2,6 +2,7 @@ pub(crate) mod agent_marks;
 mod agent_restore;
 mod boxdraw;
 mod cmd_editor;
+pub(crate) mod codex_colors;
 mod completion;
 pub mod element;
 pub mod fps;
