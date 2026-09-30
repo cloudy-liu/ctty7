@@ -2288,6 +2288,19 @@ impl TerminalView {
 
         self.close_completion();
 
+        // A function key means nothing to this editor and everything to the
+        // shell — PSReadLine puts CharacterSearch on F3 and HistorySearch on
+        // F8, and both of those act on the line that is currently on the
+        // prompt. So it takes the same route an unknown Ctrl chord takes:
+        // hand the line over first, then send the key, with every modifier
+        // combination going the same way (Alt+F7 is ClearHistory).
+        if super::input::is_function_key(key) && !m.platform {
+            if let Some(bytes) = super::input::keystroke_to_bytes(ks, self.key_flags()) {
+                self.handoff_line_to_shell(&bytes, cx);
+                return;
+            }
+        }
+
         if m.control && !m.platform && !m.alt {
             if cfg!(not(target_os = "macos")) {
                 match key {
@@ -6395,10 +6408,24 @@ impl Render for TerminalView {
             .on_action(
                 cx.listener(|this, _: &FindInTerminal, window, cx| this.open_search(window, cx)),
             )
+            // Off macOS these two live on F3 and Shift+F3, which is also where
+            // PSReadLine keeps CharacterSearch and readline users put their
+            // own widgets. With no find bar open there is no next match to
+            // step to, so the keystroke is given back the way `EditorSave`
+            // gives back Ctrl+S — otherwise the action swallows the key and
+            // the shell never sees it (#834).
             .on_action(cx.listener(|this, _: &FindNext, _w, cx| {
+                if this.search.is_none() {
+                    cx.propagate();
+                    return;
+                }
                 this.step_match(Direction::Right, cx);
             }))
             .on_action(cx.listener(|this, _: &FindPrevious, _w, cx| {
+                if this.search.is_none() {
+                    cx.propagate();
+                    return;
+                }
                 this.step_match(Direction::Left, cx);
             }))
             .on_action(cx.listener(|this, _: &ClearScrollback, _w, cx| this.clear_scrollback(cx)))
@@ -11116,6 +11143,63 @@ mod gpui_tests {
             .unwrap();
     }
 
+    /// The whole chain for #834, through the real dispatch tree: F3 is bound
+    /// to Find Next off macOS, and gpui matches bindings before the pane's key
+    /// handler. With no find bar open the action gives the key back, the pane
+    /// encodes it, and PSReadLine's CharacterSearch gets its `\EOR`.
+    ///
+    /// F7 has no binding at all and is the control: it takes the same route
+    /// with nothing to fall through.
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn an_unused_find_binding_gives_f3_back_to_the_shell(cx: &mut TestAppContext) {
+        let (window, mut daemon) = harness(cx);
+        cx.update(|cx| crate::ui::keymap::init(cx));
+        prompt_ready(&window, cx, &mut daemon);
+        window
+            .update(cx, |view, window, cx| {
+                window.activate_window();
+                view.focus_handle.focus(window, cx);
+                view.commit_text("echo a", cx);
+            })
+            .unwrap();
+
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        for (chord, seq) in [
+            ("f2", b"\x1bOQ".to_vec()),
+            ("f3", b"\x1bOR".to_vec()),
+            ("f7", b"\x1b[18~".to_vec()),
+        ] {
+            window
+                .update(cx, |view, _, _| {
+                    // The previous handoff gave this prompt to the shell for
+                    // good; take it back so both keys are tested from the
+                    // same starting state.
+                    view.editor_handoff = None;
+                    view.cmd.set("echo a");
+                    assert!(view.search.is_none(), "no find bar is open");
+                })
+                .unwrap();
+            vcx.simulate_keystrokes(chord);
+            window
+                .update(cx, |view, _, _| {
+                    assert!(view.search.is_none(), "{chord} did not open the find bar");
+                    assert_eq!(view.cmd.text(), "", "{chord} handed the line over");
+                })
+                .unwrap();
+            assert_eq!(
+                next_input_until_timeout(&mut daemon),
+                Some(b"echo a".to_vec()),
+                "{chord} puts the line on the shell's prompt first"
+            );
+            assert_eq!(
+                next_input_until_timeout(&mut daemon),
+                Some(seq),
+                "{chord} reaches the PTY"
+            );
+        }
+    }
+
     #[gpui::test]
     fn ctrl_r_fuzzy_search_accepts_into_the_editor(cx: &mut TestAppContext) {
         let (window, _daemon) = harness(cx);
@@ -11181,6 +11265,42 @@ mod gpui_tests {
             Some(b"git status\r".to_vec()),
             "Cmd+Enter ships the selected line to the PTY"
         );
+    }
+
+    /// The second half of #834. Even once the encoder knew the F keys, the
+    /// inline editor still ate them: `handle_editor_key` had no arm for a
+    /// named key it does not bind, so F8 fell out of the bottom of the match
+    /// and died on a `cx.notify()`. PSReadLine's HistorySearchBackward acts on
+    /// the line that is on the prompt, so the fix is the unknown-chord route —
+    /// the line goes over first, then the key.
+    #[gpui::test]
+    fn function_keys_hand_the_line_to_the_shell(cx: &mut TestAppContext) {
+        let (window, mut daemon) = harness(cx);
+        for (chord, seq) in [
+            ("f2", b"\x1bOQ".to_vec()),
+            ("f8", b"\x1b[19~".to_vec()),
+            ("shift-f8", b"\x1b[19;2~".to_vec()),
+            ("alt-f7", b"\x1b[18;3~".to_vec()),
+            ("f3", b"\x1bOR".to_vec()),
+        ] {
+            window
+                .update(cx, |view, _, cx| {
+                    view.cmd.set("git st");
+                    view.handle_editor_key(&key(chord), cx);
+                    assert_eq!(view.cmd.text(), "", "{chord} handed the line over");
+                })
+                .unwrap();
+            assert_eq!(
+                next_input_until_timeout(&mut daemon),
+                Some(b"git st".to_vec()),
+                "{chord} puts the line on the shell's prompt first"
+            );
+            assert_eq!(
+                next_input_until_timeout(&mut daemon),
+                Some(seq),
+                "{chord} follows the line"
+            );
+        }
     }
 
     #[gpui::test]
