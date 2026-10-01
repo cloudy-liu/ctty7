@@ -1,143 +1,266 @@
 <div align="center">
-<img src="assets/app-icon.svg" alt="ctty7" width="88" height="88" />
 
-# ctty7
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/logo.svg">
+  <source media="(prefers-color-scheme: light)" srcset="assets/logo.svg">
+  <img src="assets/logo.svg" alt="ctty7" height="120" />
+</picture>
 
-A terminal workbench for local development, remote work and coding agents.
+<h1>
+  <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=48&duration=3000&pause=1000&color=FF5FA2&center=true&vCenter=true&width=435&lines=ctty7" alt="ctty7" />
+</h1>
 
-[English](README.md) · [简体中文](README.zh-CN.md) · [Download](https://github.com/cloudy-liu/ctty7/releases/latest)
+<h3>A modern terminal workbench for AI-powered development</h3>
 
-[![CI](https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml)
-[![Release](https://img.shields.io/github/v/release/cloudy-liu/ctty7)](https://github.com/cloudy-liu/ctty7/releases/latest)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+<p>
+  <strong>Persistent sessions</strong> · <strong>Windows shell mastery</strong> · <strong>Coding agent awareness</strong> · <strong>Remote workspaces</strong>
+</p>
+
+<p>
+  <a href="https://github.com/cloudy-liu/ctty7/releases/latest">
+    <img src="https://img.shields.io/github/v/release/cloudy-liu/ctty7?style=for-the-badge&logo=github&color=FF5FA2&logoColor=white" alt="Download" />
+  </a>
+  <a href="https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml">
+    <img src="https://img.shields.io/github/actions/workflow/status/cloudy-liu/ctty7/ci.yml?style=for-the-badge&logo=githubactions&logoColor=white" alt="CI Status" />
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-Apache--2.0-3FDD8C?style=for-the-badge" alt="License" />
+  </a>
+</p>
+
+<p>
+  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
+</p>
 
 </div>
 
-ctty7 combines persistent terminal sessions, local and remote workspaces, Git
-workflows and coding-agent awareness. It adds deeper Windows CMD/Cmder support,
-Herdr host application recognition and more reliable agent-session restoration.
-It is independently maintained, forked and modified from
-[l0ng-ai/tty7](https://github.com/l0ng-ai/tty7), with no upstream affiliation.
+<br/>
 
-<img src="assets/hero.webp" alt="Terminal workspaces and coding-agent sessions" width="900" />
+<div align="center">
+  <img src="assets/hero.webp" alt="ctty7 in action" width="100%" style="border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);" />
+</div>
 
-## What you can do
+<br/>
 
-- **Keep your workspaces together.** Organize tabs and split panes, rename sidebar
-  groups, and use local terminals, WSL and SSH workspaces in one application.
-  The background server owns the shells: closing a window leaves them running.
-- **Use Windows shells with prompt editing.** CMD and Cmder/Clink report prompt
-  boundaries and working directories for completion, ghost suggestions and
-  prompt editing. Shell history keeps its native Up/Down behavior; fuzzy search
-  also reads PSReadLine and Clink history. Windows paths remain selectable as a
-  single range. Modified Enter events reach programs requesting ConPTY's
-  win32-input-mode.
-- **See Herdr and its nested agents correctly.** When Herdr is the host
-  application in a pane, its sheep avatar stays visible even when it launches
-  Codex or Claude Code. A split tab's avatar follows its focused pane; background
-  tabs retain their last focused pane.
-- **Know which agent needs attention.** Tabs and sidebar rows show working,
-  blocked, done and idle states using agent hooks and Herdr-style screen
-  detection. GUI screen recognition supplements hooks; the `tty7 agents` and
-  `tty7 wait` commands still use hook-reported states. Support varies by agent.
-- **Return to the right conversation.** Saved agent identities survive server
-  replacement. Supported agents resume a known conversation; if its identity
-  cannot be recovered, the pane opens a usable shell. All previously open
-  workspaces can return after daemon replacement. This restores layouts and
-  resumable conversations, not live processes across a system reboot.
-- **Work across machines.** Use native SSH or WSL workspaces, with Windows
-  in-pane SSH detection and WSL login-shell resolution. Windows packages include
-  the Linux server used to bootstrap WSL without a separate download.
-- **Make the workspace yours.** Theme-aware agent avatars, configurable fonts,
-  selectable prompts, keyboard shortcuts and Git diff/status views are built in.
-  The bell is off by default.
+## 🚀 Why ctty7
 
-- **Read Markdown in place.** Open Markdown in preview, switch to source to edit,
-  and install [custom reading themes](docs/customization/markdown-themes.mdx).
-  Paperglow follows the app's light and dark appearance. This feature is unreleased.
+ctty7 is built for developers who work with AI coding agents and need reliable terminal infrastructure. Whether you're running Claude Code, Codex, or Herdr-managed workflows, ctty7 keeps your sessions organized, your agent states visible, and your workspaces persistent across machines.
 
-## Install
+### ✨ What makes it different
 
-Download the latest **official Release** from
-[cloudy-liu/ctty7](https://github.com/cloudy-liu/ctty7/releases/latest).
-There is one release channel.
+<table>
+<tr>
+<td width="50%">
 
-| Platform | Package | Start |
-|---|---|---|
-| Windows x86_64 | `ctty7-<version>-windows-x86_64-setup.exe` | Run Setup, then open ctty7 from Start |
-| Windows portable | `ctty7-<version>-windows-x86_64.zip` | Extract and run `tty7-app.exe` |
-| macOS Apple silicon / Intel | `ctty7-<version>-macos-arm64.dmg` / `…-x86_64.dmg` | Drag the application into Applications |
-| Linux x86_64 | `ctty7-<version>-linux-x86_64.AppImage` | Make executable, then run |
-| Linux archive | `ctty7-<version>-linux-x86_64.tar.gz` | Extract and run `tty7-app` |
+**🪟 First-class Windows shell support**
 
-The macOS bundle directory remains `tty7.app` for compatibility. Windows builds
-are unsigned; macOS builds use ad-hoc signing unless release signing credentials
-are configured. The operating system may require manual confirmation.
+CMD and Cmder/Clink with prompt boundaries, working directory tracking, completion, ghost suggestions, and prompt editing. Native Up/Down history behavior preserved; fuzzy search reads PSReadLine and Clink history.
 
-Each release includes `checksums.txt`. The macOS ZIPs support application
-updates; `tty7-server-*` assets are internal helpers for remote workspaces.
+</td>
+<td width="50%">
 
-**Upgrading from the old fork:** install ctty7 v0.1.0 manually once. The old
-26.x updater considers 0.1.0 a downgrade. Preserve your existing configuration
-and data; see the [migration guide](docs/maintenance/migration.md).
+**🤖 Coding agent awareness**
 
-## Get started
+Tabs and sidebar show agent states (working, blocked, done, idle) using hooks and screen detection. Herdr host recognition keeps the sheep avatar visible even when nested agents launch.
 
-1. Open ctty7 and create a local terminal or choose a WSL/SSH workspace.
-2. Choose your shell in Settings. Existing CMD/Cmder launch arguments remain
-   supported, including `cmd.exe /K init.bat`.
-3. Launch your coding agent in a pane. Under **Settings → Agents**, install hooks
-   for the agents whose status and notifications you want to follow.
-4. Use **Settings → About → Check now** for official updates. Packages are
-   downloaded and verified before installation; applying an update is explicit.
+</td>
+</tr>
+<tr>
+<td width="50%">
 
-The command remains `tty7`, including `tty7 agents` and `tty7 wait`. No `ctty7`
-command alias is installed.
+**💾 Persistent workspaces**
 
-## Configuration and documentation
+Background daemon owns your shells. Close the window, your sessions keep running. Reopen them across local terminals, WSL, and SSH with layouts intact.
 
-Most options are available in Settings. Configuration stays at
-`%APPDATA%\tty7\config.json` on Windows and `~/.config/tty7/config.json` on
-macOS/Linux. `TTY7_CONFIG_DIR` or `--config-dir` selects an isolated directory.
+</td>
+<td width="50%">
 
-- [Configuration reference](docs/reference/configuration.mdx)
+**⚡ Built for productivity**
+
+Split panes, renamable sidebar groups, theme-aware avatars, Git status views, configurable shortcuts, selectable prompts, and silent bell by default.
+
+</td>
+</tr>
+</table>
+
+## 📦 Install
+
+<div align="center">
+
+**[⬇️ Download the latest release](https://github.com/cloudy-liu/ctty7/releases/latest)**
+
+</div>
+
+| Platform | Package | Installation |
+|----------|---------|-------------|
+| **Windows** 🪟 | `ctty7-*-windows-x86_64-setup.exe` | Run installer, launch from Start menu |
+| Windows portable | `ctty7-*-windows-x86_64.zip` | Extract and run `tty7-app.exe` |
+| **macOS** 🍎 | `ctty7-*-macos-arm64.dmg` (Apple Silicon)<br>`ctty7-*-macos-x86_64.dmg` (Intel) | Drag to Applications |
+| **Linux** 🐧 | `ctty7-*-linux-x86_64.AppImage` | Make executable and run |
+| Linux archive | `ctty7-*-linux-x86_64.tar.gz` | Extract and run `tty7-app` |
+
+<details>
+<summary>📝 Installation notes</summary>
+
+- Each release includes `checksums.txt` for verification
+- Windows builds are unsigned; your OS may require manual confirmation
+- macOS uses ad-hoc signing unless release credentials are configured
+- **Migrating from older versions?** See the [migration guide](docs/maintenance/migration.md)
+
+</details>
+
+## 🎯 Quick start
+
+1. **Launch ctty7** and create a local terminal, or connect to WSL/SSH
+2. **Choose your shell** in Settings. Existing CMD/Cmder arguments like `cmd.exe /K init.bat` remain supported
+3. **Start your coding agent** in a pane. Install hooks in **Settings → Agents** to track status and notifications
+4. **Check for updates** in **Settings → About → Check now**. Updates are downloaded, verified, and applied explicitly
+
+> 💡 The CLI command remains `tty7` (including `tty7 agents` and `tty7 wait`). No `ctty7` alias is installed.
+
+## 🎨 Features in depth
+
+<details>
+<summary><strong>🪟 Windows shell integration</strong></summary>
+
+ctty7 treats Windows shells as first-class citizens:
+
+- **Prompt editing** with Ctrl+A/E, word navigation, and inline editing
+- **Working directory tracking** for completion and status display
+- **Native history** with Up/Down preserved; fuzzy search reads PSReadLine/Clink
+- **Path selection** as single ranges (click-drag Windows paths without breaks)
+- **ConPTY win32-input-mode** support for programs that request modified Enter events
+
+</details>
+
+<details>
+<summary><strong>🤖 Agent state tracking</strong></summary>
+
+Know what your agents are doing at a glance:
+
+- **Visual states** in tabs and sidebar: working, blocked, done, idle
+- **Hook integration** for accurate status reporting (`tty7 agents`, `tty7 wait`)
+- **Herdr recognition** — the sheep avatar stays visible when Herdr spawns nested agents
+- **Session restoration** — agent identities survive daemon replacement, resuming conversations when possible
+
+</details>
+
+<details>
+<summary><strong>🌐 Remote workspaces</strong></summary>
+
+Work seamlessly across machines:
+
+- **Native SSH and WSL support** with in-pane detection and login shell resolution
+- **No separate downloads** — Windows packages include the Linux server for WSL bootstrap
+- **Consistent experience** across local and remote workspaces
+
+</details>
+
+<details>
+<summary><strong>📝 Markdown preview</strong></summary>
+
+Read and edit Markdown without leaving the terminal:
+
+- **Built-in preview** with switchable source editing
+- **Custom themes** — install your own or use Paperglow (light/dark aware)
+- _(Feature unreleased in current version)_
+
+</details>
+
+## ⚙️ Configuration
+
+Most settings are available in the GUI. Configuration files:
+
+- **Windows**: `%APPDATA%\tty7\config.json`
+- **macOS/Linux**: `~/.config/tty7/config.json`
+
+Override with `TTY7_CONFIG_DIR` environment variable or `--config-dir` flag.
+
+### 📚 Documentation
+
+<table>
+<tr>
+<td width="50%">
+
+**Getting Started**
 - [Installation and builds](docs/getting-started/installation.mdx)
+- [Configuration reference](docs/reference/configuration.mdx)
+- [Updates](docs/reference/updates.mdx)
+
+</td>
+<td width="50%">
+
+**Advanced**
 - [Agent status and notifications](docs/agents/status.mdx)
 - [Agent sessions](docs/agents/sessions.mdx)
 - [Remote workspaces](docs/remote/workspaces.mdx)
-- [Updates](docs/reference/updates.mdx)
 
-The reference documents retain `tty7` where it names commands and internal
-components. Product-specific support belongs in
-[this repository's issues](https://github.com/cloudy-liu/ctty7/issues).
+</td>
+</tr>
+</table>
 
-## Development and contributions
+## 🛠️ Development
 
-Use stable Rust and the native build tools for your platform. Linux also needs
-X11/Wayland/font development libraries listed in the
-[build instructions](docs/getting-started/installation.mdx#building-from-source).
-On Windows, install the MSVC C++ build tools and Windows SDK.
+### Prerequisites
+
+- Stable Rust toolchain
+- **Windows**: MSVC C++ build tools, Windows SDK
+- **Linux**: X11/Wayland/font dev libraries ([details](docs/getting-started/installation.mdx#building-from-source))
+- **macOS**: Xcode command line tools
+
+### Build from source
 
 ```sh
 git clone https://github.com/cloudy-liu/ctty7.git
 cd ctty7
 cargo build --locked
-cargo dev
+cargo dev  # Uses .tty7-dev config instead of your main config
 ```
 
-`cargo dev` uses `.tty7-dev` instead of your everyday configuration. Run
-`cargo fmt --check` and `cargo test --locked --workspace` before submitting changes.
+Before submitting changes:
 
-Rust crates, binaries, protocol identities and data paths retain their `tty7`
-names to preserve compatibility and keep future selective patch imports
-manageable. Pull requests target this fork. The [maintenance history](docs/maintenance/fork-history.md)
-records earlier differences; the [release runbook](docs/maintenance/release.md)
-covers verified publication.
+```sh
+cargo fmt --check
+cargo test --locked --workspace
+```
 
-## Origin and license
+### Project structure
 
-ctty7 is a modified distribution of tty7, licensed under [Apache-2.0](LICENSE).
-Original copyright and attribution are retained. This distribution changes
-Windows shell integration, agent and Herdr behavior, branding, documentation
-and release/update distribution. Herdr names and detection references remain
-attributed in the agent documentation.
+Rust crates, binaries, protocol identities, and data paths retain `tty7` naming for compatibility and to simplify future selective patch imports. Pull requests target this repository.
+
+**Maintenance docs:**
+- [Maintenance history](docs/maintenance/fork-history.md)
+- [Release runbook](docs/maintenance/release.md)
+
+## 🤝 Contributing
+
+Contributions are welcome! Please:
+
+1. Check [existing issues](https://github.com/cloudy-liu/ctty7/issues) before opening new ones
+2. Run tests and formatting checks before submitting PRs
+3. Target the `main` branch for all pull requests
+
+## 📄 License
+
+ctty7 is licensed under [Apache-2.0](LICENSE).
+
+## 🙏 Credits
+
+ctty7 originated from [tty7](https://github.com/l0ng-ai/tty7) and has evolved independently with extensive modifications to Windows integration, agent behavior, and workflow features. Original copyright and attribution are retained.
+
+---
+
+<div align="center">
+
+<img src="https://img.shields.io/github/stars/cloudy-liu/ctty7?style=social" alt="GitHub stars" />
+<img src="https://img.shields.io/github/forks/cloudy-liu/ctty7?style=social" alt="GitHub forks" />
+
+<br/><br/>
+
+**[⬇️ Download ctty7](https://github.com/cloudy-liu/ctty7/releases/latest)** · **[🐛 Report Issue](https://github.com/cloudy-liu/ctty7/issues)** · **[📚 Documentation](docs/)**
+
+<br/>
+
+Made with ❤️ for AI-powered development
+
+</div>
