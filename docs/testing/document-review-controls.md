@@ -18,17 +18,20 @@ visible and the layout actions remain reachable.
 
 The UI components and assets come from the maintenance fork
 `cloudy-liu/gpui-component`, pinned together at
-`39061d56eef21b9b62f37a1589b0bfc21022a643` in the manifest and lock file.
+`a4f5412fb9fb96a7b208276d96a32b09c7c67b93` in the manifest and lock file.
 [Component PR #2](https://github.com/cloudy-liu/gpui-component/pull/2) adds
 view- and revision-bound selection snapshots so a toolbar press and document
 reflow retain Markdown's selected text and highlighted byte ranges. The app
 keeps using its existing locked GPUI runtime from `l0ng-ai/zed`.
+[Component PR #3](https://github.com/cloudy-liu/gpui-component/pull/3) prevents
+restored partial selections from locking the inline state twice during painting.
 
 ## Automated checks
 
 ```powershell
 cargo fmt --all -- --check
 cargo test --locked --bin tty7-app ui::document_column::gpui_tests
+cargo test --locked --bin tty7-app ui::markdown_preview::tests::fill_and_restore_preserve_a_partial_markdown_selection
 cargo build --locked
 cargo test --locked
 ```
@@ -46,6 +49,11 @@ The GPUI tests click the rendered controls and check:
 - Unsaved editor text and cursor position, plus Markdown selection and reading
   position, survive clicks on fill and restore.
 
+The Markdown regression double-clicks a word, clicks the rendered fill and
+restore controls, and completes a draw after each change while checking the
+selected text. A state-only selection snapshot test does not exercise the
+inline painting path where the restored selection previously deadlocked.
+
 ## Desktop check
 
 1. Open a file with the left session sidebar and right file tree visible. Click
@@ -56,8 +64,8 @@ The GPUI tests click the rendered controls and check:
    saved layout preference.
 3. Hide the right panel, fill a document, and open the panel through the existing
    titlebar button. Check that the app menu and window controls remain usable.
-4. Keep an unsaved edit or a Markdown selection, then fill and restore. Check
-   the edit, selection, and agent session remain intact.
+4. Keep an unsaved edit or a partial Markdown selection, then fill and restore.
+   Check the edit, selection, and agent session remain intact.
 5. Repeat in light and dark themes and at narrow widths. Check the tooltip names
    the next action, icons align, and the document controls remain clickable below
    the window controls when they cannot share one row.
