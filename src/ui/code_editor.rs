@@ -63,6 +63,8 @@ pub(crate) struct TabCode {
     pub(crate) active: usize,
     pub(crate) roots: Vec<PathBuf>,
     pub(crate) expanded: std::collections::HashSet<PathBuf>,
+    /// Roots start open. Their folds belong to this tab and last for the session.
+    pub(crate) collapsed_roots: HashSet<PathBuf>,
     pub(crate) selected: Option<PathBuf>,
 }
 
@@ -74,6 +76,7 @@ impl TabCode {
             active: 0,
             roots: Vec::new(),
             expanded: std::collections::HashSet::new(),
+            collapsed_roots: HashSet::new(),
             selected: None,
         }
     }

@@ -28,7 +28,7 @@ mod embedded {
 }
 
 /// The icon's size on a list row. Symbols draws on a 24-unit grid with about
-/// 18 units of ink, which at 16px sits level with the 14px names.
+/// 18 units of ink, sized at 16px beside the panel's file names.
 pub(crate) const ROW_ICON: f32 = 16.0;
 
 const THEME_JSON: &str = include_str!("../../assets/file-icons/symbols/symbol-icon-theme.json");

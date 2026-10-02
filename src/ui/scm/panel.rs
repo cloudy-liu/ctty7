@@ -33,30 +33,14 @@ use crate::ui::file_icons::{FileIcon, ROW_ICON};
 use crate::ui::host_ops::{HostId, SharedHost};
 use crate::ui::i18n::{L10nKey, t, t_fmt, t_plural};
 use crate::ui::right_panel::{
-    HEADING, META, META_MONO, ROW_INSET, SEARCH_H, TEXT_MONO, action_strip, git_badge, info_chip,
+    FILE_ROW_H as ROW_H, HEADING, META, META_MONO, ROW_INSET, SEARCH_H, TEXT_MONO, action_strip,
+    git_badge, info_chip,
 };
 use crate::ui::rounding::{CARD_RADIUS, HAIRLINE, RoundedCorners as _, segment_corners};
 use crate::ui::scm::ScmIntent;
 use crate::ui::scm::path::split_display_path;
 use crate::ui::scm::state::{RepoKey, ScmGroup};
 use crate::ui::scm::status::{status_color, status_glyph};
-
-/// A file row, and the group header above it. Both 26px, so the list reads as
-/// one grid rather than as headers with a list hanging off them.
-///
-/// The pitch is the row's tallest line plus air: gpui leads a plain `div` at
-/// phi, so the mono path at [`TEXT_MONO`] occupies `round(13 × 1.618) = 21px`,
-/// and 26 gives it 2.5px on each side — dense, which is what a 260px column of
-/// paths wants. It was 24 around a 19px line while the panel was still on its
-/// own 12px step.
-///
-/// It is also the height `scm/detail.rs` gives the changed-file rows it shows
-/// for a commit — the two lists are the same list pointed at different trees,
-/// and a reader who opens a commit must not feel the pitch change under them.
-/// That file reads this constant rather than restating it; it used to carry its
-/// own copy with a comment asking the next reader to keep the two in step,
-/// which is the same kind of promise that let the panel's type ramp drift.
-pub(super) const ROW_H: f32 = 26.;
 
 /// The status letter's column, from `git_badge`. The group chevron sits in a
 /// box of exactly this width so the two line up in one column down the panel.
@@ -138,10 +122,6 @@ const MSG_ROWS_MAX: usize = 6;
 ///
 /// The frame is a hairline around a 24px interior, which puts it at 26 —
 /// gpui measures border-box, and the hairline is part of what a reader sees.
-/// Twenty-six is [`ROW_H`], the panel's row pitch, so the control sits on the
-/// same line grid as everything above and below it; it follows that constant
-/// rather than restating it, because the two moving apart is the only way this
-/// can go wrong.
 ///
 /// The chevron half is a square cell of the same interior, so the divider falls
 /// where the eye expects it rather than a couple of pixels early.
@@ -151,7 +131,7 @@ const MSG_ROWS_MAX: usize = 6;
 /// every other small mark in the panel. Marks are px on purpose. The panel's
 /// *type* is on the interface font scale and grows with it; a caret is chrome,
 /// sized against the box it sits in.
-const COMMIT_H: f32 = ROW_H;
+const COMMIT_H: f32 = 26.;
 const COMMIT_CHEVRON_W: f32 = COMMIT_H - 2.;
 const COMMIT_GLYPH: f32 = 11.;
 
@@ -1407,6 +1387,8 @@ impl Tty7App {
             .items_center()
             .gap(px(8.))
             .h(px(ROW_H))
+            .flex_shrink_0()
+            .line_height(relative(1.))
             .px(px(ROW_INSET))
             .rounded(px(5.))
             .cursor_pointer()
@@ -1487,8 +1469,9 @@ impl Tty7App {
             .items_center()
             .gap(px(8.))
             .h(px(ROW_H))
+            .flex_shrink_0()
+            .line_height(relative(1.))
             .px(px(ROW_INSET))
-            .py(px(3.))
             .rounded(px(5.))
             .cursor_pointer()
             .hover(|s| s.bg(gpui::rgb(sf.hover)))

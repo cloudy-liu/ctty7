@@ -36,7 +36,7 @@
 
 use std::sync::Arc;
 
-use gpui::{AnyElement, Context, SharedString, Window, div, prelude::*, px, rems};
+use gpui::{AnyElement, Context, SharedString, Window, div, prelude::*, px, relative, rems};
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 
 use tty7_core::core::git::diff::CommitLabel;
@@ -47,21 +47,12 @@ use crate::terminal::git_diff::DiffSource;
 use crate::ui::app::{CONTENT_INSET, Tty7App};
 use crate::ui::file_icons::{FileIcon, ROW_ICON};
 use crate::ui::i18n::{L10nKey, t, t_plural};
-use crate::ui::right_panel::{META, META_MONO, ROW_INSET, TEXT, TEXT_MONO, git_badge, info_chip};
+use crate::ui::right_panel::{
+    FILE_ROW_H as ROW_H, META, META_MONO, ROW_INSET, TEXT, TEXT_MONO, git_badge, info_chip,
+};
 use crate::ui::scm::path::{relative_time, split_display_path};
 use crate::ui::scm::state::{CommitDetailView, RepoKey};
 use crate::ui::scm::status::{status_color, status_glyph};
-
-// A file row, the same height as the working tree's, and inset the same way:
-// the two lists sit in one column and have to read as one grid, so a reader who
-// opens a commit never feels the pitch change under them.
-//
-// The inset is `right_panel`'s, because every tab of the panel is the same list
-// of rows seen from a different angle. The pitch is `panel.rs`'s, because these
-// rows *are* that list pointed at another tree — this file used to restate it
-// with a comment asking the next reader to keep the two in step, which is the
-// same kind of promise that let the panel's type ramp drift.
-use crate::ui::scm::panel::ROW_H;
 
 /// How much of the body is shown before it folds. Four lines is a paragraph;
 /// past that it is a changelog, and the file list is what the reader came for.
@@ -696,7 +687,8 @@ impl Tty7App {
             .gap(px(8.))
             .h(px(ROW_H))
             .px(px(ROW_INSET))
-            .py(px(3.))
+            .flex_shrink_0()
+            .line_height(relative(1.))
             .rounded(px(5.))
             .cursor_pointer()
             .hover(|s| s.bg(gpui::rgb(sf.hover)))
