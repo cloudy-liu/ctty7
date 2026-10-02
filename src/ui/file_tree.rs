@@ -1771,20 +1771,22 @@ impl Tty7App {
         // The root cannot be collapsed, so it keeps the open-folder glyph
         // rather than a chevron that promises something it will not do.
         let icon = if row.is_root {
-            IconName::FolderOpen
+            Icon::new(IconName::FolderOpen)
         } else if is_dir {
-            if row.expanded {
-                IconName::ChevronDown
+            Icon::empty().path(if row.expanded {
+                "icons/chevron-down-thin.svg"
             } else {
-                IconName::ChevronRight
-            }
+                "icons/chevron-right-thin.svg"
+            })
         } else {
-            IconName::File
+            Icon::new(IconName::File)
         };
         // A chevron is an affordance, not content: a step smaller and quieter
         // than the file mark, in the same cell so names still line up.
         let (glyph, glyph_color) = if is_dir && !row.is_root {
-            (ROW_GLYPH - 1., muted)
+            // The hairline chevron fills only half of its 24-unit box, so it is
+            // drawn a step larger than the file mark to read as the same size.
+            (ROW_GLYPH + 3., muted)
         } else if is_dir {
             (ROW_GLYPH, cx.theme().foreground)
         } else {
@@ -1832,7 +1834,7 @@ impl Tty7App {
                     .w(px(ROW_GLYPH))
                     .flex()
                     .justify_center()
-                    .child(Icon::new(icon).size(px(glyph)).text_color(glyph_color)),
+                    .child(icon.size(px(glyph)).text_color(glyph_color)),
             )
             .child(label)
             // Two indicators, two columns, two shapes. The dot is an unsaved
