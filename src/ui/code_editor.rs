@@ -1202,7 +1202,9 @@ impl Tty7App {
             .h_full()
             .children(header)
             .when_some(conflict_banner, |this, b| this.child(b))
-            .child(div().flex_1().min_h_0().child(body));
+            // Clip only the body: a tall editor/preview must not paint under
+            // the status bar. The header above is a sibling and is untouched.
+            .child(div().flex_1().min_h_0().overflow_hidden().child(body));
 
         // The panel's own paint is the same either way; only the box is not.
         // Filling the workspace means stopping the window's translucency and
