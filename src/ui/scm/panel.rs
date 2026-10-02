@@ -29,6 +29,7 @@ use tty7_core::core::git::status::{
 use crate::terminal::git_data::status_of;
 use crate::terminal::git_diff::DiffSource;
 use crate::ui::app::{CONTENT_INSET, TILE_GLYPH_XS, TILE_SIZE_XS, Tty7App};
+use crate::ui::file_icons::{FileIcon, ROW_ICON};
 use crate::ui::host_ops::{HostId, SharedHost};
 use crate::ui::i18n::{L10nKey, t, t_fmt, t_plural};
 use crate::ui::right_panel::{
@@ -279,7 +280,7 @@ impl Tty7App {
                 Some(t(L10nKey::PanelNoChangesHint)),
                 cx,
             ),
-            None => self.scm_groups(&repo, &status, cx),
+            None => self.scm_groups(&repo, &status, window, cx),
         };
         let history = self.render_graph_section(&repo, window, cx);
         self.scm_shell_full(title, pinned, body, history)
@@ -1328,6 +1329,7 @@ impl Tty7App {
         &mut self,
         repo: &RepoKey,
         status: &Arc<WorkingTreeStatus>,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mut list = v_flex().px(px(CONTENT_INSET - ROW_INSET)).py(px(2.));
@@ -1347,7 +1349,7 @@ impl Tty7App {
             }
             let shown = entries.len().min(MAX_RENDERED_FILES);
             for entry in entries.iter().take(shown) {
-                list = list.child(self.scm_file_row(repo, group, entry, cx));
+                list = list.child(self.scm_file_row(repo, group, entry, window, cx));
             }
             if entries.len() > shown {
                 list = list.child(self.scm_note(
@@ -1457,6 +1459,7 @@ impl Tty7App {
         repo: &RepoKey,
         group: ScmGroup,
         entry: &StatusEntry,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let sf = cx.global::<crate::ui::presets::Surfaces>().sidebar;
@@ -1513,6 +1516,7 @@ impl Tty7App {
                 }
             })
             .child(git_badge(letter, status_color(deco, cx), &mono))
+            .child(FileIcon::for_file(name).render(px(ROW_ICON), window))
             // Mono, because a path is a token you compare character by
             // character.
             //

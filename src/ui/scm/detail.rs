@@ -45,6 +45,7 @@ use tty7_core::core::git::status::DecoStatus;
 
 use crate::terminal::git_diff::DiffSource;
 use crate::ui::app::{CONTENT_INSET, Tty7App};
+use crate::ui::file_icons::{FileIcon, ROW_ICON};
 use crate::ui::i18n::{L10nKey, t, t_plural};
 use crate::ui::right_panel::{META, META_MONO, ROW_INSET, TEXT, TEXT_MONO, git_badge, info_chip};
 use crate::ui::scm::path::{relative_time, split_display_path};
@@ -136,7 +137,7 @@ impl Tty7App {
     pub(crate) fn render_commit_detail(
         &mut self,
         detail: &CommitDetailView,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
         // The detail names its own repository, and the panel may since have
@@ -168,7 +169,7 @@ impl Tty7App {
                     .child(self.detail_message(detail, commit, cx))
                     .children(self.detail_refs(commit, &mono, cx))
                     .children(self.detail_parents(detail, commit, &mono, cx))
-                    .child(self.detail_files(detail, commit, &mono, cx));
+                    .child(self.detail_files(detail, commit, &mono, window, cx));
             }
             // Nothing came back. `loaded` is what tells "still reading" apart
             // from "git has no such commit here" — without it a bad oid would
@@ -558,6 +559,7 @@ impl Tty7App {
         detail: &CommitDetailView,
         commit: &Commit,
         mono: &SharedString,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let Some(files) = detail.files.clone() else {
@@ -586,7 +588,7 @@ impl Tty7App {
         // so a hovered row's background is wider than its text.
         let mut rows = v_flex().px(px(CONTENT_INSET - ROW_INSET));
         for file in files.iter() {
-            rows = rows.child(self.detail_file_row(detail, &source, file, mono, cx));
+            rows = rows.child(self.detail_file_row(detail, &source, file, mono, window, cx));
         }
         list.child(rows).into_any_element()
     }
@@ -679,6 +681,7 @@ impl Tty7App {
         source: &DiffSource,
         file: &CommitFile,
         mono: &SharedString,
+        window: &Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let sf = panel_surface(cx);
@@ -717,6 +720,7 @@ impl Tty7App {
                 })
             })
             .child(git_badge(status_glyph(deco), status_color(deco, cx), mono))
+            .child(FileIcon::for_file(name).render(px(ROW_ICON), window))
             .child(
                 div()
                     .flex_none()

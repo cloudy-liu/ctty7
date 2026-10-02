@@ -1296,6 +1296,10 @@ impl Tty7App {
             )
             .border_b_1()
             .border_color(cx.theme().border)
+            .children(name.as_ref().map(|name| {
+                crate::ui::file_icons::FileIcon::for_file(name)
+                    .render(px(crate::ui::file_icons::ROW_ICON), window)
+            }))
             .child(
                 div()
                     .flex_1()
