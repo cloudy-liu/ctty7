@@ -18,13 +18,15 @@ visible and the layout actions remain reachable.
 
 The UI components and assets come from the maintenance fork
 `cloudy-liu/gpui-component`, pinned together at
-`a4f5412fb9fb96a7b208276d96a32b09c7c67b93` in the manifest and lock file.
+`2c3c878421d82889d5024f574b22086f483a7d56` in the manifest and lock file.
 [Component PR #2](https://github.com/cloudy-liu/gpui-component/pull/2) adds
 view- and revision-bound selection snapshots so a toolbar press and document
 reflow retain Markdown's selected text and highlighted byte ranges. The app
 keeps using its existing locked GPUI runtime from `l0ng-ai/zed`.
 [Component PR #3](https://github.com/cloudy-liu/gpui-component/pull/3) prevents
 restored partial selections from locking the inline state twice during painting.
+The pinned repair builds on the previous selection snapshot revision and changes
+only inline selection painting and its regression test.
 
 ## Automated checks
 
