@@ -36,6 +36,14 @@ fn agent_icon(path: &str) -> Option<&'static [u8]> {
         "icons/plus.svg" => include_bytes!("../../assets/icons/plus.svg"),
         "icons/ellipsis.svg" => include_bytes!("../../assets/icons/ellipsis.svg"),
         "icons/folder-closed.svg" => include_bytes!("../../assets/icons/folder-closed.svg"),
+        // Hairline disclosure chevrons for the file tree: the stock ones are
+        // drawn at stroke 2 and read as heavy beside 14px names.
+        "icons/chevron-down-thin.svg" => {
+            include_bytes!("../../assets/icons/chevron-down-thin.svg")
+        }
+        "icons/chevron-right-thin.svg" => {
+            include_bytes!("../../assets/icons/chevron-right-thin.svg")
+        }
         "icons/folder-open.svg" => include_bytes!("../../assets/icons/folder-open.svg"),
         "icons/info.svg" => include_bytes!("../../assets/icons/info.svg"),
         "icons/eye.svg" => include_bytes!("../../assets/icons/eye.svg"),
