@@ -364,6 +364,11 @@ fn settings_search_entries() -> &'static [SearchEntry] {
         },
         SearchEntry {
             section: Appearance,
+            title: SettingsEditorTheme,
+            keywords: SettingsSearchEditorThemeKeywords,
+        },
+        SearchEntry {
+            section: Appearance,
             title: SettingsSyncWithSystem,
             keywords: SettingsSearchSyncWithSystemKeywords,
         },
@@ -2372,6 +2377,7 @@ impl Tty7App {
             .child(self.render_custom_themes(cx))
             .child(self.section_rule(cx))
             .child(self.render_markdown_theme_settings(cx))
+            .child(self.render_editor_theme_settings(cx))
             .child(self.section_rule(cx))
             .child(self.render_window_section(cx))
             .child(self.section_rule(cx))
@@ -6115,6 +6121,58 @@ impl Tty7App {
             )
     }
 
+    fn render_editor_theme_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+        use crate::ui::editor_theme;
+        let selected = cx.global::<Config>().editor_theme.clone();
+        let menu_selected = selected.clone();
+        let app = cx.entity().downgrade();
+        let picker = Button::new("editor-theme-picker")
+            .debug_selector(|| "editor-theme-picker".into())
+            .label(t(editor_theme::label(&selected)))
+            .icon(IconName::ChevronDown)
+            .small()
+            .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+                let mut menu = menu.min_w(px(260.));
+                for (id, label) in editor_theme::CHOICES {
+                    let app = app.clone();
+                    menu = menu.item(
+                        PopupMenuItem::new(t(label))
+                            .checked(
+                                id == menu_selected
+                                    || (id == "auto" && !editor_theme::known(&menu_selected)),
+                            )
+                            .on_click(move |_, _, cx| {
+                                if let Some(app) = app.upgrade() {
+                                    app.update(cx, |this, cx| this.set_editor_theme(id, cx));
+                                }
+                            }),
+                    );
+                }
+                menu
+            });
+        let row = self.settings_row(
+            t(L10nKey::SettingsEditorTheme),
+            t(L10nKey::SettingsEditorThemeDesc),
+            picker.into_any_element(),
+            cx,
+        );
+        v_flex()
+            .child(row)
+            .when(!editor_theme::known(&selected), |this| {
+                this.child(
+                    div()
+                        .pb_2()
+                        .text_sm()
+                        .text_color(cx.theme().warning)
+                        .child(t_fmt(
+                            L10nKey::SettingsEditorThemeUnavailable,
+                            &[("requested", &selected)],
+                        )),
+                )
+            })
+            .into_any_element()
+    }
+
     fn render_markdown_theme_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         use crate::core::markdown_theme::Registry;
         let selected = cx.global::<Config>().markdown_theme.clone();
@@ -8185,6 +8243,33 @@ mod gpui_tests {
             .unwrap();
         let vcx = VisualTestContext::from_window(window.into(), cx);
         (app, vcx)
+    }
+
+    #[gpui::test]
+    fn editor_theme_picker_saves_the_selected_choice(cx: &mut TestAppContext) {
+        crate::core::config::pin_test_config_dir();
+        crate::ui::i18n::set_locale("en");
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.open_settings_section(SettingsSection::Appearance, window, cx);
+            let settings = app.active_settings().unwrap();
+            settings
+                .search
+                .update(cx, |input, cx| input.set_value("code editor", window, cx));
+        });
+        vcx.simulate_resize(size(px(1100.), px(800.)));
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let picker = vcx
+            .debug_bounds("editor-theme-picker")
+            .expect("search reveals the editor theme picker");
+        vcx.simulate_click(picker.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        vcx.simulate_keystrokes("down down enter");
+        vcx.run_until_parked();
+        vcx.update(|_, cx| assert_eq!(cx.global::<Config>().editor_theme, "atom_one_dark"));
     }
 
     #[gpui::test]

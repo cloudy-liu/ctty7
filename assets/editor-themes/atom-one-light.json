@@ -1,0 +1,159 @@
+{
+  "highlight_theme": {
+    "name": "Atom One Light",
+    "appearance": "light",
+    "style": {
+      "editor.background": "#FAFAFA",
+      "editor.foreground": "#383A42",
+      "editor.gutter.background": "#FAFAFA",
+      "editor.active_line.background": "#383A420C",
+      "editor.line_number": "#9D9D9F",
+      "editor.active_line_number": "#383A42",
+      "editor.invisible": "#383A4233",
+      "syntax": {
+        "keyword": {
+          "color": "#A626A4"
+        },
+        "operator": {
+          "color": "#383A42"
+        },
+        "function": {
+          "color": "#4078F2"
+        },
+        "constructor": {
+          "color": "#4078F2"
+        },
+        "type": {
+          "color": "#C18401"
+        },
+        "enum": {
+          "color": "#C18401"
+        },
+        "variant": {
+          "color": "#C18401"
+        },
+        "variable": {
+          "color": "#E45649"
+        },
+        "variable.special": {
+          "color": "#E45649"
+        },
+        "property": {
+          "color": "#E45649"
+        },
+        "constant": {
+          "color": "#986801"
+        },
+        "number": {
+          "color": "#986801"
+        },
+        "boolean": {
+          "color": "#986801"
+        },
+        "string": {
+          "color": "#50A14F"
+        },
+        "string.escape": {
+          "color": "#0184BC"
+        },
+        "string.regex": {
+          "color": "#0184BC"
+        },
+        "string.special": {
+          "color": "#50A14F"
+        },
+        "string.special.symbol": {
+          "color": "#0184BC"
+        },
+        "comment": {
+          "color": "#A0A1A7",
+          "font_style": "italic"
+        },
+        "comment.doc": {
+          "color": "#A0A1A7",
+          "font_style": "italic"
+        },
+        "tag": {
+          "color": "#E45649"
+        },
+        "tag.doctype": {
+          "color": "#A626A4"
+        },
+        "attribute": {
+          "color": "#986801"
+        },
+        "preproc": {
+          "color": "#A626A4"
+        },
+        "label": {
+          "color": "#986801"
+        },
+        "link_text": {
+          "color": "#4078F2"
+        },
+        "link_uri": {
+          "color": "#E45649"
+        },
+        "title": {
+          "color": "#4078F2"
+        },
+        "text.literal": {
+          "color": "#50A14F"
+        },
+        "text.code.span": {
+          "color": "#50A14F"
+        },
+        "embedded": {
+          "color": "#CA1243"
+        },
+        "emphasis": {
+          "color": "#A626A4",
+          "font_style": "italic"
+        },
+        "emphasis.strong": {
+          "color": "#C18401",
+          "font_weight": 700
+        },
+        "primary": {
+          "color": "#383A42"
+        },
+        "punctuation": {
+          "color": "#383A42"
+        },
+        "punctuation.bracket": {
+          "color": "#383A42"
+        },
+        "punctuation.delimiter": {
+          "color": "#383A42"
+        },
+        "punctuation.special": {
+          "color": "#383A42"
+        },
+        "punctuation.list_marker": {
+          "color": "#383A42"
+        }
+      },
+      "error": "#E45649",
+      "error.border": "#E45649",
+      "error.background": "#E4564926",
+      "warning": "#C18401",
+      "warning.border": "#C18401",
+      "warning.background": "#C1840126",
+      "info": "#4078F2",
+      "info.border": "#4078F2",
+      "info.background": "#4078F226",
+      "success": "#50A14F",
+      "success.border": "#50A14F",
+      "success.background": "#50A14F26",
+      "hint": "#A0A1A7",
+      "hint.border": "#A0A1A7",
+      "hint.background": "#A0A1A726"
+    }
+  },
+  "selection": "#E5E5E6",
+  "caret": "#526FFF",
+  "search_match": "#526FFF33",
+  "search_match_active": "#E5E5E6",
+  "muted_foreground": "#9D9D9F",
+  "border": "#383A4233"
+}

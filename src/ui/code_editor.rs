@@ -668,7 +668,7 @@ impl Tty7App {
         let language = language_for_path(&path);
         let input = cx.new(|cx| {
             InputState::new(window, cx)
-                .code_editor(language)
+                .code_editor(crate::ui::editor_theme::language(language))
                 .multi_line(true)
                 .tab_size(TabSize {
                     tab_size: 4,
@@ -1184,6 +1184,10 @@ impl Tty7App {
                 let input = f.input.clone();
                 Input::new(&input)
                     .appearance(false)
+                    .editor_style(crate::ui::editor_theme::current(
+                        language_for_path(&f.path),
+                        cx,
+                    ))
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_size(cx.theme().mono_font_size)
                     .size_full()
@@ -1546,6 +1550,268 @@ mod tests {
         }
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn editor_theme_colors_rust_bindings_without_recoloring_module_paths(cx: &mut TestAppContext) {
+        use crate::ui::editor_theme;
+        use gpui_component::highlighter::SyntaxHighlighter;
+        let (app, mut vcx) = markdown_window(cx);
+        let source = "use std::borrow::Cow;\nmod core;\nfn make(cx: &mut App) {\n    let fonts = \"a\\n\";\n    let file: std::path::PathBuf;\n    cx.add_fonts(fonts);\n    let outer = LIMIT;\n    wrap! { let inner = load_fonts(); let count = OTHER_LIMIT; let maybe = Some(inner); }\n}\n";
+        for (preference, variable, keyword, function, ty, foreground) in [
+            (
+                "atom_one_dark",
+                0xe06c75,
+                0xc678dd,
+                0x61afef,
+                0x56b6c2,
+                0xabb2bf,
+            ),
+            (
+                "atom_one_light",
+                0xe45649,
+                0xa626a4,
+                0x4078f2,
+                0x0184bc,
+                0x383a42,
+            ),
+        ] {
+            app.update_in(&mut vcx, |app, _, cx| {
+                app.set_editor_theme(preference, cx);
+                let style = editor_theme::current("rust", cx);
+                let mut highlighter = SyntaxHighlighter::new(editor_theme::language("rust"));
+                highlighter.update(None, &source.into(), None);
+                let runs = highlighter.styles(&(0..source.len()), &style.highlight_theme);
+                for (token, expected) in [
+                    ("fonts", variable),
+                    ("fn", keyword),
+                    ("make", function),
+                    ("App", ty),
+                    ("std", foreground),
+                    ("borrow", foreground),
+                    ("core", foreground),
+                    ("path", foreground),
+                    ("load_fonts", function),
+                    ("inner", variable),
+                    (
+                        "LIMIT",
+                        if preference == "atom_one_dark" {
+                            0xd19a66
+                        } else {
+                            0x986801
+                        },
+                    ),
+                    (
+                        "OTHER_LIMIT",
+                        if preference == "atom_one_dark" {
+                            0xd19a66
+                        } else {
+                            0x986801
+                        },
+                    ),
+                    ("Some", function),
+                    ("\\n", ty),
+                ] {
+                    let offset = source.find(token).unwrap();
+                    let color = runs
+                        .iter()
+                        .find(|(range, _)| range.contains(&offset))
+                        .and_then(|(_, run)| run.color)
+                        .or(style.highlight_theme.style.editor_foreground);
+                    assert_eq!(
+                        color,
+                        Some(gpui::rgb(expected).into()),
+                        "{preference}: {token}"
+                    );
+                }
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn editor_theme_highlights_cross_language_samples(cx: &mut TestAppContext) {
+        use crate::ui::editor_theme;
+        use gpui_component::highlighter::{LanguageRegistry, SyntaxHighlighter};
+        let (app, mut vcx) = markdown_window(cx);
+        let shared_rust = LanguageRegistry::singleton().language("rust").unwrap();
+        editor_theme::language("rust");
+        assert_eq!(
+            LanguageRegistry::singleton().language("rust").unwrap(),
+            shared_rust
+        );
+        for (preference, keyword, function, string, number) in [
+            ("atom_one_dark", 0xc678dd, 0x61afef, 0x98c379, 0xd19a66),
+            ("atom_one_light", 0xa626a4, 0x4078f2, 0x50a14f, 0x986801),
+        ] {
+            app.update_in(&mut vcx, |app, _, cx| {
+                app.set_editor_theme(preference, cx);
+                for (language, source, tokens) in [
+                    (
+                        "typescript",
+                        "function greet() { return \"hello\"; }",
+                        vec![
+                            ("function", keyword),
+                            ("greet", function),
+                            ("hello", string),
+                        ],
+                    ),
+                    (
+                        "javascript",
+                        "function greet() { return 42; }",
+                        vec![("function", keyword), ("greet", function), ("42", number)],
+                    ),
+                    (
+                        "python",
+                        "def greet():\n    return \"hello\"",
+                        vec![("def", keyword), ("greet", function), ("hello", string)],
+                    ),
+                    (
+                        "json",
+                        "{\"count\": 42, \"text\": \"hello\"}",
+                        vec![("42", number), ("hello", string)],
+                    ),
+                ] {
+                    let style = editor_theme::current(language, cx);
+                    let mut highlighter = SyntaxHighlighter::new(language);
+                    highlighter.update(None, &source.into(), None);
+                    let runs = highlighter.styles(&(0..source.len()), &style.highlight_theme);
+                    for (token, expected) in tokens {
+                        let offset = source.find(token).unwrap();
+                        let color = runs
+                            .iter()
+                            .find(|(range, _)| range.contains(&offset))
+                            .and_then(|(_, run)| run.color);
+                        assert_eq!(
+                            color,
+                            Some(gpui::rgb(expected).into()),
+                            "{preference} {language}: {token}"
+                        );
+                    }
+                }
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn editor_theme_switches_with_app_appearance_and_preserves_edits(cx: &mut TestAppContext) {
+        use crate::core::config::Config;
+        use crate::ui::editor_theme;
+        let (app, mut vcx) = markdown_window(cx);
+        let original = "fn main() {}\n".repeat(150);
+        let host: SharedHost = tty7_core::host::local::LocalHost::new();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.set_theme_follow_system(false, window, cx);
+            app.set_preset("light", window, cx);
+            app.editor_install_file(host, "/theme.rs".into(), original.clone(), None, window, cx);
+        });
+        let input = app.read_with(&vcx, |app, _| {
+            app.tab_code().unwrap().active_file().unwrap().input.clone()
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        vcx.simulate_keystrokes("x");
+        vcx.simulate_keystrokes("shift-right shift-right");
+        input.update(&mut vcx, |input, cx| {
+            input.set_scroll_offset(gpui::point(px(0.), px(-250.)), cx)
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let edited = input.read_with(&vcx, |input, _| input.value());
+        let cursor = input.read_with(&vcx, |input, _| input.cursor_position());
+        let selected = input.read_with(&vcx, |input, _| input.selected_range());
+        let scroll = input.read_with(&vcx, |input, _| input.scroll_offset());
+        assert!(!selected.is_empty());
+        assert!(scroll.y < px(0.));
+        for (preference, preset, background) in [
+            ("auto", "light", 0xfafafa),
+            ("auto", "dark", 0x282c34),
+            ("atom_one_dark", "light", 0x282c34),
+            ("atom_one_light", "dark", 0xfafafa),
+            ("atom_one_dark", "dark", 0x282c34),
+            ("atom_one_light", "light", 0xfafafa),
+        ] {
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.set_preset(preset, window, cx);
+                app.set_editor_theme(preference, cx);
+                let style = editor_theme::current("rust", cx);
+                assert_eq!(
+                    style.highlight_theme.style.editor_background,
+                    Some(gpui::rgb(background).into())
+                );
+                assert_eq!(cx.global::<Config>().editor_theme, preference);
+            });
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            input.read_with(&vcx, |input, _| {
+                assert_eq!(input.value(), edited);
+                assert_eq!(input.cursor_position(), cursor);
+                assert_eq!(input.selected_range(), selected);
+                assert_eq!(input.scroll_offset(), scroll);
+            });
+            app.read_with(&vcx, |app, _| {
+                assert!(app.tab_code().unwrap().active_file().unwrap().dirty)
+            });
+        }
+        app.update_in(&mut vcx, |app, window, cx| app.focus_editor(window, cx));
+        vcx.simulate_keystrokes("secondary-z");
+        input.read_with(&vcx, |input, _| assert_eq!(input.value(), original));
+    }
+
+    #[gpui::test]
+    fn editor_theme_tracks_preview_cancel_and_config_reload(cx: &mut TestAppContext) {
+        use crate::core::config::{Config, LoadOutcome};
+        use crate::ui::editor_theme;
+        let (app, mut vcx) = markdown_window(cx);
+        vcx.update(|_, cx| crate::ui::windows::WindowRegistry::init(cx));
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.set_theme_follow_system(false, window, cx);
+            app.set_editor_theme("auto", cx);
+            app.set_preset("light", window, cx);
+            app.preview_preset("dark", window, cx);
+            assert_eq!(
+                editor_theme::current("text", cx)
+                    .highlight_theme
+                    .style
+                    .editor_background,
+                Some(gpui::rgb(0x282c34).into())
+            );
+            app.cancel_preset_preview(window, cx);
+            assert_eq!(
+                editor_theme::current("text", cx)
+                    .highlight_theme
+                    .style
+                    .editor_background,
+                Some(gpui::rgb(0xfafafa).into())
+            );
+        });
+        vcx.update(|_, cx| {
+            let mut config = cx.global::<Config>().clone();
+            config.editor_theme = "atom_one_dark".into();
+            crate::apply_reloaded_config(cx, (config, LoadOutcome::Parsed), &mut false);
+            assert_eq!(
+                editor_theme::current("text", cx)
+                    .highlight_theme
+                    .style
+                    .editor_background,
+                Some(gpui::rgb(0x282c34).into())
+            );
+            let mut config = cx.global::<Config>().clone();
+            config.editor_theme = "future-theme".into();
+            crate::apply_reloaded_config(cx, (config, LoadOutcome::Parsed), &mut false);
+            assert_eq!(cx.global::<Config>().editor_theme, "future-theme");
+            assert_eq!(
+                editor_theme::current("text", cx)
+                    .highlight_theme
+                    .style
+                    .editor_background,
+                Some(gpui::rgb(0xfafafa).into())
+            );
         });
     }
 

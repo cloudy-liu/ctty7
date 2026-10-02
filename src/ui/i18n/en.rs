@@ -176,6 +176,19 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsCustomThemes => "Custom themes",
         L10nKey::SettingsThemesRejected => "Not loaded from the themes folder",
         L10nKey::SettingsMarkdownTheme => "Markdown reading theme",
+        L10nKey::SettingsEditorTheme => "Code editor theme",
+        L10nKey::SettingsEditorThemeDesc => {
+            "Automatic follows the app's light or dark appearance. Applies to source code only."
+        }
+        L10nKey::SettingsEditorThemeAuto => "Automatic",
+        L10nKey::SettingsEditorThemeDark => "Always dark · Atom One Dark",
+        L10nKey::SettingsEditorThemeLight => "Always light · Atom One Light",
+        L10nKey::SettingsEditorThemeUnavailable => {
+            "Unknown editor theme {requested}. Using Automatic until you select a theme."
+        }
+        L10nKey::SettingsSearchEditorThemeKeywords => {
+            "code editor source syntax highlighting atom one dark light theme"
+        }
         L10nKey::SettingsMarkdownThemeDesc => {
             "Choose a reading style. Its light and dark colors follow the app. Theme file changes apply automatically."
         }
