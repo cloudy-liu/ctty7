@@ -46,6 +46,10 @@ regex = "1"
 # Document-relative Markdown links and URL fragments (already transitive).
 percent-encoding = "2"
 url = "2"
+
+# Mermaid diagram rendering
+merman = { version = "0.7", features = ["render"] }
+
 # Grapheme-cluster boundaries for the sidebar's label elision
 # (`ui::tab_strip`). Cutting a label by `char` tears emoji apart: a ZWJ
 # sequence loses its joiner, `❤️` loses the variation selector that makes it an

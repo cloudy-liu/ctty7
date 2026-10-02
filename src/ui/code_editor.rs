@@ -705,6 +705,7 @@ impl Tty7App {
                     host.clone(),
                     path.clone(),
                     app,
+                    true,
                     cx,
                 )
             })
