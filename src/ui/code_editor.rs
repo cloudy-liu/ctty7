@@ -63,7 +63,9 @@ pub(crate) struct TabCode {
     pub(crate) active: usize,
     pub(crate) roots: Vec<PathBuf>,
     pub(crate) expanded: std::collections::HashSet<PathBuf>,
-    pub(crate) selected: Option<PathBuf>,
+    /// Roots start open. Their folds belong to this tab and last for the session.
+    pub(crate) collapsed_roots: HashSet<PathBuf>,
+    pub(crate) selected: Option<crate::ui::file_tree::TreeSelection>,
 }
 
 impl TabCode {
@@ -74,6 +76,7 @@ impl TabCode {
             active: 0,
             roots: Vec::new(),
             expanded: std::collections::HashSet::new(),
+            collapsed_roots: HashSet::new(),
             selected: None,
         }
     }
@@ -1296,6 +1299,10 @@ impl Tty7App {
             )
             .border_b_1()
             .border_color(cx.theme().border)
+            .children(name.as_ref().map(|name| {
+                crate::ui::file_icons::FileIcon::for_file(name)
+                    .render(px(crate::ui::file_icons::ROW_ICON), window)
+            }))
             .child(
                 div()
                     .flex_1()

@@ -8,23 +8,28 @@ use crate::core::git::status::{DecoStatus, DirRollup, StatusIndex};
 use crate::terminal::git_data::index_of;
 use crate::ui::app::Tty7App;
 use crate::ui::file_copy;
+use crate::ui::file_icons::{FileIcon, ROW_ICON};
 use crate::ui::host_ops::{ByHost, HostId, HostOps, InFlight, SharedHost, WatchSub};
 use crate::ui::host_registry::HostRegistry;
 use crate::ui::i18n::{L10nKey, t, t_fmt};
-use crate::ui::right_panel::{ROW_GLYPH, git_badge};
+use crate::ui::right_panel::{FILE_ROW_H, HEADING, TEXT_MONO, git_badge};
 use crate::ui::scm::status::{status_color, status_glyph};
 use gpui::prelude::*;
 use gpui::{
     AnyElement, App, Context, Entity, ExternalPaths, FocusHandle, KeyDownEvent, MouseButton,
-    PromptLevel, SharedString, Subscription, Window, div, px,
+    PromptLevel, SharedString, Subscription, Window, div, px, relative, rems,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
-use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_component::{ActiveTheme as _, Icon, Sizable as _, WindowExt as _, h_flex, v_flex};
 
 const INDENT: f32 = 14.0;
+
+/// The disclosure chevron's cell.
+const CHEVRON_CELL: f32 = 16.0;
+
+/// From a row's inset to its label: both cells and the row's `gap_1` after each.
+const LABEL_LEAD: f32 = CHEVRON_CELL + 4.0 + ROW_ICON + 4.0;
 
 const REFRESH_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(200);
 
@@ -49,6 +54,8 @@ struct Landed {
 
 pub(crate) struct TreeRow {
     pub entry: TreeEntry,
+    /// The root whose section contains this occurrence; search hits have none.
+    pub root: Option<PathBuf>,
     pub depth: usize,
     pub is_root: bool,
     pub expanded: bool,
@@ -57,6 +64,50 @@ pub(crate) struct TreeRow {
     /// one whose contents are all hidden, and one the OS refused to read all
     /// render as the same nothing.
     pub note: Option<TreeNote>,
+}
+
+/// One occurrence of a path in the tree. Nested roots can display a path twice.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct TreeSelection {
+    path: PathBuf,
+    root: Option<PathBuf>,
+}
+
+impl TreeSelection {
+    fn for_path(path: &Path, roots: &[PathBuf]) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            root: containing_root(roots, path).cloned(),
+        }
+    }
+
+    fn matches(&self, row: &TreeRow) -> bool {
+        self.path == row.entry.path && (row.root.is_none() || self.root == row.root)
+    }
+
+    fn is_root(&self) -> bool {
+        self.root.as_ref() == Some(&self.path)
+    }
+
+    fn element_id(&self) -> SharedString {
+        format!("tree-{:?}-{:?}", self.root, self.path).into()
+    }
+}
+
+impl TreeRow {
+    fn selection(&self) -> TreeSelection {
+        TreeSelection {
+            path: self.entry.path.clone(),
+            root: self.root.clone(),
+        }
+    }
+}
+
+fn containing_root<'a>(roots: &'a [PathBuf], path: &Path) -> Option<&'a PathBuf> {
+    roots
+        .iter()
+        .filter(|root| path.starts_with(root))
+        .max_by_key(|root| root.components().count())
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -493,6 +544,7 @@ fn search_rows(search: &SearchState) -> Vec<TreeRow> {
         .iter()
         .map(|e| TreeRow {
             entry: e.clone(),
+            root: None,
             depth: 0,
             is_root: false,
             expanded: false,
@@ -510,6 +562,7 @@ fn search_rows(search: &SearchState) -> Vec<TreeRow> {
     };
     if let Some(note) = note {
         rows.push(TreeRow {
+            root: None,
             entry: TreeEntry {
                 name: String::new(),
                 path: PathBuf::new(),
@@ -531,14 +584,17 @@ impl FileTreeState {
         host: HostId,
         roots: &[PathBuf],
         expanded: &HashSet<PathBuf>,
+        collapsed_roots: &HashSet<PathBuf>,
     ) -> Vec<TreeRow> {
         let mut rows = Vec::new();
         for root in roots {
+            let start = rows.len();
             let name = root
                 .file_name()
                 .map(|n| n.to_string_lossy().to_string())
                 .unwrap_or_else(|| root.display().to_string());
             rows.push(TreeRow {
+                root: None,
                 entry: TreeEntry {
                     name,
                     path: root.clone(),
@@ -547,10 +603,15 @@ impl FileTreeState {
                 },
                 depth: 0,
                 is_root: true,
-                expanded: true,
+                expanded: !collapsed_roots.contains(root),
                 note: None,
             });
-            self.flatten_dir(host, root, 1, expanded, &mut rows);
+            if !collapsed_roots.contains(root) {
+                self.flatten_dir(host, root, 1, expanded, &mut rows);
+            }
+            for row in &mut rows[start..] {
+                row.root = Some(root.clone());
+            }
         }
         rows
     }
@@ -576,6 +637,7 @@ impl FileTreeState {
             let is_expanded = e.is_dir && expanded.contains(&e.path);
             out.push(TreeRow {
                 entry: e.clone(),
+                root: None,
                 depth,
                 is_root: false,
                 expanded: is_expanded,
@@ -597,6 +659,7 @@ impl FileTreeState {
         let key: DirKey = (host, dir.to_path_buf());
         let note = dir_note(self.unreadable.contains(&key), landed);
         TreeRow {
+            root: None,
             entry: TreeEntry {
                 name: String::new(),
                 path: dir.to_path_buf(),
@@ -910,36 +973,43 @@ impl Tty7App {
         }
     }
 
-    fn file_tree_toggle_expand(&mut self, dir: &Path, cx: &mut Context<Self>) {
+    fn file_tree_toggle_expand(&mut self, dir: &Path, is_root: bool, cx: &mut Context<Self>) {
         let Some(code) = self.tab_code_mut() else {
             return;
         };
-        if !code.expanded.remove(dir) {
+        if is_root {
+            if !code.collapsed_roots.remove(dir) {
+                code.collapsed_roots.insert(dir.to_path_buf());
+            }
+        } else if !code.expanded.remove(dir) {
             code.expanded.insert(dir.to_path_buf());
         }
+        // A user fold supersedes a reveal that is still waiting for a listing.
+        self.right_panel.tree_reveal = None;
         cx.notify();
     }
 
     fn file_tree_activate(
         &mut self,
-        row_path: &Path,
+        selection: &TreeSelection,
         is_dir: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let row_path = &selection.path;
         if let Some(code) = self.tab_code_mut() {
-            code.selected = Some(row_path.to_path_buf());
+            code.selected = Some(selection.clone());
         }
         let searching = !self.file_search.read(cx).value().trim().is_empty();
         if is_dir && searching {
-            self.file_tree_reveal(row_path, cx);
+            self.file_tree_reveal_path(row_path, cx);
             self.file_search
                 .update(cx, |st, cx| st.set_value("", window, cx));
             cx.notify();
             return;
         }
         if is_dir {
-            self.file_tree_toggle_expand(row_path, cx);
+            self.file_tree_toggle_expand(row_path, selection.is_root(), cx);
         } else {
             self.open_file_in_editor(row_path, window, cx);
         }
@@ -957,13 +1027,13 @@ impl Tty7App {
     /// whether the frame it is drawing is already out of date.
     fn file_tree_expand_ancestors(&mut self, dir: &Path) -> bool {
         let roots = self.tab_code().map(|c| c.roots.clone()).unwrap_or_default();
-        let Some(root) = roots.iter().find(|r| dir.starts_with(r)).cloned() else {
+        let Some(root) = containing_root(&roots, dir).cloned() else {
             return false;
         };
         let Some(code) = self.tab_code_mut() else {
             return false;
         };
-        let mut opened = false;
+        let mut opened = code.collapsed_roots.remove(&root);
         for a in dir.ancestors().take_while(|a| a.starts_with(&root)) {
             opened |= code.expanded.insert(a.to_path_buf());
         }
@@ -995,7 +1065,7 @@ impl Tty7App {
         // dropped the selection on the floor there — the first reveal in a
         // session landed on a row that was expanded but not highlighted.
         if let Some(code) = self.tab_code_mut_or_init() {
-            code.selected = Some(path.to_path_buf());
+            code.selected = Some(TreeSelection::for_path(path, &code.roots));
         }
         self.right_panel.tree_reveal = Some((
             path.to_path_buf(),
@@ -1067,7 +1137,7 @@ impl Tty7App {
         // cursor must not be able to land on one.
         let rows: Vec<TreeRow> = self
             .file_tree
-            .visible_rows(host, &code.roots, &code.expanded)
+            .visible_rows(host, &code.roots, &code.expanded, &code.collapsed_roots)
             .into_iter()
             .filter(|r| r.note.is_none())
             .collect();
@@ -1077,7 +1147,7 @@ impl Tty7App {
         let sel_ix = code
             .selected
             .as_ref()
-            .and_then(|s| rows.iter().position(|r| r.entry.path == *s));
+            .and_then(|s| rows.iter().position(|r| s.matches(r)));
         let key = ev.keystroke.key.as_str();
         match key {
             "up" | "down" => {
@@ -1086,48 +1156,41 @@ impl Tty7App {
                     (Some(i), "up") => i.saturating_sub(1),
                     (Some(i), _) => (i + 1).min(rows.len() - 1),
                 };
-                let path = rows[next].entry.path.clone();
                 if let Some(code) = self.tab_code_mut() {
-                    code.selected = Some(path);
+                    code.selected = Some(rows[next].selection());
                 }
+                self.right_panel.tree_reveal = None;
                 cx.notify();
             }
             "left" => {
                 let Some(i) = sel_ix else { return };
                 let row = &rows[i];
-                let (path, is_dir, expanded, is_root) = (
-                    row.entry.path.clone(),
-                    row.entry.is_dir,
-                    row.expanded,
-                    row.is_root,
-                );
-                let parent_in_rows = path
-                    .parent()
-                    .is_some_and(|p| rows.iter().any(|r| r.entry.path == p));
-                if let Some(code) = self.tab_code_mut() {
-                    if is_dir && expanded && !is_root {
-                        code.expanded.remove(&path);
-                    } else if parent_in_rows && let Some(parent) = path.parent() {
-                        code.selected = Some(parent.to_path_buf());
-                    }
+                let path = row.entry.path.clone();
+                let parent = path.parent().and_then(|parent| {
+                    rows.iter()
+                        .find(|r| r.entry.path == parent && r.root == row.root)
+                });
+                if row.entry.is_dir && row.expanded {
+                    self.file_tree_toggle_expand(&path, row.is_root, cx);
+                } else if !row.is_root
+                    && let Some(parent) = parent
+                    && let Some(code) = self.tab_code_mut()
+                {
+                    code.selected = Some(parent.selection());
+                    self.right_panel.tree_reveal = None;
                 }
                 cx.notify();
             }
             "right" => {
                 let Some(i) = sel_ix else { return };
                 let row = &rows[i];
-                if row.entry.is_dir && !row.expanded && !row.is_root {
-                    let path = row.entry.path.clone();
-                    if let Some(code) = self.tab_code_mut() {
-                        code.expanded.insert(path);
-                    }
-                    cx.notify();
+                if row.entry.is_dir && !row.expanded {
+                    self.file_tree_toggle_expand(&row.entry.path, row.is_root, cx);
                 }
             }
             "enter" => {
                 let Some(i) = sel_ix else { return };
-                let (path, is_dir) = (rows[i].entry.path.clone(), rows[i].entry.is_dir);
-                self.file_tree_activate(&path, is_dir, window, cx);
+                self.file_tree_activate(&rows[i].selection(), rows[i].entry.is_dir, window, cx);
             }
             _ => {}
         }
@@ -1173,11 +1236,7 @@ impl Tty7App {
         } else {
             target.parent().unwrap_or(target).to_path_buf()
         };
-        if !matches!(edit_for, TreeEditKind::Rename)
-            && let Some(code) = self.tab_code_mut()
-        {
-            code.expanded.insert(host_dir.clone());
-        }
+        self.file_tree_expand_ancestors(&host_dir);
         self.file_tree.editing = Some(match edit_for {
             TreeEditKind::NewFile => TreeEdit::NewFile {
                 dir: host_dir,
@@ -1243,7 +1302,7 @@ impl Tty7App {
         };
         let rollback = self.file_tree.optimistic(id, &dir, &op, &row);
         if let Some(code) = self.tab_code_mut() {
-            code.selected = Some(new_path.clone());
+            code.selected = Some(TreeSelection::for_path(&new_path, &code.roots));
         }
 
         let target = new_path.clone();
@@ -1282,7 +1341,7 @@ impl Tty7App {
                     Err(e) => {
                         app.file_tree.rollback(id, &dir, rollback);
                         if let Some(code) = app.tab_code_mut()
-                            && code.selected.as_deref() == Some(&*new_path)
+                            && code.selected.as_ref().is_some_and(|s| s.path == new_path)
                         {
                             code.selected = None;
                         }
@@ -1343,7 +1402,7 @@ impl Tty7App {
                     .file_tree
                     .optimistic(id, &parent, &TreeWrite::Delete, &row);
                 if let Some(code) = app.tab_code_mut()
-                    && code.selected.as_deref() == Some(&path)
+                    && code.selected.as_ref().is_some_and(|s| s.path == path)
                 {
                     code.selected = None;
                 }
@@ -1529,19 +1588,26 @@ impl Tty7App {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         self.file_tree_refresh_roots(window, cx);
-        let (roots, expanded) = match self.tab_code() {
-            Some(code) => (code.roots.clone(), code.expanded.clone()),
-            None => (Vec::new(), std::collections::HashSet::new()),
-        };
         // The reveal has to open its ancestors here rather than where it was
-        // asked for: the roots above may only have just landed, and a row
+        // asked for: the roots may only have just landed, and a row
         // whose parent is still collapsed is a row `visible_rows` will not
         // produce and the scroll below will never find.
-        if let Some((path, _)) = self.right_panel.tree_reveal.clone()
-            && self.file_tree_expand_ancestors(&path)
-        {
-            cx.notify();
+        if let Some((path, _)) = self.right_panel.tree_reveal.clone() {
+            if self.file_tree_expand_ancestors(&path) {
+                cx.notify();
+            }
+            if let Some(code) = self.tab_code_mut() {
+                code.selected = Some(TreeSelection::for_path(&path, &code.roots));
+            }
         }
+        let (roots, expanded, collapsed_roots) = match self.tab_code() {
+            Some(code) => (
+                code.roots.clone(),
+                code.expanded.clone(),
+                code.collapsed_roots.clone(),
+            ),
+            None => (Vec::new(), HashSet::new(), HashSet::new()),
+        };
         let query = self.file_tree_query(cx);
         let host = self.active_host(cx);
         let host_id = self.spawn_host(cx);
@@ -1556,7 +1622,8 @@ impl Tty7App {
             if let Some(host) = &host {
                 self.file_tree.request_loads(host, &roots, &expanded, cx);
             }
-            self.file_tree.visible_rows(host_id, &roots, &expanded)
+            self.file_tree
+                .visible_rows(host_id, &roots, &expanded, &collapsed_roots)
         };
         // A search that found nothing, and a tab with no directory behind it,
         // both used to render as an empty column that looks identical to a
@@ -1657,6 +1724,10 @@ impl Tty7App {
                 && reveal
                     .as_ref()
                     .is_some_and(|(path, _)| *path == row.entry.path)
+                && self
+                    .tab_code()
+                    .and_then(|code| code.selected.as_ref())
+                    .is_some_and(|selected| selected.matches(row))
             {
                 reveal_ix = Some(children.len());
             }
@@ -1692,12 +1763,15 @@ impl Tty7App {
         &self,
         row: &TreeRow,
         deco: RowDeco,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let path = row.entry.path.clone();
         let is_dir = row.entry.is_dir;
-        let selected = self.tab_code().and_then(|c| c.selected.as_deref()) == Some(&*path);
+        let selected = self
+            .tab_code()
+            .and_then(|c| c.selected.as_ref())
+            .is_some_and(|selected| selected.matches(row));
         let muted = cx.theme().muted_foreground;
 
         // A placeholder standing in for children that are not there. Not a
@@ -1719,9 +1793,13 @@ impl Tty7App {
                 h_flex()
                     // Aligned with the label column of a real row at this
                     // depth: 6 for the row's own inset, INDENT for the depth,
-                    // then the width of the icon and its gap.
-                    .pl(px(6.0 + row.depth as f32 * INDENT + 20.0))
-                    .py_1()
+                    // then the chevron and icon cells and their gaps.
+                    .pl(px(6.0
+                        + row.depth.saturating_sub(1) as f32 * INDENT
+                        + LABEL_LEAD))
+                    .h(px(FILE_ROW_H))
+                    .flex_shrink_0()
+                    .line_height(relative(1.))
                     .items_center()
                     .text_xs()
                     .italic()
@@ -1761,36 +1839,42 @@ impl Tty7App {
                 .any(|f| f.dirty && f.host.id() == tree_host && f.path == *path)
         });
 
-        let renaming = matches!(
-            &self.file_tree.editing,
-            Some(TreeEdit::Rename { path: p, .. }) if *p == path
-        );
+        let edit_root = self
+            .tab_code()
+            .and_then(|code| containing_root(&code.roots, &path));
+        let editing_here = row.root.is_none() || row.root.as_ref() == edit_root;
+        let renaming = editing_here
+            && matches!(
+                &self.file_tree.editing,
+                Some(TreeEdit::Rename { path: p, .. }) if *p == path
+            );
 
-        // Directories are marked by a disclosure chevron (the Codex app's
-        // tree style) instead of a folder glyph; files keep the file mark.
-        // The root cannot be collapsed, so it keeps the open-folder glyph
-        // rather than a chevron that promises something it will not do.
-        let icon = if row.is_root {
-            Icon::new(IconName::FolderOpen)
-        } else if is_dir {
-            Icon::empty().path(if row.expanded {
-                "icons/chevron-down-thin.svg"
-            } else {
-                "icons/chevron-right-thin.svg"
-            })
-        } else {
-            Icon::new(IconName::File)
+        // Files keep an empty chevron cell to align with sibling folders.
+        // Root headings use the same disclosure control, without a folder icon.
+        let chevron = {
+            div()
+                .flex_none()
+                .w(px(CHEVRON_CELL))
+                .flex()
+                .justify_center()
+                .when(is_dir, |d| {
+                    d.child(
+                        Icon::empty()
+                            .path(if row.expanded {
+                                "icons/chevron-down-thin.svg"
+                            } else {
+                                "icons/chevron-right-thin.svg"
+                            })
+                            // The hairline chevron fills only half of its
+                            // 24-unit box, so it is drawn at the full cell.
+                            .size(px(CHEVRON_CELL))
+                            .text_color(muted),
+                    )
+                })
         };
-        // A chevron is an affordance, not content: a step smaller and quieter
-        // than the file mark, in the same cell so names still line up.
-        let (glyph, glyph_color) = if is_dir && !row.is_root {
-            // The hairline chevron fills only half of its 24-unit box, so it is
-            // drawn a step larger than the file mark to read as the same size.
-            (ROW_GLYPH + 3., muted)
-        } else if is_dir {
-            (ROW_GLYPH, cx.theme().foreground)
-        } else {
-            (ROW_GLYPH, muted)
+        let icon = match is_dir {
+            true => FileIcon::for_dir(&row.entry.name, row.is_root),
+            false => FileIcon::for_file(&row.entry.name),
         };
 
         let label: AnyElement = if renaming {
@@ -1801,7 +1885,7 @@ impl Tty7App {
                 .flex_1()
                 .min_w_0()
                 .text_ellipsis()
-                .text_sm()
+                .text_size(rems(TEXT_MONO))
                 .when(row.entry.ignored, |d| {
                     d.italic().text_color(muted.opacity(0.7))
                 })
@@ -1812,30 +1896,40 @@ impl Tty7App {
                 })
                 .when(deco.strike, |d| d.line_through())
                 .when(deco.bold, |d| d.font_weight(gpui::FontWeight::SEMIBOLD))
-                .when(row.is_root, |d| d.font_weight(gpui::FontWeight::MEDIUM))
-                .child(SharedString::from(row.entry.name.clone()))
+                .when(row.is_root, |d| {
+                    d.text_size(rems(HEADING))
+                        .font_weight(gpui::FontWeight::SEMIBOLD)
+                })
+                .child(SharedString::from(if row.is_root {
+                    row.entry.name.to_uppercase()
+                } else {
+                    row.entry.name.clone()
+                }))
                 .into_any_element()
         };
 
         let row_el = h_flex()
-            .id(SharedString::from(format!("tree-{}", path.display())))
+            .id(row.selection().element_id())
             .items_center()
             .gap_1()
-            .pl(px(6.0 + row.depth as f32 * INDENT))
+            .pl(px(6.0 + row.depth.saturating_sub(1) as f32 * INDENT))
             .pr_1()
-            .py_1()
+            .h(px(FILE_ROW_H))
+            .flex_shrink_0()
+            .line_height(relative(1.))
             .rounded(cx.theme().radius)
             .cursor_pointer()
             .when(selected, |d| d.bg(gpui::rgb(sf.selected)))
             .when(!selected, |d| d.hover(|s| s.bg(gpui::rgb(sf.hover))))
-            .child(
-                div()
-                    .flex_none()
-                    .w(px(ROW_GLYPH))
-                    .flex()
-                    .justify_center()
-                    .child(icon.size(px(glyph)).text_color(glyph_color)),
-            )
+            .child(chevron)
+            .when(!row.is_root, |d| {
+                d.child(
+                    div()
+                        .flex_none()
+                        .when(row.entry.ignored, |d| d.opacity(0.5))
+                        .child(icon.render(px(ROW_ICON), window)),
+                )
+            })
             .child(label)
             // Two indicators, two columns, two shapes. The dot is an unsaved
             // editor buffer and has nothing to do with git; keeping it round and
@@ -1860,10 +1954,10 @@ impl Tty7App {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener({
-                    let path = path.clone();
+                    let selection = row.selection();
                     move |this, _, window, cx| {
                         this.file_tree.focus_handle.focus(window, cx);
-                        this.file_tree_activate(&path, is_dir, window, cx);
+                        this.file_tree_activate(&selection, is_dir, window, cx);
                     }
                 }),
             )
@@ -1871,7 +1965,7 @@ impl Tty7App {
                 let name = row.entry.name.clone();
                 move |_, _, _, cx| {
                     let name = name.clone();
-                    cx.new(|_| DragGhost { name })
+                    cx.new(|_| DragGhost { name, icon })
                 }
             })
             // The other direction: files dropped on this row are copied in.
@@ -1915,15 +2009,16 @@ impl Tty7App {
                 TreeEdit::NewFile { dir, .. } | TreeEdit::NewFolder { dir, .. } => *dir == path,
                 TreeEdit::Rename { .. } => false,
             };
-            if host_matches {
+            if host_matches && row.expanded && editing_here {
                 let input = edit.input().clone();
                 out.push(
                     h_flex()
                         .items_center()
                         .gap_1()
-                        .pl(px(6.0 + (row.depth + 1) as f32 * INDENT))
+                        .pl(px(6.0 + row.depth as f32 * INDENT))
                         .pr_1()
-                        .py_0p5()
+                        .h(px(FILE_ROW_H))
+                        .flex_shrink_0()
                         .child(Input::new(&input).xsmall())
                         .into_any_element(),
                 );
@@ -2112,10 +2207,11 @@ fn dotfiles_menu_item(show_hidden: bool, app: &gpui::WeakEntity<Tty7App>) -> Pop
 
 struct DragGhost {
     name: String,
+    icon: FileIcon,
 }
 
 impl gpui::Render for DragGhost {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .items_center()
             .gap_1()
@@ -2126,7 +2222,7 @@ impl gpui::Render for DragGhost {
             .border_1()
             .border_color(cx.theme().border)
             .text_sm()
-            .child(Icon::new(IconName::File).size(px(ROW_GLYPH)))
+            .child(self.icon.render(px(ROW_ICON), window))
             .child(SharedString::from(self.name.clone()))
     }
 }
@@ -2275,6 +2371,310 @@ fn event_can_change_a_row(path: &Path, show_hidden: bool) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn activate_root(
+        app: &mut Tty7App,
+        root: &Path,
+        window: &mut Window,
+        cx: &mut Context<Tty7App>,
+    ) {
+        app.file_tree_activate(
+            &TreeSelection {
+                path: root.to_path_buf(),
+                root: Some(root.to_path_buf()),
+            },
+            true,
+            window,
+            cx,
+        );
+    }
+
+    fn tree_app(cx: &mut gpui::TestAppContext) -> (Entity<Tty7App>, gpui::VisualTestContext) {
+        use crate::ui::app::{Tab, test_window};
+        use crate::ui::pane::{Pane, PaneSlot};
+        use crate::ui::pending_pane::{PendingPane, PendingSpawn};
+
+        let (app, mut vcx) = test_window::harness(cx);
+        app.update_in(&mut vcx, |app, _, cx| {
+            // A connecting pane gives the tree a tab without spawning a shell.
+            let pending = cx.new(|cx| {
+                PendingPane::new(
+                    "tree-test",
+                    PendingSpawn {
+                        workspace: None,
+                        working_directory: None,
+                        restore_pane: None,
+                        shell: None,
+                        agent: None,
+                        agent_session_id: None,
+                        agent_launch_argv: None,
+                        agent_restore_pending: false,
+                        agent_unstarted: false,
+                        owner: None,
+                        font_size: 14.,
+                    },
+                    cx,
+                )
+            });
+            app.tabs
+                .push(Tab::new(Pane::leaf(PaneSlot::Connecting(pending))));
+            app.active = app.tabs.len() - 1;
+        });
+        (app, vcx)
+    }
+
+    #[gpui::test]
+    fn root_folds_preserve_children_and_reopen_for_reveal_and_creation(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (app, mut vcx) = tree_app(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            let root = PathBuf::from("/x");
+            let other = PathBuf::from("/y");
+            let nested = root.join("src");
+            let file = nested.join("main.rs");
+            let code = app.tab_code_mut_or_init().unwrap();
+            code.roots = vec![root.clone()];
+            code.expanded.insert(nested.clone());
+            app.file_tree
+                .children
+                .insert(HostId::LOCAL, root.clone(), vec![entry("src", true)]);
+            app.file_tree.children.insert(
+                HostId::LOCAL,
+                nested.clone(),
+                vec![TreeEntry {
+                    name: "main.rs".into(),
+                    path: file.clone(),
+                    is_dir: false,
+                    ignored: false,
+                }],
+            );
+            app.file_tree
+                .children
+                .insert(HostId::LOCAL, other.clone(), Vec::new());
+            let visible = |app: &Tty7App| {
+                let code = app.tab_code().unwrap();
+                app.file_tree
+                    .visible_rows(
+                        HostId::LOCAL,
+                        &code.roots,
+                        &code.expanded,
+                        &code.collapsed_roots,
+                    )
+                    .into_iter()
+                    .filter(|row| row.note.is_none())
+                    .map(|row| (row.entry.path, row.expanded))
+                    .collect::<Vec<_>>()
+            };
+            let open = visible(app);
+            assert_eq!(open.len(), 3, "a single root starts open");
+
+            // Clicking the root folds all descendants without losing their state.
+            activate_root(app, &root, window, cx);
+            assert_eq!(visible(app), vec![(root.clone(), false)]);
+            assert!(app.tab_code().unwrap().expanded.contains(&nested));
+
+            let key = |key: &str| KeyDownEvent {
+                keystroke: gpui::Keystroke::parse(key).unwrap(),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            app.file_tree_key_down(&key("right"), window, cx);
+            assert_eq!(visible(app), open, "Right restores the expanded subtree");
+            app.file_tree_key_down(&key("left"), window, cx);
+            assert_eq!(visible(app), vec![(root.clone(), false)]);
+            app.file_tree_key_down(&key("enter"), window, cx);
+            assert_eq!(visible(app), open, "Enter toggles the root too");
+
+            app.tab_code_mut().unwrap().roots.push(other.clone());
+            activate_root(app, &root, window, cx);
+            assert_eq!(
+                visible(app),
+                vec![(root.clone(), false), (other.clone(), true)]
+            );
+            activate_root(app, &other, window, cx);
+            assert_eq!(
+                visible(app),
+                vec![(root.clone(), false), (other.clone(), false)]
+            );
+
+            assert!(app.file_tree_reveal_path(&file, cx));
+            assert!(visible(app).iter().any(|(path, _)| path == &file));
+            assert!(app.tab_code().unwrap().collapsed_roots.contains(&other));
+            activate_root(app, &root, window, cx);
+            assert!(
+                app.right_panel.tree_reveal.is_none(),
+                "a pending reveal must not undo a user fold"
+            );
+            app.file_tree_begin_edit(TreeEditKind::NewFile, &root, true, window, cx);
+            assert!(visible(app).iter().any(|(path, _)| path == &file));
+            assert!(matches!(
+                app.file_tree.editing,
+                Some(TreeEdit::NewFile { .. })
+            ));
+            app.file_tree_cancel_edit(cx);
+
+            // A nested repository can be both a child row and a root heading.
+            app.tab_code_mut().unwrap().roots.push(nested.clone());
+            app.file_tree_activate(
+                &TreeSelection::for_path(&nested, std::slice::from_ref(&root)),
+                true,
+                window,
+                cx,
+            );
+            assert!(!app.tab_code().unwrap().expanded.contains(&nested));
+            assert!(!app.tab_code().unwrap().collapsed_roots.contains(&nested));
+            activate_root(app, &nested, window, cx);
+            assert!(app.tab_code().unwrap().collapsed_roots.contains(&nested));
+        });
+    }
+
+    #[gpui::test]
+    fn nested_root_keyboard_keeps_the_heading_selected(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = tree_app(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            let outer = PathBuf::from("/x");
+            let nested = outer.join("src");
+            let file = nested.join("main.rs");
+            let code = app.tab_code_mut_or_init().unwrap();
+            code.roots = vec![outer.clone(), nested.clone()];
+            app.file_tree
+                .children
+                .insert(HostId::LOCAL, outer.clone(), vec![entry("src", true)]);
+            app.file_tree.children.insert(
+                HostId::LOCAL,
+                nested.clone(),
+                vec![TreeEntry {
+                    name: "main.rs".into(),
+                    path: file.clone(),
+                    is_dir: false,
+                    ignored: false,
+                }],
+            );
+
+            activate_root(app, &nested, window, cx);
+            assert!(app.tab_code().unwrap().collapsed_roots.contains(&nested));
+            let key = |key: &str| KeyDownEvent {
+                keystroke: gpui::Keystroke::parse(key).unwrap(),
+                is_held: false,
+                prefer_character_input: false,
+            };
+            app.file_tree_key_down(&key("right"), window, cx);
+            assert!(
+                !app.tab_code().unwrap().collapsed_roots.contains(&nested),
+                "Right must reopen the selected root heading"
+            );
+            assert!(
+                !app.tab_code().unwrap().expanded.contains(&nested),
+                "the ordinary child row must keep its fold state"
+            );
+            app.file_tree_key_down(&key("enter"), window, cx);
+            assert!(app.tab_code().unwrap().collapsed_roots.contains(&nested));
+
+            // Both sections can show the same file; navigation must stay in its section.
+            app.tab_code_mut().unwrap().expanded.insert(nested.clone());
+            app.file_tree_key_down(&key("right"), window, cx);
+            app.file_tree_key_down(&key("down"), window, cx);
+            assert_eq!(
+                app.tab_code().unwrap().selected,
+                Some(TreeSelection {
+                    path: file,
+                    root: Some(nested.clone()),
+                })
+            );
+            app.file_tree_key_down(&key("left"), window, cx);
+            assert_eq!(
+                app.tab_code().unwrap().selected,
+                Some(TreeSelection {
+                    path: nested.clone(),
+                    root: Some(nested.clone()),
+                })
+            );
+            app.file_tree_key_down(&key("left"), window, cx);
+            assert!(app.tab_code().unwrap().collapsed_roots.contains(&nested));
+            assert!(app.tab_code().unwrap().expanded.contains(&nested));
+            assert_ne!(
+                TreeSelection::for_path(&nested, &[outer]).element_id(),
+                TreeSelection::for_path(&nested, std::slice::from_ref(&nested)).element_id(),
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn hidden_nested_root_reopens_for_creation_and_reveal(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = tree_app(cx);
+        let (nested, file) = app.update_in(&mut vcx, |app, window, cx| {
+            let outer = PathBuf::from("/x");
+            let nested = outer.join(".nested");
+            let file = nested.join("main.rs");
+            let code = app.tab_code_mut_or_init().unwrap();
+            code.roots = vec![outer.clone(), nested.clone()];
+            code.collapsed_roots.insert(nested.clone());
+            app.file_tree
+                .children
+                .insert(HostId::LOCAL, outer, vec![entry(".nested", true)]);
+            app.file_tree.children.insert(
+                HostId::LOCAL,
+                nested.clone(),
+                vec![TreeEntry {
+                    name: "main.rs".into(),
+                    path: file.clone(),
+                    is_dir: false,
+                    ignored: false,
+                }],
+            );
+            assert!(!app.file_tree.show_hidden);
+            app.file_tree_begin_edit(TreeEditKind::NewFile, &nested, true, window, cx);
+            (nested, file)
+        });
+        let rows = |app: &Tty7App| {
+            let code = app.tab_code().unwrap();
+            app.file_tree.visible_rows(
+                HostId::LOCAL,
+                &code.roots,
+                &code.expanded,
+                &code.collapsed_roots,
+            )
+        };
+        // Use the draw scope so GPUI releases the input's arena allocation.
+        vcx.draw(
+            gpui::point(px(0.), px(0.)),
+            gpui::size(px(300.), px(200.)),
+            |window, cx| {
+                app.update(cx, |app, cx| {
+                    let visible = rows(app);
+                    let heading = visible
+                        .iter()
+                        .find(|r| r.is_root && r.entry.path == nested)
+                        .unwrap();
+                    let children = app.render_tree_row(heading, RowDeco::default(), window, cx);
+                    assert_eq!(
+                        children.len(),
+                        2,
+                        "New File must render an input under the nested heading"
+                    );
+                    // The assertion checks row composition; the full app owns painting.
+                    div()
+                })
+            },
+        );
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.file_tree_cancel_edit(cx);
+            activate_root(app, &nested, window, cx);
+            assert!(app.tab_code().unwrap().collapsed_roots.contains(&nested));
+            assert!(app.file_tree_reveal_path(&file, cx));
+            assert!(
+                rows(app)
+                    .iter()
+                    .any(|r| r.note.is_none() && r.entry.path == file),
+                "reveal must make the hidden nested root's file visible"
+            );
+            assert_eq!(
+                app.tab_code().unwrap().selected.as_ref().unwrap().root,
+                Some(nested)
+            );
+        });
+    }
 
     fn entry(name: &str, is_dir: bool) -> TreeEntry {
         TreeEntry {
@@ -3029,7 +3429,12 @@ mod render_idle_gpui_tests {
         app.update_in(vcx, |app, _, _| {
             let code = app.tab_code().expect("panel state");
             app.file_tree
-                .visible_rows(HostId::LOCAL, &code.roots, &code.expanded)
+                .visible_rows(
+                    HostId::LOCAL,
+                    &code.roots,
+                    &code.expanded,
+                    &code.collapsed_roots,
+                )
                 .iter()
                 .filter(|r| r.note.is_none())
                 .count()

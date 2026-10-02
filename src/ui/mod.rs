@@ -5,6 +5,7 @@ pub mod diff_overlay;
 pub mod diff_rows;
 pub mod document_column;
 pub mod file_copy;
+pub mod file_icons;
 pub mod file_tree;
 pub mod forwards;
 pub mod hints;

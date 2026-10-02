@@ -21,6 +21,7 @@ use crate::daemon::protocol::{
 use crate::daemon::ssh::sftp::{remote_basename, remote_join, remote_parent, safe_local_name};
 use crate::terminal::RemoteTerminal;
 use crate::ui::app::{CONTENT_INSET, TILE_GLYPH_SM, TILE_SIZE_SM, Tty7App};
+use crate::ui::file_icons::{FileIcon, ROW_ICON};
 use crate::ui::i18n::{L10nKey, t, t_fmt};
 use crate::ui::right_panel::{META, TEXT};
 
@@ -1163,7 +1164,7 @@ impl Tty7App {
                 }
             }));
         let form = self.render_sftp_edit_form(cx);
-        let list = self.render_sftp_list(cx);
+        let list = self.render_sftp_list(window, cx);
 
         v_flex()
             .id("panel-sftp")
@@ -1422,7 +1423,7 @@ impl Tty7App {
         )
     }
 
-    fn render_sftp_list(&self, cx: &mut Context<Self>) -> Stateful<Div> {
+    fn render_sftp_list(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
         let danger = cx.theme().danger;
         let muted = cx.theme().muted_foreground;
         let container = div()
@@ -1468,16 +1469,15 @@ impl Tty7App {
 
         let mut list = v_flex().gap(px(1.)).py(px(2.));
         if show_go_up {
-            list = list.child(self.render_sftp_go_up_row(cx));
+            list = list.child(self.render_sftp_go_up_row(window, cx));
         }
         for entry in entries {
-            list = list.child(self.render_sftp_row(entry, cx));
+            list = list.child(self.render_sftp_row(entry, window, cx));
         }
         container.child(list)
     }
 
-    fn render_sftp_go_up_row(&self, cx: &mut Context<Self>) -> AnyElement {
-        let foreground = cx.theme().foreground;
+    fn render_sftp_go_up_row(&self, window: &Window, cx: &mut Context<Self>) -> AnyElement {
         let sf = cx.global::<crate::ui::presets::Surfaces>().popover;
         h_flex()
             .id("sftp-go-up")
@@ -1489,27 +1489,26 @@ impl Tty7App {
             .rounded(cx.theme().radius)
             .cursor_pointer()
             .hover(|s| s.bg(gpui::rgb(sf.hover)))
-            .child(
-                Icon::new(IconName::FolderOpen)
-                    .xsmall()
-                    .text_color(foreground),
-            )
+            .child(FileIcon::for_dir("..", false).render(px(ROW_ICON), window))
             .child(div().flex_1().min_w_0().text_sm().child(".."))
             .on_click(cx.listener(|this, _, _w, cx| this.sftp_up(cx)))
             .into_any_element()
     }
 
-    fn render_sftp_row(&self, entry: &SftpEntry, cx: &mut Context<Self>) -> AnyElement {
+    fn render_sftp_row(
+        &self,
+        entry: &SftpEntry,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
         let foreground = cx.theme().foreground;
         let muted = cx.theme().muted_foreground;
-        let dir_color = foreground;
         let list_hover = cx.theme().list_hover;
         let entry = entry.clone();
         let dir_like = is_dir_like(&entry);
-        let icon = if dir_like {
-            IconName::Folder
-        } else {
-            IconName::File
+        let icon = match dir_like {
+            true => FileIcon::for_dir(&entry.name, false),
+            false => FileIcon::for_file(&entry.name),
         };
         let is_symlink = matches!(entry.kind, SftpEntryKind::Symlink);
         let size = if dir_like {
@@ -1547,11 +1546,7 @@ impl Tty7App {
                     this.sftp_open_entry(open_entry.clone(), window, cx)
                 }),
             )
-            .child(
-                Icon::new(icon)
-                    .xsmall()
-                    .text_color(if dir_like { dir_color } else { muted }),
-            )
+            .child(icon.render(px(ROW_ICON), window))
             .child(
                 div()
                     .flex_1()

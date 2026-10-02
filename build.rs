@@ -1,4 +1,6 @@
 fn main() {
+    embed_file_icons();
+
     #[cfg(windows)]
     {
         println!("cargo:rerun-if-changed=assets/favicon.ico");
@@ -11,6 +13,49 @@ fn main() {
         }
         stage_bundled_conpty();
     }
+}
+
+/// Emit `$OUT_DIR/file_icons.rs`: every vendored Symbols SVG as a
+/// `("files/rust.svg", include_bytes!(..))` pair, sorted by key so
+/// `ui::file_icons` can binary-search it.
+///
+/// Generated rather than hand-listed because the set is the upstream theme's
+/// (350-odd files, replaced wholesale by `scripts/sync-symbols-icons.py`), and
+/// an SVG missing from a hand-kept table renders as nothing, silently.
+fn embed_file_icons() {
+    use std::fmt::Write as _;
+    use std::path::PathBuf;
+
+    let root = PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap())
+        .join("assets/file-icons/symbols");
+    println!("cargo:rerun-if-changed={}", root.display());
+
+    let mut icons = Vec::new();
+    for kind in ["files", "folders"] {
+        let dir = root.join(kind);
+        println!("cargo:rerun-if-changed={}", dir.display());
+        for entry in std::fs::read_dir(&dir).expect("assets/file-icons/symbols is vendored") {
+            let path = entry.unwrap().path();
+            if path.extension().is_some_and(|e| e == "svg") {
+                let name = path.file_name().unwrap().to_str().unwrap().to_owned();
+                icons.push((format!("{kind}/{name}"), path));
+            }
+        }
+    }
+    icons.sort();
+
+    let mut out = String::from("pub(super) static SVGS: &[(&str, &[u8])] = &[\n");
+    for (key, path) in &icons {
+        writeln!(
+            out,
+            "    ({key:?}, include_bytes!({:?})),",
+            path.display().to_string()
+        )
+        .unwrap();
+    }
+    out.push_str("];\n");
+    let dest = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("file_icons.rs");
+    std::fs::write(dest, out).unwrap();
 }
 
 /// Put the bundled ConPTY beside cargo's output, the way the packaged app has

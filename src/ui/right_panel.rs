@@ -45,39 +45,12 @@ pub(crate) const META_MONO: f32 = META - STEP;
 /// sidebar's group headings, which are the same thing one panel over.
 pub(crate) const HEADING: f32 = 11. * STEP;
 
-/// The leading glyph on a panel row — the file tree's folder and file marks.
-///
-/// Pixels, not rems, because glyphs in this window are sized off the tile
-/// ladder in `app.rs` (`TILE_GLYPH` 13, `TILE_GLYPH_XS` 11) rather than off the
-/// text ramp above. A row that reached for gpui-component's rem sizes instead
-/// could never agree with the tab tiles it sits under: at the default
-/// `ui_font_size` of 16 that ladder offers `xsmall` 12 and `small` 14 and
-/// nothing between, so the tree's glyph came out either a step under the
-/// chrome — reading as a speck beside a 14px name — or a step over it, which
-/// puts a row of content above the navigation that owns it. 13 is the tab
-/// tile's own glyph size, so the two agree by construction.
-pub(crate) const ROW_GLYPH: f32 = crate::ui::app::TILE_GLYPH;
+// All tabs use this rem scale and follow `ui_font_size`. File names in Files
+// and Source Control share the 13px `TEXT_MONO` step for denser lists, even
+// though Files uses the interface font. Info body text remains on `TEXT`.
 
-// The right panel's type ramp: four steps, a point apart, that the Info and
-// Source Control tabs both draw from so switching between them does not change
-// the apparent size of the panel. The Files tab, in `file_tree.rs`, reaches the
-// same 14px through `text_sm()`, which is the same rem under another name. The
-// steps are close together on purpose: the panel is a dense aside next to the
-// terminal, and the differences between them are meant to be felt as hierarchy
-// rather than seen as different type sizes.
-//
-// Every tab of the panel is on this ladder now. The px constants that used to
-// live here — PANEL_TEXT and its steps — went when the interface font scale
-// landed, and `scm/` followed a branch later: it had been cut from main hours
-// before that commit and had copied the ladder as it stood, which left the
-// Source Control tab frozen at the *old* 12/11/10.5 while its neighbours moved
-// to 14/13/12/11 and started tracking `ui_font_size`. Nothing in git conflicted
-// — the two touched different files — so the only thing that would have caught
-// it was a reader noticing that one tab was a step smaller than the rest.
-//
-// Which is the reason to keep reaching for these names rather than spelling a
-// number: a size written as `px(12.)` anywhere in this panel is either a
-// mistake or something that is not type.
+/// File rows and section headings in Files and Source Control share this pitch.
+pub(crate) const FILE_ROW_H: f32 = 24.;
 
 /// Rows are laid out inside this inset and then pad themselves back out, so a
 /// hovered row's background is wider than its text on both sides.

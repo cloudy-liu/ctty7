@@ -249,6 +249,8 @@ ctty7 is licensed under [Apache-2.0](LICENSE).
 
 ctty7 originated from [tty7](https://github.com/l0ng-ai/tty7) and has evolved independently with extensive modifications to Windows integration, agent behavior, and workflow features. Original copyright and attribution are retained.
 
+File and folder icons are the [Symbols](https://github.com/miguelsolorio/vscode-symbols) icon theme by Miguel Solorio (MIT).
+
 ---
 
 <div align="center">
