@@ -797,6 +797,89 @@ mod tests {
     }
 
     #[gpui::test]
+    fn fill_and_restore_preserve_a_partial_markdown_selection(cx: &mut TestAppContext) {
+        let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
+        vcx.simulate_resize(gpui::size(px(1600.), px(900.)));
+        let host = DocumentsHost::new(904, "Selection test", None);
+        app.update_in(&mut vcx, |app, window, cx| {
+            init(Default::default(), cx);
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = app.tabs.len() - 1;
+            app.editor_open_on_host(host, Path::new("/repo/docs/readme.md"), window, cx);
+        });
+        settle(&mut vcx, |cx| {
+            app.read_with(cx, |app, _| {
+                app.tab_code()
+                    .and_then(|code| code.active_file())
+                    .is_some_and(|file| file.reading.is_some())
+            })
+        });
+        let reading = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .as_ref()
+                .unwrap()
+                .clone()
+        });
+        let text = reading.read_with(&vcx, |reading, _| reading.text.clone());
+        settle(&mut vcx, |cx| {
+            text.read_with(cx, |text, _| text.anchor_bounds("selection-test").is_some())
+        });
+        // The first prepaint records the reading width, which can change the
+        // card's padding. Let that reflow finish before choosing a text hit.
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let position = reading.read_with(&vcx, |reading, _| {
+            reading.scroll.bounds().origin + point(px(30.), px(28.))
+        });
+        vcx.simulate_mouse_move(position, None, gpui::Modifiers::default());
+        vcx.simulate_event(gpui::MouseDownEvent {
+            position,
+            modifiers: gpui::Modifiers::default(),
+            button: gpui::MouseButton::Left,
+            click_count: 2,
+            first_mouse: false,
+        });
+        vcx.simulate_event(gpui::MouseUpEvent {
+            position,
+            modifiers: gpui::Modifiers::default(),
+            button: gpui::MouseButton::Left,
+            click_count: 2,
+        });
+        vcx.run_until_parked();
+        assert_eq!(
+            text.read_with(&vcx, |text, _| text.selected_text()).trim(),
+            "Selection"
+        );
+
+        for layout in [
+            crate::core::config::DocumentLayout::Fill,
+            crate::core::config::DocumentLayout::Dock,
+        ] {
+            let button = vcx.debug_bounds("document-fill-toggle").unwrap();
+            vcx.simulate_click(button.center(), gpui::Modifiers::default());
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            assert_eq!(
+                text.read_with(&vcx, |text, _| text.selected_text()).trim(),
+                "Selection"
+            );
+            assert_eq!(
+                app.read_with(&vcx, |app, cx| app.document_layout(cx)),
+                layout
+            );
+        }
+    }
+
+    #[gpui::test]
     fn markdown_edits_release_image_budget_and_ignore_old_completions(cx: &mut TestAppContext) {
         let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
         app.update_in(&mut vcx, |app, _, cx| {
