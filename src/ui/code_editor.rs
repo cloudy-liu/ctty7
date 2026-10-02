@@ -65,7 +65,7 @@ pub(crate) struct TabCode {
     pub(crate) expanded: std::collections::HashSet<PathBuf>,
     /// Roots start open. Their folds belong to this tab and last for the session.
     pub(crate) collapsed_roots: HashSet<PathBuf>,
-    pub(crate) selected: Option<PathBuf>,
+    pub(crate) selected: Option<crate::ui::file_tree::TreeSelection>,
 }
 
 impl TabCode {
