@@ -6,9 +6,9 @@ use std::{
 
 use gpui::prelude::*;
 use gpui::{
-    App, BoxShadow, Context, Entity, FocusHandle, Focusable, FontWeight, Global, Hsla, Pixels,
-    Render, ScrollHandle, SharedString, StyleRefinement, Subscription, Window, div, point, px,
-    relative, rems,
+    App, Context, Entity, FocusHandle, Focusable, FontWeight, Global, Hsla, Pixels, Render,
+    ScrollHandle, SharedString, StyleRefinement, Subscription, Window, div, point, px, relative,
+    rems,
 };
 use gpui_component::{
     ActiveTheme as _, ElementExt as _, IconName, Sizable as _, ThemeMode,
@@ -541,11 +541,6 @@ impl Render for MarkdownPreview {
         } else {
             layout.padding
         } * scale;
-        let outer = if compact {
-            0.
-        } else {
-            layout.outer_padding * scale
-        };
         let body_font = typography
             .fonts
             .first()
@@ -587,24 +582,12 @@ impl Render for MarkdownPreview {
             .text_size(px(typography.font_size * scale))
             .line_height(relative(typography.line_height))
             .font_family(body_font)
-            .text_color(color(palette.foreground))
-            .bg(color(palette.paper));
+            .text_color(color(palette.foreground));
         card.style().text.font_fallbacks =
             Some(gpui::FontFallbacks::from_fonts(typography.fonts.clone()));
-        let card = card
-            .when(!compact, |el| {
-                el.rounded(px(layout.radius * scale))
-                    .border_1()
-                    .border_color(color(palette.paper_border))
-                    .shadow(vec![BoxShadow {
-                        color: color(palette.shadow),
-                        offset: point(px(0.), px(layout.shadow_offset * scale)),
-                        blur_radius: px(layout.shadow_blur * scale),
-                        spread_radius: px(0.),
-                        inset: false,
-                    }])
-            })
-            .child(text);
+        // One surface: the paper colour fills the whole pane, so there is no
+        // separate "desk" behind a floating, bordered card.
+        let card = card.child(text);
         let entity = cx.weak_entity();
         let scroll = self.scroll.clone();
         crate::ui::scrollbar::with_vertical_scrollbar(
@@ -613,10 +596,9 @@ impl Render for MarkdownPreview {
                 .id("markdown-reading")
                 .size_full()
                 .key_context("MarkdownPreview")
-                .bg(color(palette.background))
+                .bg(color(palette.paper))
                 .overflow_y_scroll()
                 .track_scroll(&scroll)
-                .p(px(outer))
                 .on_key_down(cx.listener(Self::on_key_down))
                 .child(card)
                 .on_prepaint(move |_, window, cx| {

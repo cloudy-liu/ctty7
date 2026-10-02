@@ -1196,13 +1196,17 @@ impl Tty7App {
         let header = chrome
             .renders_own_header()
             .then(|| self.render_editor_header(chrome, window, cx));
+        // `min_h_0` + `overflow_hidden` keep the body inside the space left
+        // above the status bar; otherwise a tall editor/preview can paint
+        // underneath it.
         let editor_col = v_flex()
             .flex_1()
             .min_w_0()
-            .h_full()
+            .min_h_0()
+            .overflow_hidden()
             .children(header)
             .when_some(conflict_banner, |this, b| this.child(b))
-            .child(div().flex_1().min_h_0().child(body));
+            .child(div().flex_1().min_h_0().overflow_hidden().child(body));
 
         // The panel's own paint is the same either way; only the box is not.
         // Filling the workspace means stopping the window's translucency and
@@ -1239,7 +1243,14 @@ impl Tty7App {
                         this.toggle_code_panel(window, cx);
                     }
                 }))
-                .child(h_flex().flex_1().min_h_0().w_full().child(editor_col))
+                .child(
+                    h_flex()
+                        .flex_1()
+                        .min_h_0()
+                        .w_full()
+                        .overflow_hidden()
+                        .child(editor_col),
+                )
                 .child(self.render_code_status_bar(window, cx))
                 .into_any_element(),
         )
