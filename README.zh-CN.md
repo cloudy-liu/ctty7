@@ -248,6 +248,8 @@ ctty7 使用 [Apache-2.0](LICENSE) 许可证。
 
 ctty7 源自 [tty7](https://github.com/l0ng-ai/tty7) 并独立演进，在 Windows 集成、Agent 行为、工作流特性等方面进行了大量修改。保留原作者版权和署名。
 
+文件和文件夹图标来自 Miguel Solorio 的 [Symbols](https://github.com/miguelsolorio/vscode-symbols) 图标主题（MIT）。
+
 ---
 
 <div align="center">

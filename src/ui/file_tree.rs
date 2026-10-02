@@ -8,10 +8,11 @@ use crate::core::git::status::{DecoStatus, DirRollup, StatusIndex};
 use crate::terminal::git_data::index_of;
 use crate::ui::app::Tty7App;
 use crate::ui::file_copy;
+use crate::ui::file_icons::{FileIcon, ROW_ICON};
 use crate::ui::host_ops::{ByHost, HostId, HostOps, InFlight, SharedHost, WatchSub};
 use crate::ui::host_registry::HostRegistry;
 use crate::ui::i18n::{L10nKey, t, t_fmt};
-use crate::ui::right_panel::{ROW_GLYPH, git_badge};
+use crate::ui::right_panel::git_badge;
 use crate::ui::scm::status::{status_color, status_glyph};
 use gpui::prelude::*;
 use gpui::{
@@ -20,11 +21,15 @@ use gpui::{
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{ContextMenuExt as _, PopupMenu, PopupMenuItem};
-use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
-};
+use gpui_component::{ActiveTheme as _, Icon, Sizable as _, WindowExt as _, h_flex, v_flex};
 
 const INDENT: f32 = 14.0;
+
+/// The disclosure chevron's cell.
+const CHEVRON_CELL: f32 = 16.0;
+
+/// From a row's inset to its label: both cells and the row's `gap_1` after each.
+const LABEL_LEAD: f32 = CHEVRON_CELL + 4.0 + ROW_ICON + 4.0;
 
 const REFRESH_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(200);
 
@@ -1692,7 +1697,7 @@ impl Tty7App {
         &self,
         row: &TreeRow,
         deco: RowDeco,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
         let path = row.entry.path.clone();
@@ -1719,8 +1724,8 @@ impl Tty7App {
                 h_flex()
                     // Aligned with the label column of a real row at this
                     // depth: 6 for the row's own inset, INDENT for the depth,
-                    // then the width of the icon and its gap.
-                    .pl(px(6.0 + row.depth as f32 * INDENT + 20.0))
+                    // then the chevron and icon cells and their gaps.
+                    .pl(px(6.0 + row.depth as f32 * INDENT + LABEL_LEAD))
                     .py_1()
                     .items_center()
                     .text_xs()
@@ -1766,31 +1771,33 @@ impl Tty7App {
             Some(TreeEdit::Rename { path: p, .. }) if *p == path
         );
 
-        // Directories are marked by a disclosure chevron (the Codex app's
-        // tree style) instead of a folder glyph; files keep the file mark.
-        // The root cannot be collapsed, so it keeps the open-folder glyph
-        // rather than a chevron that promises something it will not do.
-        let icon = if row.is_root {
-            Icon::new(IconName::FolderOpen)
-        } else if is_dir {
-            Icon::empty().path(if row.expanded {
-                "icons/chevron-down-thin.svg"
-            } else {
-                "icons/chevron-right-thin.svg"
-            })
-        } else {
-            Icon::new(IconName::File)
-        };
-        // A chevron is an affordance, not content: a step smaller and quieter
-        // than the file mark, in the same cell so names still line up.
-        let (glyph, glyph_color) = if is_dir && !row.is_root {
-            // The hairline chevron fills only half of its 24-unit box, so it is
-            // drawn a step larger than the file mark to read as the same size.
-            (ROW_GLYPH + 3., muted)
-        } else if is_dir {
-            (ROW_GLYPH, cx.theme().foreground)
-        } else {
-            (ROW_GLYPH, muted)
+        // Every row but the root has a chevron cell, empty on files, so a
+        // file's icon lines up with its sibling folders'. The root cannot be
+        // collapsed and takes no cell rather than one that promises a fold.
+        let chevron = (!row.is_root).then(|| {
+            div()
+                .flex_none()
+                .w(px(CHEVRON_CELL))
+                .flex()
+                .justify_center()
+                .when(is_dir, |d| {
+                    d.child(
+                        Icon::empty()
+                            .path(if row.expanded {
+                                "icons/chevron-down-thin.svg"
+                            } else {
+                                "icons/chevron-right-thin.svg"
+                            })
+                            // The hairline chevron fills only half of its
+                            // 24-unit box, so it is drawn at the full cell.
+                            .size(px(CHEVRON_CELL))
+                            .text_color(muted),
+                    )
+                })
+        });
+        let icon = match is_dir {
+            true => FileIcon::for_dir(&row.entry.name, row.is_root),
+            false => FileIcon::for_file(&row.entry.name),
         };
 
         let label: AnyElement = if renaming {
@@ -1828,13 +1835,12 @@ impl Tty7App {
             .cursor_pointer()
             .when(selected, |d| d.bg(gpui::rgb(sf.selected)))
             .when(!selected, |d| d.hover(|s| s.bg(gpui::rgb(sf.hover))))
+            .children(chevron)
             .child(
                 div()
                     .flex_none()
-                    .w(px(ROW_GLYPH))
-                    .flex()
-                    .justify_center()
-                    .child(icon.size(px(glyph)).text_color(glyph_color)),
+                    .when(row.entry.ignored, |d| d.opacity(0.5))
+                    .child(icon.render(px(ROW_ICON), window)),
             )
             .child(label)
             // Two indicators, two columns, two shapes. The dot is an unsaved
@@ -1871,7 +1877,7 @@ impl Tty7App {
                 let name = row.entry.name.clone();
                 move |_, _, _, cx| {
                     let name = name.clone();
-                    cx.new(|_| DragGhost { name })
+                    cx.new(|_| DragGhost { name, icon })
                 }
             })
             // The other direction: files dropped on this row are copied in.
@@ -2112,10 +2118,11 @@ fn dotfiles_menu_item(show_hidden: bool, app: &gpui::WeakEntity<Tty7App>) -> Pop
 
 struct DragGhost {
     name: String,
+    icon: FileIcon,
 }
 
 impl gpui::Render for DragGhost {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         h_flex()
             .items_center()
             .gap_1()
@@ -2126,7 +2133,7 @@ impl gpui::Render for DragGhost {
             .border_1()
             .border_color(cx.theme().border)
             .text_sm()
-            .child(Icon::new(IconName::File).size(px(ROW_GLYPH)))
+            .child(self.icon.render(px(ROW_ICON), window))
             .child(SharedString::from(self.name.clone()))
     }
 }
