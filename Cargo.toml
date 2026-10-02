@@ -52,6 +52,12 @@ log.workspace = true
 # Smart double-click selection patterns (URL/email/path). Already in the tree
 # transitively, so pinning it here adds no new native code.
 regex = "1"
+# Lazy static initialization for compiled regexes (Mermaid block detection).
+# Already in the tree transitively, so this pins no new code.
+once_cell = "1"
+# Mermaid diagram rendering for Markdown preview. Headless Rust implementation
+# that parses and renders Mermaid diagrams to SVG without external dependencies.
+merman = "0.8.0-alpha.7"
 # SIMD byte search for `ParkedCursorScanner`'s fast path
 # (`terminal::parked_cursor`), which scans every output batch the client
 # receives — the same skip-ahead the

@@ -3249,6 +3249,9 @@ impl Tty7App {
             None => self.render_editor_empty(cx).into_any_element(),
             Some(f) if f.preview => {
                 let markdown = f.input.read(cx).text().to_string();
+                // Process Mermaid blocks before rendering
+                let mermaid_config = crate::ui::markdown_mermaid::mermaid_config_from_theme(cx);
+                let markdown = crate::ui::markdown_mermaid::process_mermaid_blocks(&markdown, &mermaid_config);
                 let scroll = f.preview_scroll.clone();
                 // The bar's wrapper takes its height from `flex_1`, so it needs
                 // a column with a definite height to grow inside — hand it one
