@@ -163,7 +163,8 @@ Read and edit Markdown without leaving the terminal:
 
 - **Built-in preview** with switchable source editing
 - **Custom themes** — install your own or use Paperglow (light/dark aware)
-- _(Feature unreleased in current version)_
+- **Mermaid diagrams** — render flowcharts, sequence diagrams, class diagrams, and more inline
+- **Theme integration** — diagrams automatically match your Markdown theme colors
 
 </details>
 

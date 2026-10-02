@@ -705,7 +705,7 @@ impl Tty7App {
                     host.clone(),
                     path.clone(),
                     app,
-                    Some(crate::ui::markdown_mermaid::render_mermaid),
+                    true,
                     cx,
                 )
             })

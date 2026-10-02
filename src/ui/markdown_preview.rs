@@ -1,4 +1,8 @@
-use std::{collections::HashMap, path::PathBuf, sync::Arc};
+use std::{
+    collections::HashMap,
+    path::PathBuf,
+    sync::{Arc, LazyLock},
+};
 
 use gpui::prelude::*;
 use gpui::{
@@ -256,7 +260,7 @@ pub(crate) struct MarkdownPreview {
     width: Pixels,
     style_key: Option<(String, u64, bool, u32, SharedString)>,
     style: TextViewStyle,
-    mermaid_renderer: Option<fn(&str) -> Option<String>>,
+    mermaid_enabled: bool,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -266,15 +270,18 @@ impl MarkdownPreview {
         host: SharedHost,
         path: PathBuf,
         app: gpui::WeakEntity<Tty7App>,
-        mermaid_renderer: Option<fn(&str) -> Option<String>>,
+        mermaid_enabled: bool,
         cx: &mut Context<Self>,
     ) -> Self {
-        let mut content = source.read(cx).text().to_string();
-        // Pre-process mermaid code blocks
-        if let Some(renderer) = mermaid_renderer {
-            content = Self::preprocess_mermaid(&content, renderer);
-        }
-        let text = cx.new(|cx| TextViewState::markdown_with_extensions(&content, extensions(), cx));
+        let content = source.read(cx).text().to_string();
+        let processed_content = if mermaid_enabled {
+            Self::preprocess_mermaid(&content, cx)
+        } else {
+            content
+        };
+        let text = cx.new(|cx| {
+            TextViewState::markdown_with_extensions(&processed_content, extensions(), cx)
+        });
         let subscriptions = vec![
             cx.observe_global::<Registry>(|_, cx| cx.notify()),
             cx.observe_global::<gpui_component::Theme>(|_, cx| cx.notify()),
@@ -304,7 +311,7 @@ impl MarkdownPreview {
             width: px(0.),
             style_key: None,
             style: TextViewStyle::default(),
-            mermaid_renderer,
+            mermaid_enabled,
             _subscriptions: subscriptions,
         }
     }
@@ -324,13 +331,14 @@ impl MarkdownPreview {
         self.image_bytes = 0;
         self.last_position = None;
         self.restore_position = None;
-        let mut content = self.source.read(cx).text().to_string();
-        // Pre-process mermaid code blocks
-        if let Some(renderer) = self.mermaid_renderer {
-            content = Self::preprocess_mermaid(&content, renderer);
-        }
+        let content = self.source.read(cx).text().to_string();
+        let processed_content = if self.mermaid_enabled {
+            Self::preprocess_mermaid(&content, cx)
+        } else {
+            content
+        };
         self.text
-            .update(cx, |state, cx| state.set_text(&content, cx));
+            .update(cx, |state, cx| state.set_text(&processed_content, cx));
         cx.notify();
     }
 
@@ -339,44 +347,6 @@ impl MarkdownPreview {
         snapshot: Option<gpui_component::text::TextViewSelectionSnapshot>,
     ) {
         self.layout_selection = snapshot;
-    }
-
-    fn preprocess_mermaid(content: &str, renderer: fn(&str) -> Option<String>) -> String {
-        let mut result = String::new();
-        let mut in_mermaid = false;
-        let mut mermaid_code = String::new();
-
-        for line in content.lines() {
-            if line.trim() == "```mermaid" {
-                in_mermaid = true;
-                mermaid_code.clear();
-                continue;
-            }
-
-            if in_mermaid {
-                if line.trim() == "```" {
-                    in_mermaid = false;
-                    // Render mermaid diagram
-                    if let Some(svg) = renderer(&mermaid_code) {
-                        result.push_str(&svg);
-                        result.push('\n');
-                    } else {
-                        // Fallback: show as code block
-                        result.push_str("```mermaid\n");
-                        result.push_str(&mermaid_code);
-                        result.push_str("```\n");
-                    }
-                } else {
-                    mermaid_code.push_str(line);
-                    mermaid_code.push('\n');
-                }
-            } else {
-                result.push_str(line);
-                result.push('\n');
-            }
-        }
-
-        result
     }
 
     pub(crate) fn restore_layout_selection(&mut self, cx: &mut Context<Self>) {
@@ -507,6 +477,34 @@ impl MarkdownPreview {
         ));
         cx.stop_propagation();
         cx.notify();
+    }
+
+    /// Replace ```` ```mermaid ```` fences with inline SVG rendered in the
+    /// active Markdown theme. A diagram that fails to render stays a plain
+    /// code block, followed by an HTML comment carrying the error.
+    fn preprocess_mermaid(content: &str, cx: &mut Context<Self>) -> String {
+        static MERMAID_FENCE: LazyLock<regex::Regex> = LazyLock::new(|| {
+            regex::Regex::new(r"(?m)^```mermaid[ \t]*\n([\s\S]*?)^```")
+                .expect("mermaid fence regex is valid")
+        });
+
+        if !MERMAID_FENCE.is_match(content) {
+            return content.to_string();
+        }
+        let theme = current(cx).theme;
+        let dark = cx.theme().mode.is_dark();
+
+        MERMAID_FENCE
+            .replace_all(content, |caps: &regex::Captures| {
+                let source = &caps[1];
+                match crate::ui::markdown_mermaid::render_mermaid(source, &theme, dark) {
+                    Ok(svg) => format!("\n{svg}\n"),
+                    Err(err) => {
+                        format!("```mermaid\n{source}```\n<!-- Mermaid render error: {err} -->")
+                    }
+                }
+            })
+            .into_owned()
     }
 }
 

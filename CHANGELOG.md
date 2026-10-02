@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Mermaid diagram support in Markdown preview**. Code blocks with `mermaid`
+  language identifier are now rendered as inline SVG diagrams. Supports all
+  Mermaid diagram types: flowcharts, sequence diagrams, class diagrams, state
+  diagrams, Git graphs, Gantt charts, pie charts, and more. Diagrams automatically
+  inherit colors from the active Markdown theme, adapting seamlessly to light/dark
+  mode switches. The integration uses the `merman` headless renderer with full
+  theme mapping from Paperglow palette to diagram elements (canvas, surface, text,
+  borders, actors, notes, activation bars). See `docs/mermaid-support.md` for
+  usage examples and theme customization.
+
 - **Documents dock beside the terminal** (#625). Opening a file, toggling the
   code panel or opening a diff no longer covers the workspace: the document
   takes a column to the right of the terminal — half the space between the
