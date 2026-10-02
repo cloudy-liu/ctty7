@@ -1766,16 +1766,29 @@ impl Tty7App {
             Some(TreeEdit::Rename { path: p, .. }) if *p == path
         );
 
+        // Directories are marked by a disclosure chevron (the Codex app's
+        // tree style) instead of a folder glyph; files keep the file mark.
+        // The root cannot be collapsed, so it keeps the open-folder glyph
+        // rather than a chevron that promises something it will not do.
         let icon = if row.is_root {
             IconName::FolderOpen
         } else if is_dir {
             if row.expanded {
-                IconName::FolderOpen
+                IconName::ChevronDown
             } else {
-                IconName::Folder
+                IconName::ChevronRight
             }
         } else {
             IconName::File
+        };
+        // A chevron is an affordance, not content: a step smaller and quieter
+        // than the file mark, in the same cell so names still line up.
+        let (glyph, glyph_color) = if is_dir && !row.is_root {
+            (ROW_GLYPH - 1., muted)
+        } else if is_dir {
+            (ROW_GLYPH, cx.theme().foreground)
+        } else {
+            (ROW_GLYPH, muted)
         };
 
         let label: AnyElement = if renaming {
@@ -1813,11 +1826,14 @@ impl Tty7App {
             .cursor_pointer()
             .when(selected, |d| d.bg(gpui::rgb(sf.selected)))
             .when(!selected, |d| d.hover(|s| s.bg(gpui::rgb(sf.hover))))
-            .child(Icon::new(icon).size(px(ROW_GLYPH)).text_color(if is_dir {
-                cx.theme().foreground
-            } else {
-                muted
-            }))
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(ROW_GLYPH))
+                    .flex()
+                    .justify_center()
+                    .child(Icon::new(icon).size(px(glyph)).text_color(glyph_color)),
+            )
             .child(label)
             // Two indicators, two columns, two shapes. The dot is an unsaved
             // editor buffer and has nothing to do with git; keeping it round and
