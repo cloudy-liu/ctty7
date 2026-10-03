@@ -1,5 +1,4 @@
-; Fallback source-editor captures. The bundled language rules precede these
-; and retain their more specific function, type, constant and macro roles.
+; These broad variable fallbacks follow the bundled specific captures.
 ; Use grammar roles, so module paths and opaque macro token trees are excluded.
 [
   (_expression/identifier)

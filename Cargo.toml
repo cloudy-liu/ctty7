@@ -251,6 +251,7 @@ ksni = { version = "0.3.6", default-features = false, features = ["blocking", "a
 # App/Window harness the view/event tests run on. Dev-only: the feature merges
 # into test builds and never reaches a release binary.
 [dev-dependencies]
+tree-sitter = "0.26.8"
 gpui = { workspace = true, features = ["test-support"] }
 
 [lints]
@@ -289,10 +290,10 @@ version = "0.1.0"
 # that, since a path dependency can't resolve on CI.
 #
 # `tree-sitter-languages` compiles the grammars the code editor highlights with.
-gpui-component = { git = "https://github.com/cloudy-liu/gpui-component", rev = "833b0e084a12a3a0561d1e844b307e120cb37123", version = "0.5.2", features = [
+gpui-component = { git = "https://github.com/cloudy-liu/gpui-component", rev = "a8bc7a71b974cbf190b86622837e46e4508070e7", version = "0.5.2", features = [
     "tree-sitter-languages",
 ] }
-gpui-component-assets = { git = "https://github.com/cloudy-liu/gpui-component", rev = "833b0e084a12a3a0561d1e844b307e120cb37123", version = "0.5.1" }
+gpui-component-assets = { git = "https://github.com/cloudy-liu/gpui-component", rev = "a8bc7a71b974cbf190b86622837e46e4508070e7", version = "0.5.1" }
 
 gpui = { git = "https://github.com/zed-industries/zed", rev = "1d217ee39d381ac101b7cf49d3d22451ac1093fe" }
 # Base features are cross-platform (`font-kit`, `runtime_shaders` only map to the

@@ -4,10 +4,70 @@ Spec: [cloudy-liu/ctty7#84](https://github.com/cloudy-liu/ctty7/issues/84).
 Verification ran on Windows on 2026-10-03.
 
 The application pins `cloudy-liu/gpui-component` at
-`833b0e084a12a3a0561d1e844b307e120cb37123`. Both component packages and
+`a8bc7a71b974cbf190b86622837e46e4508070e7`. Both component packages and
 the transitive macro package resolve to that revision in `Cargo.lock`.
 
+## Theme fidelity correction
+
+The screenshot report exposed a conversion error: flattening the theme by
+rule name discarded language-specific scopes and exact capture subroles.
+The component also let local-definition/reference captures compete with
+visible colors. These errors affected several languages, not just Python.
+The current component revision preserves exact capture styles with generic
+fallbacks and excludes local bookkeeping patterns from visual precedence.
+
+The complete pinned Dark and Light source files are now bundled and checked
+by parsed-content SHA-256 fingerprints during palette regeneration. Each
+contains 74 UI colors and 211 ordered token rules. The Dark source also matches
+the installed Atom One Dark 2.3.0 theme's parsed data. Palette generation uses
+explicit scope selectors and language-qualified captures instead of rule names.
+
+The current targeted command is:
+
+```powershell
+cargo test --locked --features updater -j 2 --bin tty7-app editor_theme_
+```
+
+It passed 11 tests with no failures. The independent TextMate reference corpus
+covers 46 samples across 21 languages and two appearances, with 440 token color
+assertions. Separate tests compare 22 resolved editor/control color fields with
+the authored sources and check successful compilation of all 38 private
+language queries while leaving shared registrations unchanged. Embedded
+HTML/JavaScript, JSX/TSX and canonical Rust Markdown fences are also covered.
+The [corpus provenance](../../assets/editor-themes/tests/README.md) records the
+reference engine and languages.
+
+TSX and C++ now include their full base highlight queries. Kotlin's unsupported
+composite-token patterns no longer disable its highlighter. Numeric SQL query
+predicates use the highlighter's regex syntax. Language-specific corrections
+include Python variables/imports, JavaScript/TypeScript bindings and operators,
+JSON literals, CSS selectors/properties/units, Rust imports and types, Markdown
+markup, and Lua/Make/TOML roles.
+
+These tests establish the documented sample coverage, not exhaustive TextMate
+selector equivalence. CMake, C#, GraphQL, Protocol Buffers and Swift have empty
+highlight queries in the dependency and remain readable foreground text.
+Semantic tokens, bracket coloring and arbitrary Markdown fence aliases remain
+outside the mapped syntax coverage.
+
+The current locked workspace regression passed 2,945 tests with 6 ignored and
+no failures. Formatting, whitespace and Host boundary checks passed; the
+boundary script checked 98 UI/terminal files. Regenerating the palettes from
+the bundled sources produced byte-for-byte identical output.
+The locked Windows build also passed. Standards review identified an unused
+language argument in palette selection; it was removed because language rules
+now belong to the private queries and qualified capture styles. Spec review
+identified expression word operators incorrectly receiving keyword purple;
+`typeof`, `void` and `delete` now use the authored JS/TS cyan operator override.
+Six independently generated JS/TS/TSX operator samples add 42 expectations,
+including the purple `in`, `instanceof`, `new` and `of` cases. Follow-up reviews
+found no remaining actionable Standards or Spec implementation findings;
+the native full-app acceptance gap remains documented below.
+
 ## Initial implementation checks
+
+The following results are historical checks at component revision
+`833b0e084a12a3a0561d1e844b307e120cb37123`, before the fidelity correction.
 
 | Check | Result |
 | --- | --- |
@@ -61,7 +121,7 @@ results above remain the initial implementation's checks.
 
 ## Native component previews
 
-These images show native GPUI `Input` components with the shipped palettes,
+These historical images show native GPUI `Input` components with the initial palettes,
 Rust query adaptation and bundled Hack font. They are component previews,
 not screenshots of the full tty7 application. Each window contains two
 independently styled editors and one ordinary input using the app colors.
@@ -76,7 +136,8 @@ Light application appearance:
 
 Both editor backgrounds remain opaque, including when their appearance
 differs from the containing window. The preview was built against the pinned
-component revision above.
+initial component revision `833b0e084a12a3a0561d1e844b307e120cb37123`.
+They do not verify the subsequent language-scope fidelity correction.
 
 ## Rendering performance sample
 

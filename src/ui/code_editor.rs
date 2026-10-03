@@ -1184,10 +1184,7 @@ impl Tty7App {
                 let input = f.input.clone();
                 Input::new(&input)
                     .appearance(false)
-                    .editor_style(crate::ui::editor_theme::current(
-                        language_for_path(&f.path),
-                        cx,
-                    ))
+                    .editor_style(crate::ui::editor_theme::current(cx))
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_size(cx.theme().mono_font_size)
                     .size_full()
@@ -1535,31 +1532,29 @@ mod tests {
                     app.set_theme_follow_system(false, window, cx);
                     app.set_preset(&preset.id, window, cx);
                     app.set_editor_theme(preference, cx);
-                    for language in ["rust", "text"] {
-                        let base = editor_theme::current(language, cx);
-                        let background = packed(base.highlight_theme.style.editor_background.unwrap());
-                        let foreground = packed(base.highlight_theme.style.editor_foreground.unwrap());
-                        for accent in [preset.neutrals().accent, 0x434750, background] {
-                            cx.set_global(presets::ActiveAccent(accent));
-                            let style = editor_theme::current(language, cx);
-                            let hit = packed(style.search_match);
-                            let active = packed(style.search_match_active);
-                            assert!(
-                                presets::contrast(hit, active) >= 1.2,
-                                "{} / {preference} / {language}: current and other matches must differ",
-                                preset.id
-                            );
-                            assert!(presets::contrast(background, active) >= 1.89);
-                            assert_eq!(style.search_match.a, 1.0);
-                            assert_eq!(style.search_match_active.a, 1.0);
-                            for fill in [hit, active] {
-                                assert!(presets::contrast(foreground, fill) >= 2.95);
-                            }
-                            assert_eq!(style.selection, base.selection);
-                            assert_eq!(style.caret, base.caret);
-                            assert_eq!(style.highlight_theme, base.highlight_theme);
-                            assert_eq!(style.search_match, base.search_match);
+                    let base = editor_theme::current(cx);
+                    let background = packed(base.highlight_theme.style.editor_background.unwrap());
+                    let foreground = packed(base.highlight_theme.style.editor_foreground.unwrap());
+                    for accent in [preset.neutrals().accent, 0x434750, background] {
+                        cx.set_global(presets::ActiveAccent(accent));
+                        let style = editor_theme::current(cx);
+                        let hit = packed(style.search_match);
+                        let active = packed(style.search_match_active);
+                        assert!(
+                            presets::contrast(hit, active) >= 1.2,
+                            "{} / {preference}: current and other matches must differ",
+                            preset.id
+                        );
+                        assert!(presets::contrast(background, active) >= 1.89);
+                        assert_eq!(style.search_match.a, 1.0);
+                        assert_eq!(style.search_match_active.a, 1.0);
+                        for fill in [hit, active] {
+                            assert!(presets::contrast(foreground, fill) >= 2.95);
                         }
+                        assert_eq!(style.selection, base.selection);
+                        assert_eq!(style.caret, base.caret);
+                        assert_eq!(style.highlight_theme, base.highlight_theme);
+                        assert_eq!(style.search_match, base.search_match);
                     }
                 });
             }
@@ -1625,7 +1620,7 @@ mod tests {
         ] {
             app.update_in(&mut vcx, |app, _, cx| {
                 app.set_editor_theme(preference, cx);
-                let style = editor_theme::current("rust", cx);
+                let style = editor_theme::current(cx);
                 let mut highlighter = SyntaxHighlighter::new(editor_theme::language("rust"));
                 highlighter.update(None, &source.into(), None);
                 let runs = highlighter.styles(&(0..source.len()), &style.highlight_theme);
@@ -1676,6 +1671,257 @@ mod tests {
     }
 
     #[gpui::test]
+    fn editor_theme_python_variables_match_atom_one_foreground(cx: &mut TestAppContext) {
+        use crate::ui::editor_theme;
+        use gpui_component::highlighter::SyntaxHighlighter;
+        let (app, mut vcx) = markdown_window(cx);
+        let source = "import json\nDEST = Path(__file__).parent\nroot = Path(\"icons\")\nversion = json.loads(root.read_text())\n";
+        for (preference, foreground) in [("atom_one_dark", 0xabb2bf), ("atom_one_light", 0x383a42)]
+        {
+            app.update_in(&mut vcx, |app, _, cx| {
+                app.set_editor_theme(preference, cx);
+                let style = editor_theme::current(cx);
+                let mut highlighter = SyntaxHighlighter::new(editor_theme::language("python"));
+                highlighter.update(None, &source.into(), None);
+                let runs = highlighter.styles(&(0..source.len()), &style.highlight_theme);
+                for token in ["json", "DEST", "root", "version", "parent"] {
+                    let offset = source.find(token).unwrap();
+                    let color = runs
+                        .iter()
+                        .find(|(range, _)| range.contains(&offset))
+                        .and_then(|(_, run)| run.color)
+                        .or(style.highlight_theme.style.editor_foreground);
+                    assert_eq!(
+                        color,
+                        Some(gpui::rgb(foreground).into()),
+                        "{preference}: {token}"
+                    );
+                }
+            });
+        }
+    }
+
+    #[test]
+    fn editor_theme_preserves_exact_capture_styles_and_base_fallbacks() {
+        let colors: gpui_component::highlighter::SyntaxColors = serde_json::from_str(
+            r##"{"variable":{"color":"#E06C75"},"variable.parameter":{"color":"#ABB2BF"},"function":{"color":"#61AFEF"},"function.builtin":{"color":"#56B6C2"}}"##,
+        ).unwrap();
+        for (capture, expected) in [
+            ("variable.parameter", 0xabb2bf),
+            ("variable.member", 0xe06c75),
+            ("function.builtin", 0x56b6c2),
+            ("function.method", 0x61afef),
+        ] {
+            assert_eq!(
+                colors.style(capture).unwrap().color,
+                Some(gpui::rgb(expected).into()),
+                "{capture}"
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn editor_theme_matches_upstream_textmate_color_samples(cx: &mut TestAppContext) {
+        use crate::ui::editor_theme;
+        use gpui_component::highlighter::SyntaxHighlighter;
+        #[derive(serde::Deserialize)]
+        struct Token {
+            text: String,
+            start: usize,
+            end: usize,
+            color: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct Sample {
+            mode: String,
+            language: String,
+            source: String,
+            tokens: Vec<Token>,
+        }
+        let samples: Vec<Sample> = serde_json::from_str(include_str!(
+            "../../assets/editor-themes/tests/textmate-colors.json"
+        ))
+        .unwrap();
+        let (app, mut vcx) = markdown_window(cx);
+        let mut failures = Vec::new();
+        for sample in samples {
+            app.update_in(&mut vcx, |app, _, cx| {
+                app.set_editor_theme(&format!("atom_one_{}", sample.mode), cx);
+                let style = editor_theme::current(cx);
+                // The registry owns static language names, just like path detection.
+                let language = gpui_component::highlighter::Language::all()
+                    .find(|language| language.name() == sample.language)
+                    .unwrap()
+                    .name();
+                let alias = editor_theme::language(language);
+                let mut highlighter = SyntaxHighlighter::new(alias);
+                if highlighter.language().as_ref() != alias {
+                    failures.push(format!("{language} query must compile"));
+                    return;
+                }
+                highlighter.update(None, &sample.source.as_str().into(), None);
+                let runs = highlighter.styles(&(0..sample.source.len()), &style.highlight_theme);
+                for token in &sample.tokens {
+                    let expected =
+                        u32::from_str_radix(token.color.trim_start_matches('#'), 16).unwrap();
+                    for offset in token.start..token.end {
+                        if sample.source.as_bytes()[offset].is_ascii_whitespace() {
+                            continue;
+                        }
+                        let color = runs
+                            .iter()
+                            .find(|(range, _)| range.contains(&offset))
+                            .and_then(|(_, run)| run.color)
+                            .or(style.highlight_theme.style.editor_foreground);
+                        if color != Some(gpui::rgb(expected).into()) {
+                            failures.push(format!(
+                                "{} {} {:?} at {}: expected {}, got {:?}",
+                                sample.mode,
+                                language,
+                                token.text,
+                                offset,
+                                token.color,
+                                color.map(crate::terminal::palette::hsla_to_rgb)
+                            ));
+                            break;
+                        }
+                    }
+                }
+            });
+        }
+        assert!(failures.is_empty(), "{}", failures.join("\n"));
+    }
+
+    #[gpui::test]
+    fn editor_theme_queries_compile_without_changing_shared_languages(cx: &mut TestAppContext) {
+        let _ = markdown_window(cx);
+        use gpui_component::highlighter::{Language, LanguageRegistry, SyntaxHighlighter};
+        let registry = LanguageRegistry::singleton();
+        let originals: Vec<_> = Language::all()
+            .map(|language| (language.name(), registry.language(language.name()).unwrap()))
+            .collect();
+        let mut errors = Vec::new();
+        for (name, original) in originals {
+            let alias = crate::ui::editor_theme::language(name);
+            let config = registry.language(alias).unwrap();
+            if let Err(error) = tree_sitter::Query::new(
+                &config.language,
+                &format!(
+                    "{}{}{}",
+                    config.injections, config.locals, config.highlights
+                ),
+            ) {
+                errors.push(format!("{name}: {error}"));
+                continue;
+            }
+            let highlighter = SyntaxHighlighter::new(alias);
+            assert_eq!(highlighter.language().as_ref(), alias, "{name}");
+            assert_eq!(registry.language(name).unwrap(), original, "shared {name}");
+        }
+        assert!(errors.is_empty(), "{}", errors.join("\n"));
+    }
+
+    #[gpui::test]
+    fn editor_theme_control_colors_match_the_authored_sources(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        for (preference, source) in [
+            (
+                "atom_one_dark",
+                include_str!("../../assets/editor-themes/upstream/OneDark.json"),
+            ),
+            (
+                "atom_one_light",
+                include_str!("../../assets/editor-themes/upstream/OneLight.json"),
+            ),
+        ] {
+            let source: serde_json::Value = serde_json::from_str(source).unwrap();
+            app.update_in(&mut vcx, |app, _, cx| {
+                app.set_editor_theme(preference, cx);
+                let style = crate::ui::editor_theme::current(cx);
+                let colors = &style.highlight_theme.style;
+                for (actual, key) in [
+                    (colors.editor_background.unwrap(), "editor.background"),
+                    (colors.editor_foreground.unwrap(), "editor.foreground"),
+                    (
+                        colors.editor_gutter_background.unwrap(),
+                        "editor.background",
+                    ),
+                    (
+                        colors.editor_active_line.unwrap(),
+                        "editor.lineHighlightBackground",
+                    ),
+                    (
+                        colors.editor_line_number.unwrap(),
+                        "editorLineNumber.foreground",
+                    ),
+                    (
+                        colors.editor_active_line_number.unwrap(),
+                        "editorLineNumber.activeForeground",
+                    ),
+                    (
+                        colors.editor_invisible.unwrap(),
+                        "editorWhitespace.foreground",
+                    ),
+                    (style.selection, "editor.selectionBackground"),
+                    (style.caret, "editorCursor.foreground"),
+                    (style.muted_foreground, "editorLineNumber.foreground"),
+                    (style.border, "editorIndentGuide.background"),
+                ] {
+                    let expected: gpui::Hsla =
+                        serde_json::from_value(source["colors"][key].clone()).unwrap();
+                    assert_eq!(actual, expected, "{preference}: {key}");
+                }
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn editor_theme_preserves_language_overrides_inside_embedded_code(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        for (preference, foreground, orange, cyan, red, green, blue) in [
+            (
+                "atom_one_dark",
+                0xabb2bf,
+                0xd19a66,
+                0x56b6c2,
+                0xe06c75,
+                0x98c379,
+                0x61afef,
+            ),
+            (
+                "atom_one_light",
+                0x383a42,
+                0x986801,
+                0x0184bc,
+                0xe45649,
+                0x50a14f,
+                0x4078f2,
+            ),
+        ] {
+            app.update_in(&mut vcx, |app, _, cx| {
+                app.set_editor_theme(preference, cx);
+                for (language, source, tokens) in [
+                    ("html", "<script>let root = obj.parent + 2;</script>", vec![("root", foreground), ("=", cyan), ("parent", red), ("2", orange)]),
+                    ("tsx", "const root: string = obj.parent + 2; const view = <div id=\"main\">{root}</div>;", vec![("root", orange), ("string", cyan), ("parent", red), ("div", red), ("id", orange), ("main", green)]),
+                    ("javascript", "const view = <div id=\"main\">{item}</div>;", vec![("div", red), ("id", orange), ("main", green), ("item", foreground)]),
+                    ("markdown", "```rust\nstruct Widget;\n```\n", vec![("Widget", cyan)]),
+                    ("python", "from pathlib import Path\nDEST = Path(__file__).parent\n", vec![("Path", foreground), ("Path(__file__)", blue), ("__file__", red), ("parent", foreground)]),
+                ] {
+                    let style = crate::ui::editor_theme::current(cx);
+                    let mut highlighter = gpui_component::highlighter::SyntaxHighlighter::new(crate::ui::editor_theme::language(language));
+                    highlighter.update(None, &source.into(), None);
+                    let runs = highlighter.styles(&(0..source.len()), &style.highlight_theme);
+                    for (token, expected) in tokens {
+                        let offset = source.find(token).unwrap();
+                        let color = runs.iter().find(|(range, _)| range.contains(&offset)).and_then(|(_, run)| run.color).or(style.highlight_theme.style.editor_foreground);
+                        assert_eq!(color, Some(gpui::rgb(expected).into()), "{preference} {language}: {token}");
+                    }
+                }
+            });
+        }
+    }
+
+    #[gpui::test]
     fn editor_theme_highlights_cross_language_samples(cx: &mut TestAppContext) {
         use crate::ui::editor_theme;
         use gpui_component::highlighter::{LanguageRegistry, SyntaxHighlighter};
@@ -1718,8 +1964,8 @@ mod tests {
                         vec![("42", number), ("hello", string)],
                     ),
                 ] {
-                    let style = editor_theme::current(language, cx);
-                    let mut highlighter = SyntaxHighlighter::new(language);
+                    let style = editor_theme::current(cx);
+                    let mut highlighter = SyntaxHighlighter::new(editor_theme::language(language));
                     highlighter.update(None, &source.into(), None);
                     let runs = highlighter.styles(&(0..source.len()), &style.highlight_theme);
                     for (token, expected) in tokens {
@@ -1783,7 +2029,7 @@ mod tests {
             app.update_in(&mut vcx, |app, window, cx| {
                 app.set_preset(preset, window, cx);
                 app.set_editor_theme(preference, cx);
-                let style = editor_theme::current("rust", cx);
+                let style = editor_theme::current(cx);
                 assert_eq!(
                     style.highlight_theme.style.editor_background,
                     Some(gpui::rgb(background).into())
@@ -1821,7 +2067,7 @@ mod tests {
             app.set_preset("light", window, cx);
             app.preview_preset("dark", window, cx);
             assert_eq!(
-                editor_theme::current("text", cx)
+                editor_theme::current(cx)
                     .highlight_theme
                     .style
                     .editor_background,
@@ -1829,7 +2075,7 @@ mod tests {
             );
             app.cancel_preset_preview(window, cx);
             assert_eq!(
-                editor_theme::current("text", cx)
+                editor_theme::current(cx)
                     .highlight_theme
                     .style
                     .editor_background,
@@ -1841,7 +2087,7 @@ mod tests {
             config.editor_theme = "atom_one_dark".into();
             crate::apply_reloaded_config(cx, (config, LoadOutcome::Parsed), &mut false);
             assert_eq!(
-                editor_theme::current("text", cx)
+                editor_theme::current(cx)
                     .highlight_theme
                     .style
                     .editor_background,
@@ -1852,7 +2098,7 @@ mod tests {
             crate::apply_reloaded_config(cx, (config, LoadOutcome::Parsed), &mut false);
             assert_eq!(cx.global::<Config>().editor_theme, "future-theme");
             assert_eq!(
-                editor_theme::current("text", cx)
+                editor_theme::current(cx)
                     .highlight_theme
                     .style
                     .editor_background,
