@@ -179,6 +179,19 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsCustomThemes => "カスタムテーマ",
         L10nKey::SettingsThemesRejected => "テーマフォルダから読み込めなかったもの",
         L10nKey::SettingsMarkdownTheme => "Markdown の閲覧テーマ",
+        L10nKey::SettingsEditorTheme => "コードエディタのテーマ",
+        L10nKey::SettingsEditorThemeDesc => {
+            "自動ではアプリのライト・ダーク表示に合わせます。ソースコードのみに適用します。"
+        }
+        L10nKey::SettingsEditorThemeAuto => "自動",
+        L10nKey::SettingsEditorThemeDark => "常にダーク · Atom One Dark",
+        L10nKey::SettingsEditorThemeLight => "常にライト · Atom One Light",
+        L10nKey::SettingsEditorThemeUnavailable => {
+            "不明なエディタテーマ {requested}。テーマを選択するまで自動を使用します。"
+        }
+        L10nKey::SettingsSearchEditorThemeKeywords => {
+            "コード エディタ ソース 構文 ハイライト 自動 テーマ atom one dark light"
+        }
         L10nKey::SettingsMarkdownThemeDesc => {
             "閲覧スタイルを選択します。明暗はアプリに追従し、テーマファイルの変更は自動的に反映されます。"
         }

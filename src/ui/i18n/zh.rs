@@ -159,6 +159,17 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsCustomThemes => "自定义主题",
         L10nKey::SettingsThemesRejected => "主题文件夹里这些没能加载",
         L10nKey::SettingsMarkdownTheme => "Markdown 阅读主题",
+        L10nKey::SettingsEditorTheme => "代码编辑区主题",
+        L10nKey::SettingsEditorThemeDesc => "自动模式跟随应用深浅外观，仅影响源码编辑区。",
+        L10nKey::SettingsEditorThemeAuto => "自动",
+        L10nKey::SettingsEditorThemeDark => "固定深色 · Atom One Dark",
+        L10nKey::SettingsEditorThemeLight => "固定浅色 · Atom One Light",
+        L10nKey::SettingsEditorThemeUnavailable => {
+            "未知编辑区主题 {requested}，暂时使用自动模式，请选择有效主题。"
+        }
+        L10nKey::SettingsSearchEditorThemeKeywords => {
+            "代码 编辑器 编辑区 源码 语法 高亮 配色 自动 深色 浅色 主题 atom one dark light"
+        }
         L10nKey::SettingsMarkdownThemeDesc => {
             "选择阅读样式，深浅配色自动跟随应用。修改主题文件后自动生效。"
         }

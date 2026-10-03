@@ -3570,7 +3570,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.5.2"
-source = "git+https://github.com/cloudy-liu/gpui-component?rev=833b0e084a12a3a0561d1e844b307e120cb37123#833b0e084a12a3a0561d1e844b307e120cb37123"
+source = "git+https://github.com/cloudy-liu/gpui-component?rev=a8bc7a71b974cbf190b86622837e46e4508070e7#a8bc7a71b974cbf190b86622837e46e4508070e7"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3653,7 +3653,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-assets"
 version = "0.5.1"
-source = "git+https://github.com/cloudy-liu/gpui-component?rev=833b0e084a12a3a0561d1e844b307e120cb37123#833b0e084a12a3a0561d1e844b307e120cb37123"
+source = "git+https://github.com/cloudy-liu/gpui-component?rev=a8bc7a71b974cbf190b86622837e46e4508070e7#a8bc7a71b974cbf190b86622837e46e4508070e7"
 dependencies = [
  "anyhow",
  "gpui",
@@ -3667,7 +3667,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.5.1"
-source = "git+https://github.com/cloudy-liu/gpui-component?rev=833b0e084a12a3a0561d1e844b307e120cb37123#833b0e084a12a3a0561d1e844b307e120cb37123"
+source = "git+https://github.com/cloudy-liu/gpui-component?rev=a8bc7a71b974cbf190b86622837e46e4508070e7#a8bc7a71b974cbf190b86622837e46e4508070e7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10541,6 +10541,7 @@ dependencies = [
  "tempfile",
  "toml 0.8.23",
  "tray-icon",
+ "tree-sitter",
  "tty7-core",
  "unicode-segmentation",
  "unicode-width",

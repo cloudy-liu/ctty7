@@ -133,6 +133,9 @@ pub struct Config {
     pub theme_preset: String,
     /// Reading theme package; its light/dark variant follows the applied UI mode.
     pub markdown_theme: String,
+    /// Source editor palette: auto, atom_one_dark, or atom_one_light.
+    #[serde(default = "default_editor_theme", deserialize_with = "de_editor_theme")]
+    pub editor_theme: String,
     pub theme_follow_system: bool,
     pub theme_preset_light: String,
     pub theme_preset_dark: String,
@@ -575,6 +578,7 @@ impl Default for Config {
             theme: "light".to_string(),
             theme_preset: "light".to_string(),
             markdown_theme: "paperglow".to_string(),
+            editor_theme: default_editor_theme(),
             theme_follow_system: false,
             theme_preset_light: "light".to_string(),
             theme_preset_dark: "dark".to_string(),
@@ -1029,6 +1033,18 @@ pub fn agent_commands_cached() -> &'static HashMap<String, String> {
     })
 }
 
+fn default_editor_theme() -> String {
+    "auto".to_owned()
+}
+
+fn de_editor_theme<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_str()
+        .map(str::to_owned)
+        .unwrap_or_else(default_editor_theme))
+}
+
 fn default_preset() -> String {
     "default".to_string()
 }
@@ -1413,6 +1429,33 @@ mod tests {
         let json = serde_json::to_string(&off).unwrap();
         let back: Config = serde_json::from_str(&json).unwrap();
         assert!(!back.dim_inactive_panes);
+    }
+
+    #[test]
+    fn editor_theme_keeps_old_configs_and_unknown_preferences() {
+        for (input, expected) in [
+            (r#"{"font_size":19}"#, "auto"),
+            (
+                r#"{"font_size":19,"editor_theme":"atom_one_dark"}"#,
+                "atom_one_dark",
+            ),
+            (
+                r#"{"font_size":19,"editor_theme":"atom_one_light"}"#,
+                "atom_one_light",
+            ),
+            (
+                r#"{"font_size":19,"editor_theme":"future-theme"}"#,
+                "future-theme",
+            ),
+        ] {
+            let config: Config = serde_json::from_str(input).unwrap();
+            let saved = serde_json::to_value(&config).unwrap();
+            assert_eq!(saved["editor_theme"], expected);
+            assert_eq!(saved["font_size"], 19.0);
+        }
+        let malformed: Config =
+            serde_json::from_str(r#"{"font_size":19,"editor_theme":{"wrong":"type"}}"#).unwrap();
+        assert_eq!(malformed.font_size, 19.0);
     }
 
     #[test]
