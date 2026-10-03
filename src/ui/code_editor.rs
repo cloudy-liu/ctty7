@@ -8,7 +8,7 @@ use gpui::{
     div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
-use gpui_component::input::{Input, InputEvent, InputState, Position, TabSize};
+use gpui_component::input::{CodeEditorStyle, Input, InputEvent, InputState, Position, TabSize};
 use gpui_component::menu::ContextMenuExt as _;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
@@ -22,6 +22,28 @@ use crate::ui::i18n::{L10nKey, t, t_fmt};
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
 const RELOAD_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(200);
+
+fn editor_search_style(theme: &gpui_component::Theme, accent: u32) -> Arc<CodeEditorStyle> {
+    use crate::ui::presets::{match_wash_targets, wash};
+
+    let pack = |color| {
+        let color = crate::terminal::palette::hsla_to_rgb(color);
+        (color.r as u32) << 16 | (color.g as u32) << 8 | color.b as u32
+    };
+    let background = pack(theme.background);
+    let foreground = pack(theme.foreground);
+    let (hit_target, active_target) = match_wash_targets(background, foreground);
+    let mut style = CodeEditorStyle::from_theme(theme);
+    // appearance(false) previously inherited the application's body text color.
+    Arc::make_mut(&mut style.highlight_theme)
+        .style
+        .editor_foreground = Some(theme.foreground);
+    // Separate luminance targets also work when the selection and accent are gray.
+    // Opaque fills keep the active match independent of the hit painted below it.
+    style.search_match = gpui::rgb(wash(background, foreground, hit_target)).into();
+    style.search_match_active = gpui::rgb(wash(background, accent, active_target)).into();
+    Arc::new(style)
+}
 
 pub(crate) struct OpenFile {
     pub(crate) path: PathBuf,
@@ -1183,6 +1205,10 @@ impl Tty7App {
             Some(f) => {
                 let input = f.input.clone();
                 Input::new(&input)
+                    .editor_style(editor_search_style(
+                        cx.theme(),
+                        cx.global::<crate::ui::presets::ActiveAccent>().0,
+                    ))
                     .appearance(false)
                     .font_family(cx.theme().mono_font_family.clone())
                     .text_size(cx.theme().mono_font_size)
@@ -1515,6 +1541,74 @@ impl Tty7App {
 mod tests {
     use super::*;
     use gpui::{TestAppContext, VisualTestContext};
+
+    fn packed(color: gpui::Hsla) -> u32 {
+        let color = crate::terminal::palette::hsla_to_rgb(color);
+        (color.r as u32) << 16 | (color.g as u32) << 8 | color.b as u32
+    }
+
+    #[test]
+    fn editor_search_highlights_distinguish_achromatic_selection() {
+        let mut theme = gpui_component::Theme::default();
+        theme.background = gpui::rgb(0x282c34).into();
+        theme.foreground = gpui::rgb(0xabb2bf).into();
+        theme.selection = gpui::rgb(0x434750).into();
+        for accent in [0x61afef, 0x434750, 0x282c34] {
+            let style = editor_search_style(&theme, accent);
+            let hit = packed(style.search_match);
+            let active = packed(style.search_match_active);
+            assert!(crate::ui::presets::contrast(hit, active) >= 1.2);
+            assert!(crate::ui::presets::contrast(0x282c34, active) >= 1.9);
+            assert_eq!(style.selection, theme.selection);
+        }
+    }
+
+    #[test]
+    fn editor_search_highlights_distinguish_matches_in_every_builtin() {
+        for preset in crate::ui::presets::builtins() {
+            let colors = preset.neutrals();
+            let mut theme = gpui_component::Theme::default();
+            theme.background = gpui::rgb(colors.background).into();
+            theme.foreground = gpui::rgb(colors.foreground).into();
+            theme.selection = gpui::rgb(colors.selection).into();
+            let style = editor_search_style(&theme, colors.accent);
+            let hit = packed(style.search_match);
+            let active = packed(style.search_match_active);
+            assert!(
+                crate::ui::presets::contrast(hit, active) >= 1.2,
+                "{}: current and other matches must differ in luminance",
+                preset.id
+            );
+            assert!(
+                crate::ui::presets::contrast(colors.background, active) >= 1.89,
+                "{}: the current match must stand out from the editor",
+                preset.id
+            );
+            assert_eq!(style.search_match.a, 1.0);
+            assert_eq!(style.search_match_active.a, 1.0);
+            for fill in [hit, active] {
+                assert!(
+                    crate::ui::presets::contrast(colors.foreground, fill) >= 2.95,
+                    "{}: highlighted text must remain readable",
+                    preset.id
+                );
+            }
+            assert_eq!(style.selection, theme.selection);
+            assert_eq!(style.caret, theme.caret);
+            assert_eq!(
+                style.highlight_theme.style.editor_foreground,
+                Some(theme.foreground)
+            );
+            assert_eq!(
+                style.highlight_theme.style.syntax,
+                theme.highlight_theme.style.syntax
+            );
+            assert_eq!(
+                style.highlight_theme.style.editor_background,
+                theme.highlight_theme.style.editor_background
+            );
+        }
+    }
 
     fn markdown_window(cx: &mut TestAppContext) -> (Entity<Tty7App>, VisualTestContext) {
         let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
