@@ -7,11 +7,17 @@ The bundled palettes adapt the MIT-licensed Atom One themes by Mahmoud Ali:
 
 The JSON files map TextMate token roles to the component's Tree-sitter roles.
 They retain the authored editor backgrounds, text, line numbers, selections,
-cursor, search match, whitespace, and syntax colors. Auxiliary diagnostic colors
+cursor, whitespace, and syntax colors. Auxiliary diagnostic colors
 use the palette's red, gold, blue, green, and comment roles. Their backgrounds
 use a 15% tint. These are tty7 adaptations, not additional upstream theme keys.
 Fold controls and scrollbars use the editor's muted text, selection, background,
 and border colors. Their colors remain local when app and editor modes differ.
+
+The JSON retains the upstream search colors as source data. At runtime, search
+fills use the resolved editor background and foreground with tty7's contrast
+targets. Ordinary matches are neutral; the current match uses the application
+accent with a contrast fallback. Both fills are opaque and keep the search
+visibility fix from cloudy-liu/ctty7#87 when app and editor appearances differ.
 
 Rust uses the upstream Rust-specific cyan type override. Editor-only query
 additions distinguish variables from module paths and map escapes to the

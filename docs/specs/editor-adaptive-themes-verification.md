@@ -7,7 +7,7 @@ The application pins `cloudy-liu/gpui-component` at
 `833b0e084a12a3a0561d1e844b307e120cb37123`. Both component packages and
 the transitive macro package resolve to that revision in `Cargo.lock`.
 
-## Automated checks
+## Initial implementation checks
 
 | Check | Result |
 | --- | --- |
@@ -29,6 +29,35 @@ imports and types, functions, escapes, constants, constructors and macro
 injections. The shared Rust language registration remains unchanged. The
 component test draws an overridden editor beside an ordinary editor and
 changes the override without replacing either buffer.
+
+## Search integration checks
+
+Integration with `main@92297d13` retains the current-match visibility fix from
+[cloudy-liu/ctty7#87](https://github.com/cloudy-liu/ctty7/pull/87). The source
+editor receives one complete style. Its search fills use the resolved editor
+background and foreground, plus the application accent, so opposite app/editor
+appearances use the editor's actual contrast budget.
+
+The regression command is:
+
+```powershell
+cargo test --locked -j 2 --bin tty7-app editor_search_highlights -- --nocapture
+```
+
+Before the fix, this test failed because the current match had less than 1.89:1
+contrast against the editor background. After the fix, it passed for all three
+editor preferences, every built-in application theme, Rust and plain-text
+palettes, and colored, gray and editor-background-colored accents. It checks
+separate opaque search fills and preserves the selection, caret and syntax
+palette. These are color-contract checks; they do not replace native visual
+acceptance.
+
+The integrated workspace check,
+`cargo test --locked --workspace --features updater -j 2`, passed 2,939 tests
+with 6 ignored and no failures. Formatting, whitespace and Host boundary
+checks also passed, as did the Windows `cargo build --locked -j 2`.
+The component revision is unchanged, so the component
+results above remain the initial implementation's checks.
 
 ## Native component previews
 

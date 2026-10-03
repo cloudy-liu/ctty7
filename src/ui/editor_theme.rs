@@ -1,7 +1,11 @@
 //! Source editor colors are independent of the terminal and Markdown reader.
 
 use crate::core::config::Config;
-use crate::ui::{app::Tty7App, i18n::L10nKey};
+use crate::ui::{
+    app::Tty7App,
+    i18n::L10nKey,
+    presets::{ActiveAccent, match_wash_targets, wash},
+};
 use gpui::{App, Context, rgb};
 use gpui_component::{ActiveTheme as _, ThemeMode, input::CodeEditorStyle};
 use std::sync::{Arc, OnceLock};
@@ -65,12 +69,27 @@ pub(crate) fn current(language: &str, cx: &App) -> Arc<CodeEditorStyle> {
         _ => cx.theme().mode == ThemeMode::Dark,
     };
     let palettes = palettes();
-    match (dark, language == "rust") {
+    let mut style = match (dark, language == "rust") {
         (true, true) => palettes.rust_dark.clone(),
         (false, true) => palettes.rust_light.clone(),
         (true, false) => palettes.dark.clone(),
         (false, false) => palettes.light.clone(),
-    }
+    };
+    let pack = |color| {
+        let color = crate::terminal::palette::hsla_to_rgb(color);
+        (color.r as u32) << 16 | (color.g as u32) << 8 | color.b as u32
+    };
+    let colors = &style.highlight_theme.style;
+    let background = pack(colors.editor_background.expect("bundled editor background"));
+    let foreground = pack(colors.editor_foreground.expect("bundled editor foreground"));
+    let (hit_target, active_target) = match_wash_targets(background, foreground);
+    let accent = cx.global::<ActiveAccent>().0;
+    // Use the editor's contrast budget even when its appearance differs from the app.
+    // Opaque fills keep the current match independent of the ordinary hit below it.
+    let resolved = Arc::make_mut(&mut style);
+    resolved.search_match = rgb(wash(background, foreground, hit_target)).into();
+    resolved.search_match_active = rgb(wash(background, accent, active_target)).into();
+    style
 }
 
 pub(crate) fn language(language: &'static str) -> &'static str {

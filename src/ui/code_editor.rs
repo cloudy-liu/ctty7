@@ -1520,6 +1520,52 @@ mod tests {
     use super::*;
     use gpui::{TestAppContext, VisualTestContext};
 
+    fn packed(color: gpui::Hsla) -> u32 {
+        let color = crate::terminal::palette::hsla_to_rgb(color);
+        (color.r as u32) << 16 | (color.g as u32) << 8 | color.b as u32
+    }
+
+    #[gpui::test]
+    fn editor_search_highlights_follow_the_resolved_editor_palette(cx: &mut TestAppContext) {
+        use crate::ui::{editor_theme, presets};
+        let (app, mut vcx) = markdown_window(cx);
+        for preset in presets::builtins() {
+            for preference in ["auto", "atom_one_dark", "atom_one_light"] {
+                app.update_in(&mut vcx, |app, window, cx| {
+                    app.set_theme_follow_system(false, window, cx);
+                    app.set_preset(&preset.id, window, cx);
+                    app.set_editor_theme(preference, cx);
+                    for language in ["rust", "text"] {
+                        let base = editor_theme::current(language, cx);
+                        let background = packed(base.highlight_theme.style.editor_background.unwrap());
+                        let foreground = packed(base.highlight_theme.style.editor_foreground.unwrap());
+                        for accent in [preset.neutrals().accent, 0x434750, background] {
+                            cx.set_global(presets::ActiveAccent(accent));
+                            let style = editor_theme::current(language, cx);
+                            let hit = packed(style.search_match);
+                            let active = packed(style.search_match_active);
+                            assert!(
+                                presets::contrast(hit, active) >= 1.2,
+                                "{} / {preference} / {language}: current and other matches must differ",
+                                preset.id
+                            );
+                            assert!(presets::contrast(background, active) >= 1.89);
+                            assert_eq!(style.search_match.a, 1.0);
+                            assert_eq!(style.search_match_active.a, 1.0);
+                            for fill in [hit, active] {
+                                assert!(presets::contrast(foreground, fill) >= 2.95);
+                            }
+                            assert_eq!(style.selection, base.selection);
+                            assert_eq!(style.caret, base.caret);
+                            assert_eq!(style.highlight_theme, base.highlight_theme);
+                            assert_eq!(style.search_match, base.search_match);
+                        }
+                    }
+                });
+            }
+        }
+    }
+
     fn markdown_window(cx: &mut TestAppContext) -> (Entity<Tty7App>, VisualTestContext) {
         let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
         app.update_in(&mut vcx, |app, _, cx| {
