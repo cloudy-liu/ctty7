@@ -22,6 +22,19 @@ Use `cargo test --workspace --locked` for the application and
 `cargo test -p gpui-component --lib --features tree-sitter-languages` for the
 component. The application pins both component crates to the same Git revision.
 
+## Latest automated verification
+
+On Windows, 2026-10-04, an independent application checkout passed
+`cargo test --workspace --locked -j 1` using only the pushed Git component
+revision `b3e1c4b5343f0eb27c31d21f7266b5af56ee049b`, with no local path override:
+2,923 tests passed, 6 were ignored, and none failed. This includes the search
+highlight tests from current fork main.
+
+The component passed `cargo test --all -j 1`: 295 tests passed, 2 documentation
+tests were ignored, and none failed; example targets also compiled. Application
+workspace formatting and the host-boundary check passed. All 12 Rust files
+changed for Markdown in the component passed their formatting check.
+
 ## Visual comparison
 
 Use [the acceptance sample](../examples/markdown-github-theme.md) unchanged in

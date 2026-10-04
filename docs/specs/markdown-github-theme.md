@@ -2,7 +2,7 @@
 
 发布目标：`cloudy-liu/ctty7` 的 GitHub Issues，标签 `ready-for-agent`。
 
-当前阶段：规格已定，尚未实施。应用改动在独立 worktree 分支 `feat/github-markdown-theme`（基于 `cloudy-liu/ctty7` 的 `main@44aa4510`）；组件改动在 `cloudy-liu/gpui-component` 的 worktree 分支 `feat/github-markdown-style`，基于尚未推送的 `4072869e`（圆角行内代码与列表符号颜色）。
+Implementation status (2026-10-04): implemented in [application draft PR #88](https://github.com/cloudy-liu/ctty7/pull/88) and [component draft PR #4](https://github.com/cloudy-liu/gpui-component/pull/4). The application incorporates current fork main and pins combined component revision `b3e1c4b5343f0eb27c31d21f7266b5af56ee049b`. Native/browser screenshot acceptance and human review remain pending; see [verification instructions](../testing/markdown-github-theme.md). The original specification below records the planned `4072869e` component foundation.
 
 ## Problem Statement
 
