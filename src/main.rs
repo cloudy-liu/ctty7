@@ -58,7 +58,7 @@ fn config_watch_change(
     }
 }
 
-fn spawn_config_watcher(cx: &mut App) {
+fn spawn_config_watcher(cx: &mut App, config_problem_announced: bool) {
     use notify::{RecursiveMode, Watcher};
 
     let Some(config_file) = crate::core::config::config_path("config.json") else {
@@ -106,7 +106,7 @@ fn spawn_config_watcher(cx: &mut App) {
         // fires for every theme file, so a config.json left broken would
         // otherwise re-announce itself on each of them. Cleared by the load
         // that parses, so a second breakage speaks up again.
-        let mut announced = false;
+        let mut announced = config_problem_announced;
         let mut reload_application = false;
         while let Ok(change) = rx.recv().await {
             reload_application |= change == ConfigWatchChange::Application;
@@ -185,7 +185,10 @@ fn apply_reloaded_config(
         cx.refresh_windows();
         return false;
     }
-    *announced = false;
+    let migration_failed =
+        outcome == crate::core::config::LoadOutcome::MarkdownThemeMigrationFailed;
+    let notify_migration = migration_failed && !*announced;
+    *announced = migration_failed;
     // The keymap is rebuilt only when a binding actually moved. This watcher
     // fires for every write under the config dir — including the app's own
     // `save()`, which a sidebar drag or a palette open triggers — so reloading
@@ -203,6 +206,9 @@ fn apply_reloaded_config(
     let language_changed = cx.global::<Config>().gui_language != config.gui_language;
     crate::ui::i18n::set_locale(&config.gui_language);
     cx.set_global(config);
+    if notify_migration {
+        notify_config_load_failed(cx, outcome, false);
+    }
     reload_themes(cx);
     crate::ui::theme::apply_cursor_hide_mode(cx);
     // The menu bar is built once from the current locale, so editing
@@ -264,6 +270,9 @@ fn notify_config_load_failed(
     // nothing to copy, so it must not send the user after a `.corrupt` file
     // that was never written.
     let key = match (outcome, startup) {
+        (LoadOutcome::MarkdownThemeMigrationFailed, _) => {
+            L10nKey::SettingsMarkdownMigrationSaveFailed
+        }
         (LoadOutcome::Unreadable, true) => L10nKey::ConfigUnreadableStartup,
         (LoadOutcome::Unreadable, false) => L10nKey::ConfigUnreadableReload,
         (_, true) => L10nKey::ConfigQuarantinedStartup,
@@ -678,7 +687,9 @@ fn main() {
             crate::ui::presets::load_registry(cx);
             crate::ui::markdown_preview::init(markdown_themes, cx);
             crate::ui::theme::apply_cursor_hide_mode(cx);
-            spawn_config_watcher(cx);
+            let config_problem = config_outcome.failed()
+                || config_outcome == crate::core::config::LoadOutcome::MarkdownThemeMigrationFailed;
+            spawn_config_watcher(cx, config_problem);
             crate::core::update::spawn_check(cx);
             cx.background_executor()
                 .spawn(async {
@@ -689,7 +700,7 @@ fn main() {
             crate::ui::local_link::LocalLink::install(cx);
 
             crate::ui::windows::restore_at_launch(cx, daemon_startup, restore_session, open_path);
-            if config_outcome.failed() {
+            if config_problem {
                 notify_config_load_failed(cx, config_outcome, true);
             }
         });
@@ -928,7 +939,7 @@ mod config_reload_tests {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("study.yaml");
         let yaml =
-            "schema_version: 1\nid: study\nname: Study\nlight: {}\ndark: {link: '#123456'}\n";
+            "schema_version: 2\nid: study\nname: Study\nlight: {}\ndark: {link: '#123456'}\n";
         std::fs::write(&path, yaml).unwrap();
         cx.update(|cx| {
             let mut config = Config::default();

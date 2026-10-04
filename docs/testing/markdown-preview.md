@@ -1,5 +1,7 @@
 # Markdown 阅读主题实现验证
 
+> 历史记录：主题组成、配置迁移及文件格式已由 [规格 #85](https://github.com/cloudy-liu/ctty7/issues/85) 更新。当前使用唯一内置 GitHub 与 v2 自定义主题，见 [阅读主题文档](../customization/markdown-themes.mdx)。
+
 验证日期：2026-09-13。当前执行环境为 Windows，Rust 目标为 `x86_64-pc-windows-msvc`。
 
 ## 实现与依赖
@@ -88,7 +90,7 @@ macOS/Linux 快捷键、实际主题字体效果与下列人工验收项目尚�
 
 ## 人工验收入口
 
-使用 [Markdown 综合样例](../examples/markdown-preview.md) 和仓库的 `README.md`、`README.zh-CN.md`。在设置的外观页选择 Markdown 阅读主题，打开主题目录并放入 [Blue Paper 完整主题](../examples/markdown-themes/blue-paper.yaml)。
+使用 [Markdown 综合样例](../examples/markdown-preview.md) 和仓库的 `README.md`、`README.zh-CN.md`。在设置的外观页选择 Markdown 阅读主题，打开主题目录并放入 [Blue Links v2 主题](../examples/markdown-themes/blue-links.yaml)。
 
 先分别查看深浅模式和宽窄文档列，再检查编辑往返、选择复制、长代码与宽表的独立横向滚动。将样例主题的颜色或字号改动并保存，检查已经打开的文档是否刷新且保留阅读位置；随后验证损坏、删除、修复和重启回退。最后在 SSH/SFTP 文档中重复资源与导航流程。
 

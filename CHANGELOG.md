@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Markdown previews now offer GitHub Light and Dark styles, including typed alerts, padded inline code, keyboard keys, striped tables and diff span backgrounds. New configurations default to GitHub; saved Paperglow selections and existing user packages retain their styles. (cloudy-liu/ctty7#85)
+- Markdown previews now offer GitHub Light and Dark styles, including typed alerts, padded inline code, keyboard keys, striped tables and diff span backgrounds. GitHub is the only built-in reading theme; saved Paperglow selections migrate to it. Custom packages require v2 and inherit GitHub defaults; v1 files remain untouched and show upgrade instructions. (cloudy-liu/ctty7#85)
 
 - **Mermaid diagram support in Markdown preview**. Code blocks with `mermaid`
   language identifier are now rendered as inline SVG diagrams. Supports all

@@ -1936,7 +1936,7 @@ mod tests {
         let (app, mut vcx) = markdown_window(cx);
         let dir = tempfile::tempdir().unwrap();
         let theme_path = dir.path().join("study.yaml");
-        let yaml = "schema_version: 1\nid: study\nname: Study\nlight: {link: '#123456'}\ndark: {link: '#654321'}\n";
+        let yaml = "schema_version: 2\nid: study\nname: Study\nlight: {link: '#123456'}\ndark: {link: '#654321'}\n";
         std::fs::write(&theme_path, yaml).unwrap();
         let host: SharedHost = tty7_core::host::local::LocalHost::new();
         let content = (0..80)
@@ -1945,7 +1945,7 @@ mod tests {
         app.update_in(&mut vcx, |app, window, cx| {
             app.set_theme_follow_system(false, window, cx);
             app.set_preset("light", window, cx);
-            app.set_markdown_theme("paperglow", cx);
+            app.set_markdown_theme("github", cx);
             crate::ui::markdown_preview::apply_snapshot(markdown_theme::scan(Some(dir.path())), cx);
             app.editor_install_file(
                 host,
@@ -2136,7 +2136,7 @@ mod tests {
                 .reading_position(reading.scroll.bounds().top())
                 .unwrap()
         });
-        std::fs::write(dir.path().join("large.yaml"), "schema_version: 1\nid: large\nname: Large\ntypography: {font_size: 22, heading_sizes: [42, 36, 30, 27, 24, 22]}\nlight: {}\ndark: {}\n").unwrap();
+        std::fs::write(dir.path().join("large.yaml"), "schema_version: 2\nid: large\nname: Large\ntypography: {font_size: 22, heading_sizes: [42, 36, 30, 27, 24, 22]}\nlight: {}\ndark: {}\n").unwrap();
         app.update_in(&mut vcx, |app, _, cx| {
             crate::ui::markdown_preview::apply_snapshot(
                 crate::core::markdown_theme::scan(Some(dir.path())),

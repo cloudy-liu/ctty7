@@ -1,7 +1,7 @@
 # github-markdown-css 5.9.0, generated from GitHub's Light/Dark default styles.
 # See tests/fixtures/github-markdown-css-5.9.0 and GITHUB-NOTICE/GITHUB-LICENSE.
 # Sizes are CSS computed values at 16px in logical pixels.
-schema_version: 1
+schema_version: 2
 id: github
 name: GitHub
 author: GitHub, Sindre Sorhus

@@ -15,8 +15,8 @@ use serde_yaml::Value;
 
 pub const DEFAULT_ID: &str = "github";
 pub const DIRECTORY: &str = "markdown-themes";
-pub const PAPERGLOW: &str = include_str!("../../assets/markdown-themes/paperglow.yaml");
 pub const GITHUB: &str = include_str!("../../assets/markdown-themes/github.yaml");
+pub const V1_UPGRADE_REQUIRED: &str = "This theme uses schema_version 1. Upgrade to v2; omitted styles will use GitHub defaults. The original file has not been changed.";
 const MAX_THEME_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -75,9 +75,11 @@ pub struct Typography {
     pub code_line_height: Option<f32>,
     pub inline_code_size: Option<f32>,
     pub kbd_size: Option<f32>,
+    #[serde(deserialize_with = "font_stack")]
     pub fonts: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "font_stack")]
     pub heading_fonts: Vec<String>,
+    #[serde(deserialize_with = "font_stack")]
     pub code_fonts: Vec<String>,
     pub font_size: f32,
     pub code_size: f32,
@@ -87,6 +89,13 @@ pub struct Typography {
     pub heading_line_height: f32,
     pub paragraph_gap: f32,
     pub heading_gap: f32,
+}
+
+fn font_stack<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    // serde_yaml accepts null as an empty sequence; v2 distinguishes an
+    // explicit empty fallback list from an invalid null field.
+    Option::<Vec<String>>::deserialize(deserializer)?
+        .ok_or_else(|| serde::de::Error::custom("expected a font list, not null"))
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq)]
@@ -258,9 +267,9 @@ impl Theme {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if self.schema_version != 1 {
+        if self.schema_version != 2 {
             return Err(format!(
-                "unsupported schema_version {}; expected 1",
+                "unsupported schema_version {}; expected 2",
                 self.schema_version
             ));
         }
@@ -391,6 +400,9 @@ fn merge(base: &mut Value, overrides: Value) {
 pub fn parse(text: &str) -> Result<Theme, String> {
     let value: Value = serde_yaml::from_str(text).map_err(|e| e.to_string())?;
     let mapping = value.as_mapping().ok_or("theme must be a YAML mapping")?;
+    if value["schema_version"].as_u64() == Some(1) {
+        return Err(V1_UPGRADE_REQUIRED.into());
+    }
     for key in ["schema_version", "id", "name", "light", "dark"] {
         if !mapping.contains_key(Value::String(key.into())) {
             return Err(format!("missing field {key}"));
@@ -403,7 +415,7 @@ pub fn parse(text: &str) -> Result<Theme, String> {
     }
     static BASE: OnceLock<Value> = OnceLock::new();
     let mut base = BASE
-        .get_or_init(|| serde_yaml::from_str(PAPERGLOW).expect("bundled theme YAML"))
+        .get_or_init(|| serde_yaml::from_str(GITHUB).expect("bundled theme YAML"))
         .clone();
     // Metadata is not inherited from the author of the default palette.
     for key in ["author", "description", "license"] {
@@ -415,17 +427,14 @@ pub fn parse(text: &str) -> Result<Theme, String> {
     Ok(theme)
 }
 
-pub fn paperglow() -> Arc<Theme> {
-    static THEME: OnceLock<Arc<Theme>> = OnceLock::new();
-    THEME
-        .get_or_init(|| Arc::new(parse(PAPERGLOW).expect("valid bundled Paperglow theme")))
-        .clone()
-}
-
 pub fn builtin() -> Arc<Theme> {
     static THEME: OnceLock<Arc<Theme>> = OnceLock::new();
     THEME
-        .get_or_init(|| Arc::new(parse(GITHUB).expect("valid bundled GitHub theme")))
+        .get_or_init(|| {
+            let theme: Theme = serde_yaml::from_str(GITHUB).expect("complete bundled GitHub theme");
+            theme.validate().expect("valid bundled GitHub theme");
+            Arc::new(theme)
+        })
         .clone()
 }
 
@@ -491,7 +500,12 @@ pub fn scan(directory: Option<&Path>) -> Snapshot {
                 return Err("theme exceeds 256 KiB".into());
             }
             let theme = parse(&text)?;
-            if theme.id == DEFAULT_ID || theme.id == "paperglow" {
+            if theme.id == "paperglow" {
+                return Err(
+                    "id \"paperglow\" is reserved for legacy configuration migration".into(),
+                );
+            }
+            if theme.id == DEFAULT_ID {
                 return Err(format!(
                     "id {:?} is reserved for a built-in theme",
                     theme.id
@@ -546,24 +560,14 @@ pub struct Registry {
 impl Default for Registry {
     fn default() -> Self {
         Self {
-            entries: BTreeMap::from([
-                (
-                    "paperglow".into(),
-                    Entry {
-                        theme: paperglow(),
-                        source: None,
-                        revision: 0,
-                    },
-                ),
-                (
-                    DEFAULT_ID.into(),
-                    Entry {
-                        theme: builtin(),
-                        source: None,
-                        revision: 0,
-                    },
-                ),
-            ]),
+            entries: BTreeMap::from([(
+                DEFAULT_ID.into(),
+                Entry {
+                    theme: builtin(),
+                    source: None,
+                    revision: 0,
+                },
+            )]),
             errors: Vec::new(),
             retained: None,
             revision: 0,
@@ -574,10 +578,7 @@ impl Default for Registry {
 impl Registry {
     pub fn replace(&mut self, snapshot: Snapshot, selected: &str) {
         let previous = self.resolve(selected).clone();
-        let mut entries = BTreeMap::from([
-            (DEFAULT_ID.into(), self.entries[DEFAULT_ID].clone()),
-            ("paperglow".into(), self.entries["paperglow"].clone()),
-        ]);
+        let mut entries = BTreeMap::from([(DEFAULT_ID.into(), self.entries[DEFAULT_ID].clone())]);
         for (id, (path, theme)) in snapshot.themes {
             let old = self
                 .entries
@@ -629,47 +630,90 @@ mod tests {
     use super::*;
 
     const CUSTOM: &str =
-        "schema_version: 1\nid: study\nname: Study\nlight:\n  link: '#123456'\ndark: {}\n";
+        "schema_version: 2\nid: study\nname: Study\nlight:\n  link: '#123456'\ndark: {}\n";
 
     #[test]
-    fn github_is_default_while_saved_paperglow_and_empty_user_variants_are_preserved() {
-        let config: tty7_core::core::config::Config = serde_json::from_str("{}").unwrap();
-        assert_eq!(config.markdown_theme, "github");
-        let saved: tty7_core::core::config::Config =
-            serde_json::from_str(r#"{"markdown_theme":"paperglow"}"#).unwrap();
-        assert_eq!(saved.markdown_theme, "paperglow");
-        let mut registry = Registry::default();
-        registry.replace(Snapshot::default(), "missing-theme");
-        assert_eq!(registry.resolve("missing-theme").theme.id, "github");
-        assert_eq!(registry.resolve("paperglow").theme.id, "paperglow");
-        assert!(registry.errors.iter().any(|(id, _)| id == "missing-theme"));
+    fn v2_empty_variants_use_the_complete_github_style() {
         let custom =
-            parse("schema_version: 1\nid: empty\nname: Empty\nlight: {}\ndark: {}\n").unwrap();
-        let paperglow = parse(PAPERGLOW).unwrap();
-        assert_eq!(custom.light, paperglow.light);
-        assert_eq!(custom.dark, paperglow.dark);
-        assert_eq!(custom.typography, paperglow.typography);
+            parse("schema_version: 2\nid: empty\nname: Empty\nlight: {}\ndark: {}\n").unwrap();
+        let github = builtin();
+        assert_eq!(custom.light, github.light);
+        assert_eq!(custom.dark, github.dark);
+        assert_eq!(custom.typography, github.typography);
+        assert_eq!(custom.layout, github.layout);
+        assert!(custom.author.is_empty());
+        assert!(custom.license.is_empty());
     }
 
     #[test]
-    fn markdown_package_fills_both_variants_without_inheriting_authorship() {
+    fn v1_packages_are_untouched_and_recover_when_the_author_upgrades() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("study.yaml");
+        let legacy = CUSTOM.replace("schema_version: 2", "schema_version: 1");
+        std::fs::write(&path, &legacy).unwrap();
+        let snapshot = scan(Some(dir.path()));
+        assert!(snapshot.themes.is_empty());
+        assert!(snapshot.errors[0].1.contains("Upgrade to v2"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), legacy);
+        let mut registry = Registry::default();
+        registry.replace(snapshot, "study");
+        assert_eq!(registry.entries.len(), 1);
+        assert_eq!(registry.resolve("study").theme.id, "github");
+        std::fs::write(&path, CUSTOM).unwrap();
+        registry.replace(scan(Some(dir.path())), "study");
+        assert_eq!(registry.resolve("study").theme.id, "study");
+        let good = registry.resolve("study").clone();
+        std::fs::write(&path, &legacy).unwrap();
+        registry.replace(scan(Some(dir.path())), "study");
+        assert_eq!(registry.resolve("study").theme, good.theme);
+        assert!(registry.unavailable("study"));
+    }
+
+    #[test]
+    fn github_is_the_only_builtin_and_missing_custom_themes_fall_back() {
+        let config: tty7_core::core::config::Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.markdown_theme, "github");
+        let mut registry = Registry::default();
+        assert_eq!(registry.entries.keys().collect::<Vec<_>>(), vec!["github"]);
+        registry.replace(Snapshot::default(), "missing-theme");
+        assert_eq!(registry.resolve("missing-theme").theme.id, "github");
+        assert!(registry.errors.iter().any(|(id, _)| id == "missing-theme"));
+    }
+
+    #[test]
+    fn markdown_package_overrides_only_explicit_fields_without_inheriting_authorship() {
         let theme = parse(CUSTOM).unwrap();
-        assert_eq!(theme.light.link, parse_color("#123456").unwrap());
-        assert_eq!(theme.dark, paperglow().dark);
-        assert_eq!(theme.typography, paperglow().typography);
+        let mut expected = builtin().light.clone();
+        expected.link = parse_color("#123456").unwrap();
+        assert_eq!(theme.light, expected);
+        assert_eq!(theme.dark, builtin().dark);
+        assert_eq!(theme.typography, builtin().typography);
+        assert_eq!(theme.layout, builtin().layout);
         assert!(theme.author.is_empty());
-        assert_eq!(
-            paperglow().light.background,
-            parse_color("#f7f2eb").unwrap()
+    }
+
+    #[test]
+    fn v2_arrays_replace_defaults_and_null_is_an_explicit_override() {
+        let source =
+            format!("{CUSTOM}typography:\n  fonts: [Only]\nlayout:\n  table_radius: null\n");
+        let source = source.replace(
+            "light:\n  link: '#123456'",
+            "light:\n  link: '#123456'\n  table_stripe: null",
         );
-        assert_eq!(paperglow().dark.background, parse_color("#222120").unwrap());
+        let theme = parse(&source).unwrap();
+        assert_eq!(theme.typography.fonts, vec!["Only"]);
+        assert_eq!(theme.typography.code_fonts, builtin().typography.code_fonts);
+        assert_eq!(theme.light.table_stripe, None);
+        assert_eq!(theme.dark.table_stripe, builtin().dark.table_stripe);
+        assert_eq!(theme.layout.table_radius, None);
+        assert!(parse(&source.replace("fonts: [Only]", "fonts: null")).is_err());
     }
 
     #[test]
     fn markdown_package_rejects_invalid_fields_and_values() {
         for (yaml, expected) in [
             (
-                CUSTOM.replace("schema_version: 1", "schema_version: 2"),
+                CUSTOM.replace("schema_version: 2", "schema_version: 3"),
                 "schema_version",
             ),
             (CUSTOM.replace("id: study", "id: Study"), "id"),
@@ -715,7 +759,7 @@ mod tests {
             CUSTOM.replace("id: study", "id: other"),
         )
         .unwrap();
-        std::fs::write(dir.path().join("reserved.yml"), PAPERGLOW).unwrap();
+        std::fs::write(dir.path().join("reserved.yml"), GITHUB).unwrap();
         let snapshot = scan(Some(dir.path()));
         assert_eq!(snapshot.themes.keys().collect::<Vec<_>>(), vec!["other"]);
         assert_eq!(snapshot.errors.len(), 5);
@@ -755,7 +799,7 @@ mod tests {
             registry.resolve("study").theme.light.link,
             parse_color("#654321").unwrap()
         );
-        assert_eq!(registry.resolve("paperglow").theme.id, "paperglow");
+        assert_eq!(registry.resolve("github").theme.id, "github");
     }
 
     #[test]

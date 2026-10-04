@@ -2,7 +2,7 @@
 //!
 //! Diagrams are rendered to SVG by the pure-Rust `merman` renderer. The
 //! colors come from the active Markdown theme palette, so any theme (built-in
-//! Paperglow or a user YAML theme) drives diagrams in both light and dark mode
+//! GitHub or a user YAML theme) drives diagrams in both light and dark mode
 //! without Mermaid-specific theme fields.
 
 use merman::render::{HeadlessRenderer, HostThemeAppearance, HostThemeProfile, HostThemeRoles};

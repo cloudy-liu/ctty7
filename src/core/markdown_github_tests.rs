@@ -291,8 +291,8 @@ fn github_reading_palette_and_typography_match_the_upstream_css_snapshot() {
 }
 
 #[test]
-fn new_theme_fields_reject_invalid_input_and_both_builtins_are_reserved() {
-    let base = "schema_version: 1\nid: custom\nname: Custom\nlight: {}\ndark: {}\n";
+fn new_theme_fields_reject_invalid_input_and_builtin_and_legacy_ids_are_reserved() {
+    let base = "schema_version: 2\nid: custom\nname: Custom\nlight: {}\ndark: {}\n";
     for (section, field, value) in [
         ("typography", "bold_weight", "901"),
         ("typography", "heading_bottom_gap", "-1"),
@@ -313,8 +313,12 @@ fn new_theme_fields_reject_invalid_input_and_both_builtins_are_reserved() {
         assert!(error.contains(field), "{field}: {error}");
     }
     let dir = tempfile::tempdir().unwrap();
-    for (name, source) in [("github", GITHUB), ("paperglow", PAPERGLOW)] {
-        std::fs::write(dir.path().join(format!("{name}.yaml")), source).unwrap();
+    for name in ["github", "paperglow"] {
+        std::fs::write(
+            dir.path().join(format!("{name}.yaml")),
+            base.replace("id: custom", &format!("id: {name}")),
+        )
+        .unwrap();
     }
     let snapshot = scan(Some(dir.path()));
     assert!(snapshot.themes.is_empty());

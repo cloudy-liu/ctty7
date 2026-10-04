@@ -7,11 +7,15 @@ are pinned in `assets/markdown-themes/GITHUB-NOTICE` with their MIT licenses.
 
 ## Automated checks
 
-- Theme tests cover CSS palette and typography values, validation, reserved IDs,
-  the GitHub default and fallback, and preservation of saved Paperglow choices.
-- The Paperglow regression compares complete reading styles and syntax themes
-  with the pre-change mapping at scales 100%, 150% and 200%, in both modes. It
-  also checks the existing Blue Paper package.
+- Theme tests cover CSS palette and typography values, v2 validation, reserved
+  IDs, the single GitHub builtin and fallback, and v1 upgrade errors without
+  modifying the original files. A repaired v2 package restores its saved ID.
+- A minimal v2 package produces GitHub's complete reading style and syntax
+  colors at scales 100%, 150% and 200%, in both modes. Partial overrides,
+  array replacement and explicit null values have separate coverage.
+- Configuration tests migrate only the saved Paperglow selection, retain other
+  settings, avoid rewriting custom IDs, and recover from a migration write
+  failure while using GitHub in memory.
 - GPUI reading tests cover public pointer selection across body/code/kbd,
   copy text, theme reflow and diff foreground/background spans with legacy
   fallback colors.
@@ -22,7 +26,19 @@ Use `cargo test --workspace --locked` for the application and
 `cargo test -p gpui-component --lib --features tree-sitter-languages` for the
 component. The application pins both component crates to the same Git revision.
 
-## Latest automated verification
+## GitHub-only v2 verification
+
+On Windows, 2026-10-04, `cargo test --workspace --locked -j 1` passed with
+2,929 tests passed, 6 ignored and no failures, without local dependency
+overrides. All 34 Markdown-targeted tests passed. `cargo check --locked
+--bin tty7-app`, workspace formatting and the host-boundary check passed.
+
+This run includes the migration success/failure/custom-ID tests and the
+corrected pool-close test. The shared target directory's local core package
+cache was cleared before final verification to avoid reusing another
+worktree's configuration defaults.
+
+## Previous automated verification
 
 On Windows, 2026-10-04, an independent application checkout passed
 `cargo test --workspace --locked -j 1` using only the pushed Git component
@@ -44,7 +60,7 @@ reading widths, then Windows display scale 100% and 150%.
 
 Check all six headings, h1/h2 rules, inline code and heading code, kbd keys,
 five alerts, nested lists, task states, narrow/overflowing tables, a horizontal
-rule, code and diff. Hover a link and switch between GitHub and Paperglow while
+rule, code and diff. Hover a link and switch between GitHub and a v2 custom theme while
 partially selected and scrolled. Return to the editor and verify unsaved text.
 
 Color values and layout dimensions must match the pinned sources. Native font
@@ -53,3 +69,15 @@ differences. Mermaid uses the documented Primer palette roles for this renderer.
 
 The native/browser screenshot matrix and macOS/Linux visual checks have not yet
 been verified. This record does not claim pixel-level visual acceptance.
+
+The reading background follows the selected Markdown palette, not the
+application background. GitHub stays white in light mode and `#0d1117` in dark
+mode even if an application theme uses other colors. No application palette
+blending is part of the visual acceptance target.
+
+The old macOS CI failure in `closing_the_pool_drops_queued_work` was reproduced
+by allowing a second worker to run before close. Its corrected test occupies
+all workers first, then verifies that closing drops the queued closure. The
+production pool is unchanged. The corrected test passed 30 standalone
+repetitions; removing queue clearing made it fail, confirming that it still
+detects the behavior it protects.

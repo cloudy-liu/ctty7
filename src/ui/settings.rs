@@ -6119,7 +6119,7 @@ impl Tty7App {
         use crate::core::markdown_theme::Registry;
         let selected = cx.global::<Config>().markdown_theme.clone();
         let active = crate::ui::markdown_preview::current(cx);
-        let (entries, errors, unavailable) = match cx.try_global::<Registry>() {
+        let (mut entries, errors, unavailable) = match cx.try_global::<Registry>() {
             Some(registry) => (
                 registry.entries.values().cloned().collect::<Vec<_>>(),
                 registry.errors.clone(),
@@ -6127,46 +6127,66 @@ impl Tty7App {
             ),
             None => (vec![active.clone()], Vec::new(), false),
         };
+        entries.sort_by_key(|entry| (entry.source.is_some(), entry.theme.id.clone()));
         let app = cx.entity().downgrade();
         let label = crate::ui::markdown_preview::theme_label(&active);
         let menu_selected = selected.clone();
-        let picker = Button::new("markdown-theme-picker")
-            .label(label)
-            .tooltip(crate::ui::markdown_preview::theme_description(&active))
-            .icon(IconName::ChevronDown)
-            .small()
-            .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
-                let mut menu = menu.min_w(px(230.));
-                for entry in &entries {
-                    let id = entry.theme.id.clone();
-                    let source = if entry.source.is_none() {
-                        L10nKey::SettingsMarkdownThemeBuiltin
-                    } else {
-                        L10nKey::SettingsMarkdownThemeUser
-                    };
-                    let duplicate_name = entries
-                        .iter()
-                        .filter(|other| other.theme.name == entry.theme.name)
-                        .count()
-                        > 1;
-                    let name = if duplicate_name {
-                        format!("{} [{}]", entry.theme.name, id)
-                    } else {
-                        crate::ui::markdown_preview::theme_label(entry)
-                    };
-                    let app = app.clone();
-                    menu = menu.item(
-                        PopupMenuItem::new(format!("{} · {}", name, t(source)))
-                            .checked(id == menu_selected)
-                            .on_click(move |_, _, cx| {
-                                if let Some(app) = app.upgrade() {
-                                    app.update(cx, |this, cx| this.set_markdown_theme(&id, cx));
-                                }
-                            }),
-                    );
-                }
-                menu
-            });
+        let picker = if entries.len() > 1 {
+            Button::new("markdown-theme-picker")
+                .label(label)
+                .tooltip(crate::ui::markdown_preview::theme_description(&active))
+                .icon(IconName::ChevronDown)
+                .small()
+                .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
+                    let mut menu = menu.min_w(px(230.));
+                    for entry in &entries {
+                        let id = entry.theme.id.clone();
+                        let source = if entry.source.is_none() {
+                            L10nKey::SettingsMarkdownThemeBuiltin
+                        } else {
+                            L10nKey::SettingsMarkdownThemeUser
+                        };
+                        let duplicate_name = entries
+                            .iter()
+                            .filter(|other| other.theme.name == entry.theme.name)
+                            .count()
+                            > 1;
+                        let name = if duplicate_name {
+                            format!("{} [{}]", entry.theme.name, id)
+                        } else {
+                            crate::ui::markdown_preview::theme_label(entry)
+                        };
+                        let app = app.clone();
+                        menu = menu.item(
+                            PopupMenuItem::new(format!("{} · {}", name, t(source)))
+                                .checked(id == menu_selected)
+                                .on_click(move |_, _, cx| {
+                                    if let Some(app) = app.upgrade() {
+                                        app.update(cx, |this, cx| this.set_markdown_theme(&id, cx));
+                                    }
+                                }),
+                        );
+                    }
+                    menu
+                })
+                .into_any_element()
+        } else if unavailable {
+            Button::new("use-github-markdown-theme")
+                .label(t(L10nKey::SettingsMarkdownUseGithub))
+                .small()
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.set_markdown_theme(crate::core::markdown_theme::DEFAULT_ID, cx);
+                }))
+                .into_any_element()
+        } else {
+            div()
+                .text_sm()
+                .child(format!(
+                    "{label} · {}",
+                    t(L10nKey::SettingsMarkdownThemeBuiltin)
+                ))
+                .into_any_element()
+        };
         let control = h_flex()
             .gap_2()
             .child(picker)
@@ -6198,6 +6218,11 @@ impl Tty7App {
             ));
         }
         for (path, error) in errors {
+            let error = if error == crate::core::markdown_theme::V1_UPGRADE_REQUIRED {
+                t(L10nKey::SettingsMarkdownV1Upgrade).to_owned()
+            } else {
+                error
+            };
             section = section.child(
                 div()
                     .pb_2()

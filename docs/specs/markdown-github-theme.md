@@ -1,268 +1,205 @@
-# 内置 GitHub Markdown 阅读主题（严格复刻 GitHub 配色与排版）
-
-发布目标：`cloudy-liu/ctty7` 的 GitHub Issues，标签 `ready-for-agent`。
-
-Implementation status (2026-10-04): implemented in [application draft PR #88](https://github.com/cloudy-liu/ctty7/pull/88) and [component draft PR #4](https://github.com/cloudy-liu/gpui-component/pull/4). The application incorporates current fork main and pins combined component revision `b3e1c4b5343f0eb27c31d21f7266b5af56ee049b`. Native/browser screenshot acceptance and human review remain pending; see [verification instructions](../testing/markdown-github-theme.md). The original specification below records the planned `4072869e` component foundation.
-
 ## Problem Statement
 
-用户在 ctty7 里阅读 README、CHANGELOG 和设计文档，同一批文档平时也在 github.com 上阅读。默认的 Paperglow 是暖色纸张风格：17px Montserrat、圆角卡片加阴影、陶土色链接、单色提示块，看起来和 GitHub 完全不同。在两处之间切换时，标题层级、代码块、提示块和表格的视觉记忆对不上，用户无法凭"在 GitHub 上看起来什么样"判断文档写得对不对。
-
-用户要的不是"GitHub 风格"，而是 GitHub 本身：浅色和深色都使用 GitHub 官方 Markdown 样式中的颜色、字体、字号、间距，以及标题分隔线、行内代码、`kbd`、五种提示块、表格斑马纹和 `diff` 代码块的增删配色。配色必须逐值复制，不能近似。
-
-现有渲染器还做不到这一点。ctty7 的预览由原生文本组件绘制，主题只能调节一部分参数：五种提示块只能共用一种颜色，表格固定圆角并撑满宽度，分隔线固定 2px，链接始终带下划线，加粗固定 700，嵌套有序列表是 1 → A → a，行内代码没有内边距和圆角，`kbd` 与行内代码外观相同，`diff` 代码块的新增行会套用"字符串"色、删除行套用"关键字"色，且语法高亮不支持背景色。
+ctty7 的 Markdown 阅读应采用 GitHub Light / Dark。此前规格保留 Paperglow，并让自定义主题缺省字段继续继承 Paperglow，造成默认主题、升级行为与自定义主题基底不一致。用户希望删除 Paperglow，保留自定义能力，同时明确旧主题升级和阅读区与应用背景的关系。
 
 ## Solution
 
-新增一个内置 Markdown 阅读主题 **GitHub**，与 Paperglow 并列，并成为新安装的默认主题。它的浅色和深色变体逐值取自 GitHub 官方 Markdown 样式（以 github-markdown-css 5.9.0 为核对快照，其值由 GitHub 线上样式生成，对应 GitHub 的 Light default 与 Dark default）。用户在 ctty7 中打开 Markdown，看到的页面背景、正文、标题、链接、代码、引用、提示块、列表、表格、分隔线与 github.com 文件页的 Markdown 区域一致。
-
-为此给原生文本组件补齐缺失的样式能力，并扩展主题格式。所有新能力都以"默认值保持现有行为"的方式加入：Paperglow 外观零变化，现有用户主题文件无需修改即可继续加载。
-
-已在配置中保存 `paperglow` 的用户保留原选择，不做迁移；新安装或未保存选择的用户默认使用 GitHub。用户主题包缺省字段仍从 Paperglow 补齐，现有自定义主题外观不变。
+GitHub 成为唯一内置 Markdown 阅读主题。旧 Paperglow 选择自动迁移到 GitHub。自定义主题采用 v2，缺省值来自 GitHub；v1 提示升级且保留原文件。Markdown 跟随应用实际深浅模式，但保持 GitHub 自己的完整配色，接受与应用主题背景存在色差，不增加自动套用应用背景的选项。
 
 ## User Stories
 
-1. 作为新安装 ctty7 的读者，我希望打开 Markdown 时默认看到 GitHub 样式，以便和我在 github.com 上的阅读习惯一致。
-2. 作为浅色界面用户，我希望预览使用 GitHub Light 的白色背景和 `#1f2328` 正文，以便与 github.com 浅色页面无差别。
-3. 作为深色界面用户，我希望预览使用 GitHub Dark 的 `#0d1117` 背景和 `#f0f6fc` 正文，以便与 github.com 深色页面无差别。
-4. 作为切换应用深浅模式的用户，我希望 GitHub 主题随应用实际生效的模式切换变体，以便无需单独设置。
-5. 作为长期使用 Paperglow 的用户，我希望升级后仍保留 Paperglow，以便我的阅读体验不被替换。
-6. 作为想尝试 GitHub 主题的 Paperglow 用户，我希望在设置的 Markdown 阅读主题下拉中直接选到 GitHub，以便一键切换。
-7. 作为主题作者，我希望现有主题文件升级后无需修改即可加载并保持原外观，以便不必追着格式变化改文件。
-8. 作为主题作者，我希望可以在自己的主题里使用新增的样式字段（分类型提示块、表格斑马纹、链接下划线方式等），以便做出更丰富的主题。
-9. 作为读者，我希望正文使用 16px、1.5 倍行高，以及 GitHub 的系统字体栈，以便字形、行距与 GitHub 一致。
-10. 作为中文读者，我希望中文字符在 GitHub 字体栈之后有可用的中文字体回退，以便中英混排正常显示。
-11. 作为读者，我希望六级标题使用 GitHub 的 32/24/20/16/14/13.6px、600 字重和 1.25 倍行高，以便层级与 GitHub 完全相同。
-12. 作为读者，我希望一级和二级标题下方都有 GitHub 的细分隔线，以便章节划分和 GitHub 一样醒目。
-13. 作为读者，我希望六级标题使用次要文字色，以便与 GitHub 一致。
-14. 作为读者，我希望加粗文字使用 600 字重，以便与 GitHub 的强调程度一致。
-15. 作为读者，我希望链接平时不显示下划线，悬停时才显示，以便和 GitHub 链接行为一致。
-16. 作为读者，我希望段落、列表、引用、表格和代码块之间使用 GitHub 的 16px 间距，以便版面节奏一致。
-17. 作为代码读者，我希望行内代码显示为 GitHub 的灰色圆角块，带内边距，文字保持正文颜色，以便与 GitHub 一致。
-18. 作为代码读者，我希望围栏代码块使用 GitHub 的浅灰（深色模式为深灰）底色、6px 圆角、16px 内边距、13.6px 字号和 1.45 倍行高，并且没有边框，以便与 GitHub 一致。
-19. 作为代码读者，我希望语法高亮使用 GitHub 的配色（关键字、字符串、注释、常量、函数/类型名、变量、标签名），以便代码颜色和 GitHub 一致。
-20. 作为审阅补丁的读者，我希望 `diff` 代码块的新增行是绿字配浅绿底、删除行是红字配浅红底、`@@` 区段头是紫色加粗，以便一眼看出增删。
-21. 作为读者，我希望文档中的 `<kbd>` 显示为 GitHub 的按键样式（细边框、底部内阴影、11px 等宽字体），以便和行内代码区分。
-22. 作为读者，我希望五种 GitHub 提示块各自使用 GitHub 的颜色和图标（NOTE 蓝、TIP 绿、IMPORTANT 紫、WARNING 黄、CAUTION 红），以便快速分辨提示等级。
-23. 作为读者，我希望提示块没有背景色，正文保持正文颜色，只有左侧色条和彩色标题，以便与 GitHub 一致。
-24. 作为读者，我希望普通引用使用 GitHub 的 4px 灰色左边条和次要文字色，没有背景和圆角，以便与 GitHub 一致。
-25. 作为读者，我希望无序列表的符号依次为实心圆、空心圆、方块，有序列表依次为 1、i、a，以便嵌套层级与 GitHub 一致。
-26. 作为读者，我希望表格的每个单元格都有边框、偶数行有斑马纹底色、表头 600 字重、单元格内边距 6px/13px，以便与 GitHub 一致。
-27. 作为读者，我希望窄表格按内容宽度显示而不被拉满，宽表格在自己的区域内横向滚动，以便与 GitHub 一致。
-28. 作为读者，我希望分隔线是 GitHub 的 4px 灰色粗线，上下各 24px 间距，以便与 GitHub 一致。
-29. 作为在宽阅读区阅读的用户，我希望内容最大宽度 980px、四周 45px 留白，没有卡片圆角、边框和阴影，以便与 GitHub 文件页一致。
-30. 作为在窄分栏阅读的用户，我希望阅读区窄于 768px 时留白收紧到 15px，以便与 GitHub 窄屏一致。
-31. 作为选择文本的读者，我希望选区颜色取自 GitHub 设计系统，以便选区不突兀。
-32. 作为任务列表读者，我希望复选框使用 GitHub 的强调色，以便状态清楚。
-33. 作为阅读 Mermaid 图的用户，我希望图表继续跟随当前阅读主题的背景、文字和边线颜色，以便切换到 GitHub 主题后图表不突兀。
-34. 作为启动时选中主题不可用的用户，我希望回退到新的默认 GitHub 主题并看到原因，以便应用仍能正常阅读。
-35. 作为主题作者，我希望 `github` 和 `paperglow` 两个 ID 都保留给内置主题，以便用户文件不会冒名覆盖内置主题。
-36. 作为维护者，我希望 GitHub 主题的每个取值都能对照固定版本的 GitHub 官方样式快照校验，以便"严格复刻"可以被自动检查。
-37. 作为维护者，我希望 GitHub 官方样式更新后，有明确的步骤刷新快照并找出差异，以便主题能跟进 GitHub 的改版。
-38. 作为维护者，我希望来源许可（github-markdown-css、Primer、Octicons，均为 MIT）随应用保留，以便合规分发。
-39. 作为使用通用文本组件的其他界面，我希望组件新增能力默认关闭，以便没有传入新样式的视图外观不变。
-40. 作为阅读文档的用户，我希望在 GitHub 与 Paperglow 之间切换时保留阅读位置、选区和编辑状态，以便切换主题不打断阅读。
-41. 作为文档作者，我希望 ctty7 与 github.com 渲染同一份 Markdown 的截图可以并排对照，以便确认没有遗漏的样式差异。
+1. As a reader, I want GitHub to be the only bundled Markdown theme, so that the default reading experience has one clear standard.
+2. As a new user, I want GitHub selected by default, so that documents look familiar immediately.
+3. As an existing Paperglow user, I want my saved selection migrated to GitHub, so that upgrading does not leave a missing-theme warning.
+4. As a user with other settings, I want migration to preserve my other configuration, so that my terminal and workspace preferences stay intact.
+5. As a user with a separate config directory, I want migration to respect that directory, so that other installations remain untouched.
+6. As a user with an unwritable config, I want GitHub to work in memory with a save-failure notice, so that I know the migration was not persisted.
+7. As a light-mode reader, I want GitHub Light colors, so that Markdown matches the fixed GitHub light style.
+8. As a dark-mode reader, I want GitHub Dark colors, so that Markdown matches the fixed GitHub dark style.
+9. As a user changing application themes, I want Markdown to follow actual light/dark mode but retain its own palette, so that GitHub colors remain predictable.
+10. As a user previewing an application theme, I want Markdown to follow preview and cancellation, so that the visible reading mode is consistent with the active mode.
+11. As a reader, I want GitHub headings, lists, tables, alerts, inline code, keyboard keys and diff colors, so that document structure is recognizable.
+12. As a reader in a narrow pane, I want correct wrapping and horizontally scrollable wide tables, so that content is not clipped or lost.
+13. As a reader using display scaling, I want correct logical sizes at different DPI and application scales, so that text remains readable.
+14. As a reader selecting text, I want selection and reading position retained across theme changes, so that I can continue reading and copying.
+15. As an author, I want unsaved text and undo history preserved, so that theme changes cannot discard my work.
+16. As a Mermaid reader, I want diagrams recolored without losing selection, so that diagrams remain usable while switching themes.
+17. As a user without custom themes, I want a simple GitHub label instead of a one-option picker, so that settings stay concise.
+18. As a custom-theme user, I want local theme installation, selection and hot reload retained, so that I can still customize reading.
+19. As a v2 theme author, I want omitted styles to inherit GitHub, so that small theme packages have a consistent base.
+20. As a v2 theme author, I want explicit values, arrays and nullable fields to have documented merge behavior, so that my overrides have predictable results.
+21. As a v1 theme user, I want an actionable upgrade message without file modification, so that I can decide how to migrate my theme.
+22. As a user whose selected theme is unavailable, I want GitHub fallback with the original ID retained, so that repairing the theme restores my choice.
+23. As a user editing a valid theme, I want the last valid version retained after an invalid edit, so that reading continues during repairs.
+24. As a theme author, I want clear validation and duplicate-ID errors, so that I can correct my package.
+25. As a localized-app user, I want theme and migration messages in my selected language, so that I can understand settings and failures.
 
 ## Implementation Decisions
 
-### 1. 来源与"严格复刻"的定义
+### 2.1 默认阅读效果
 
-- **唯一来源**是 github-markdown-css 5.9.0（MIT，由 GitHub 线上样式生成，变量已展开为具体值）的 `github-markdown-light.css` 和 `github-markdown-dark.css`。浅色对应 GitHub Light default，深色对应 GitHub Dark default。其他 GitHub 主题（Dimmed、高对比、色盲友好）不在本次范围。
-- **严格复刻**指：源样式中有定义的颜色逐值复制，包括透明度（八位十六进制原样保留），不做近似、取整或"看起来差不多"的调整。尺寸按源样式在 16px 正文下的计算值换算成逻辑像素（例如 `.85em` 写成 13.6）。
-- **源样式未定义的取值**（选区、任务复选框、代码复制按钮、Mermaid 图表角色）必须取自 GitHub 设计系统 Primer 的对应 token，实施时在 Primer 源码中核对，并在主题文件里注明来源；找不到对应 token 的，明确标为"非 GitHub 取值"。
-- 源样式快照随仓库保存为测试夹具（含 MIT 许可），用于自动校验主题取值，也作为日后刷新的比对基准。
+GitHub 是一个主题包，ID 为 github，显示名为 GitHub，包含 Light default 和 Dark default 两个变体。应用实际处于浅色时采用 Light，深色时采用 Dark。应用跟随系统、临时预览主题和取消预览时，Markdown 同步实际生效的模式。不新增独立的 Markdown 深浅开关，不增加 github-light、github-dark 配置 ID。
 
-### 2. GitHub 主题取值
+新配置、未保存主题的配置默认 GitHub。旧 Paperglow 选择迁移成 GitHub。背景是完整的白色或 GitHub 深色页面，没有暖色纸张、外层卡片边框、圆角或阴影。阅读主题只控制 Markdown 阅读区，不改变应用界面、终端和源码编辑器配色。
 
-#### 2.1 阅读配色
+### 2.2 设置
 
-| 阅读元素 | 浅色 | 深色 | 源样式出处 |
-|---|---|---|---|
-| 页面背景（无卡片，纸张与背景同色） | `#ffffff` | `#0d1117` | `.markdown-body` 背景 |
-| 正文、标题、代码块普通文字、`kbd` 文字 | `#1f2328` | `#f0f6fc` | `.markdown-body` 颜色 |
-| 次要文字（h6、引用正文） | `#59636e` | `#9198a1` | `h6`、`blockquote` |
-| 链接；悬停同色加下划线 | `#0969da` | `#4493f8` | `a`、`a:hover` |
-| 默认边线（分隔线填充、引用左条、表格单元格边框、提示块默认左条） | `#d1d9e0` | `#3d444d` | `hr`、`blockquote`、`td/th` |
-| 弱边线（h1/h2 分隔线、表格行顶线、`kbd` 边框与内阴影） | `#d1d9e0b3` | `#3d444db3` | `h1`、`h2`、`tr` |
-| 弱背景（代码块、`kbd`、表格偶数行） | `#f6f8fa` | `#151b23` | `pre`、`kbd`、`tr:nth-child(2n)` |
-| 表格奇数行 | `#ffffff` | `#0d1117` | `tr` |
-| 行内代码背景（文字保持正文色） | `#818b981f` | `#656c7633` | `code` |
+保留“设置 → 外观 → Markdown 阅读主题”和“打开主题目录”。没有有效自定义主题时显示 GitHub 及“内置，浅色／深色随应用切换”的说明，无需提供只有一个选项的下拉菜单。有有效自定义主题时显示选择器，GitHub 排首位，其后沿用现有自定义主题排序。文件加载错误仍可查看，即使没有可选自定义主题。所选自定义主题不可用且没有其他有效自定义主题时，显示“使用 GitHub”恢复按钮；只有用户点击后才改写所选 ID。
 
-#### 2.2 提示块
+移除 Paperglow 选项和对应的三语言产品文案。英文、中文、日文覆盖新说明、旧版本提示和迁移写入失败提示。
 
-提示块没有背景，正文继承正文颜色。左侧色条和标题文字分别取色，深色模式下两者不同：
+### 2.3 状态保持
 
-| 类型 | 浅色左条 | 浅色标题 | 深色左条 | 深色标题 |
-|---|---|---|---|---|
-| NOTE | `#0969da` | `#0969da` | `#1f6feb` | `#4493f8` |
-| TIP | `#1a7f37` | `#1a7f37` | `#238636` | `#3fb950` |
-| IMPORTANT | `#8250df` | `#8250df` | `#8957e5` | `#ab7df8` |
-| WARNING | `#9a6700` | `#9a6700` | `#9e6a03` | `#d29922` |
-| CAUTION | `#cf222e` | `#d1242f` | `#da3633` | `#f85149` |
+切换 GitHub 与自定义主题、深浅模式切换、主题热加载和重新排版后，保留文档缓冲区、未保存内容、撤销历史、当前编辑／预览模式和文本选区。阅读位置以内容锚点保持，允许因字体度量改变产生必要的位置调整。Mermaid 随模式更新配色，保持选区与阅读位置。
 
-图标使用 GitHub 实际使用的 Octicons（NOTE `info`、TIP `light-bulb`、IMPORTANT `report`、WARNING `alert`、CAUTION `stop`），16px，与标题文字同色，图标与文字间距 8px。Octicons 为 MIT 许可，随应用署名。
+### 3.1 核对来源
 
-#### 2.3 代码语法与 diff
+固定使用 github-markdown-css 5.9.0 的 light/dark 快照作为 Markdown 样式来源，选择和控件强调色沿用已固定的 Primer token，提示图标使用 Octicons。保留来源、版本和许可。
 
-GitHub 用 TextMate 语法的类名着色，ctty7 用 tree-sitter 的 capture 名。按语义建立对应关系：
+当前 PR 中的 GitHub 主题包是已实现数值的清单；升级为 v2 时不借机改色或改排版。如果清单与源快照冲突，以可追溯的源样式为准。逐项校验全部有源出处的颜色和尺寸，不以新主题文件复制出的常量作为独立验证证据。
 
-| GitHub 类别 | 浅色 | 深色 | 对应的高亮语义 |
-|---|---|---|---|
-| 关键字 `pl-k` | `#cf222e` | `#ff7b72` | 关键字、预处理、布尔值之外的存储修饰 |
-| 注释 `pl-c` | `#59636e` | `#9198a1` | 注释、文档注释 |
-| 常量 `pl-c1` | `#0550ae` | `#79c0ff` | 数字、布尔、常量、内建变量、属性 |
-| 实体名 `pl-e`/`pl-en` | `#6639ba` | `#d2a8ff` | 函数、构造器、类型名、属性名（HTML attribute） |
-| 标签名 `pl-ent` | `#0550ae` | `#7ee787` | 标签、doctype |
-| 字符串与正则 `pl-s`/`pl-sr` | `#0a3069` | `#a5d6ff` | 字符串、特殊字符串、正则 |
-| 正则转义 `pl-cce`（加粗） | `#116329` | `#7ee787` | 字符串转义 |
-| 变量 `pl-v` | `#953800` | `#ffa657` | 特殊变量、参数 |
-| 普通标识符 `pl-smi` | `#1f2328` | `#f0f6fc` | 普通变量、运算符、标点 |
-| 标记标题 `pl-mh`（加粗） | `#0550ae` | `#1f6feb` | Markdown 标题、diff 文件头 |
-| 标记列表 `pl-ml` | `#3b2300` | `#f2cc60` | 列表符号 |
-| 链接地址 `pl-corl`（下划线） | `#0a3069` | `#a5d6ff` | 链接 URI |
+GitHub 线上页面可能更新。对照截图必须记录日期、模式、尺寸和来源版本；线上变化不能自动成为修改固定快照的依据。字体栅格化和 tree-sitter 与 TextMate 的 token 分类差异是明确允许的差异，不因此声称像素完全一致。
 
-`diff` 代码块使用独立的增删语义，背景只铺在该行文字范围内（与 GitHub 的行内 span 一致），不铺满整行宽度：
+### 3.2 主要配色
 
-| diff 语义 | 浅色文字 / 背景 | 深色文字 / 背景 |
+| 用途 | Light | Dark |
 |---|---|---|
-| 新增行、新文件头 `pl-mi1` | `#116329` / `#dafbe1` | `#aff5b4` / `#033a16` |
-| 删除行、旧文件头 `pl-md` | `#82071e` / `#ffebe9` | `#ffdcd7` / `#67060c` |
-| 变更 `pl-mc` | `#953800` / `#ffd8b5` | `#ffdfb6` / `#5a1e02` |
-| 区段头 `@@`（加粗）`pl-mdr` | `#8250df` | `#d2a8ff` |
+| 页面和阅读区背景 | #ffffff | #0d1117 |
+| 正文和主要标题 | #1f2328 | #f0f6fc |
+| 次要文字及 h6 | #59636e | #9198a1 |
+| 链接 | #0969da | #4493f8 |
+| 代码块、kbd、表格偶数行背景 | #f6f8fa | #151b23 |
+| 行内代码背景 | #818b981f | #656c7633 |
+| 默认边线 | #d1d9e0 | #3d444d |
+| h1/h2 与 kbd 弱边线 | #d1d9e0b3 | #3d444db3 |
+| diff 新增文字／背景 | #116329 / #dafbe1 | #aff5b4 / #033a16 |
+| diff 删除文字／背景 | #82071e / #ffebe9 | #ffdcd7 / #67060c |
+| diff 变更文字／背景 | #953800 / #ffd8b5 | #ffdfb6 / #5a1e02 |
+| diff 区段头 | #8250df | #d2a8ff |
 
-tree-sitter 与 TextMate 的切词粒度不同，同一段代码个别 token 的分类会和 GitHub 不一致。这是已接受的差异：颜色值必须严格一致，token 分类以上表为准，不为追求逐 token 一致而引入 TextMate 引擎。
+五种提示块分别采用 NOTE、TIP、IMPORTANT、WARNING、CAUTION 的源样式边线、标题色和图标；边线色与标题色独立，不能用同一颜色近似。其余语法颜色沿用固定快照的语义映射。diff 背景覆盖对应文本范围，不额外铺满整行。
 
-#### 2.4 排版与布局（100% 缩放下的逻辑像素）
+### 3.3 字体与布局
 
-| 元素 | 取值 |
+所有尺寸是 100% 应用缩放下的逻辑像素，系统 DPI 由 GPUI 处理，不能重复乘缩放系数。
+
+| 元素 | 标准 |
 |---|---|
 | 正文 | 16px，字重 400，行高 1.5；加粗 600 |
-| 正文字体 | 按 GitHub 顺序列出具体字体：系统 UI 字体（macOS 上代替 `-apple-system`）、Segoe UI、Noto Sans、Helvetica、Arial、Apple Color Emoji、Segoe UI Emoji；末尾追加中文回退 Microsoft YaHei、PingFang SC、Noto Sans SC（GitHub 未定义中文字体，此项标为非 GitHub 取值） |
-| 代码字体 | SFMono-Regular、SF Mono、Menlo、Consolas、Liberation Mono（去掉 CSS 通用关键字） |
-| 标题 | 字重统一 600，行高 1.25，上 24 下 16；字号 32 / 24 / 20 / 16 / 14 / 13.6 |
-| h1、h2 分隔线 | 底部内边距 0.3em（9.6 / 7.2），1px 弱边线 |
-| 块间距 | 段落、列表、引用、表格、代码块下方 16 |
-| 列表 | 缩进 32；相邻项间距 4；项内段落上方 16；嵌套列表无额外上下间距 |
-| 列表符号 | 无序：实心圆 → 空心圆 → 方块；有序：1 → i → a |
-| 引用 | 左右内边距 16，左条 4，次要文字色，无背景、无圆角 |
-| 提示块 | 内边距 8 / 16，左条 4，标题字重 500、行高 1 |
-| 行内代码 | 13.6px，内边距约 2.7 / 5.4（0.2em / 0.4em），圆角 6，无边框；标题内的行内代码继承标题字号 |
+| 正文字体 | 本机系统 UI 字体、Segoe UI、Noto Sans、Helvetica、Arial 及 emoji 回退；中文补充 Microsoft YaHei、PingFang SC、Noto Sans SC，并标明这些中文回退并非 GitHub 原样式定义 |
+| 代码字体 | SFMono-Regular、SF Mono、Menlo、Consolas、Liberation Mono；最终本机等宽回退，不下载字体 |
+| h1–h6 | 32 / 24 / 20 / 16 / 14 / 13.6px，字重 600，行高 1.25；通常上间距 24、下间距 16，首元素遵循源样式 |
+| h1、h2 | 底部内边距 0.3em，1px 弱边线 |
+| 阅读区 | 最大宽度 980；宽阅读区内边距 45；阅读区小于 768 时为 15；无外层卡片装饰 |
+| 块间距 | 段落、列表、引用、表格和代码块下方 16 |
+| 列表 | 缩进 32，相邻项间距 4；项内段落上间距 16；嵌套列表无额外上下间距；无序圆点、空心圆、方块，有序 1、i、a 按源规则嵌套 |
+| 行内代码 | 正文中 13.6px，内边距约 2.72 / 5.44，圆角 6，无边框；标题中继承标题字号；窄区可正确换行，不丢字、不重复内边距 |
 | 代码块 | 13.6px，行高 1.45，内边距 16，圆角 6，无边框 |
-| `kbd` | 11px 等宽，行高 10，内边距 4，1px 弱边线，圆角 6，底部内阴影 1px 弱边线色 |
-| 分隔线 | 高 4，默认边线色填充，上下 24 |
-| 表格 | 按内容宽度，最宽 100% 后横向滚动；单元格内边距 6 / 13，1px 默认边线，表头 600，偶数行弱背景，无圆角 |
-| 阅读区 | 最大宽度 980，内边距 45；阅读区窄于 768 时内边距 15；无卡片圆角、边框、阴影 |
+| kbd | 独立按键外观，11px 等宽，10px 行高，内边距 4，1px 边框和底部内阴影，圆角 6；单个按键不按词拆散 |
+| 普通引用 | 左右内边距 16、左边线 4、次要文字色，无背景、圆角 |
+| 提示块 | 上下／左右内边距 8 / 16、左边线 4、标题字重 500；正文继承正文色 |
+| 表格 | 按内容宽度，最大 100%，内容超宽时横向滚动；单元格上下／左右内边距 6 / 13，1px 边框，表头 600，正文第二行起隔行着色；无圆角、无额外悬停底色 |
+| 分隔线 | 高 4，上下间距 24 |
+| 链接 | 正常无下划线，悬停显示下划线 |
 
-### 3. 主题格式扩展
+任务项继续只展示选中状态。代码复制、正文选择和现有键盘滚动行为保留。Mermaid 使用现有渲染器的 Primer 角色映射，不承诺复刻 GitHub 的 mermaid.js 输出。
 
-- 格式版本仍为 1。新增字段全部可选，缺省值从 Paperglow 补齐。
-- Paperglow 内置文件为每个新增字段写入"复现当前外观"的值。例如：新增的常量、属性等语法颜色取当前映射所用的颜色；提示块五种类型都取当前统一的提示块颜色；表格不加斑马纹、保留圆角；链接保持始终下划线；加粗保持 700；有序列表保持 1 → A → a；diff 增删颜色取当前"字符串"和"关键字"颜色且无背景。
-- 新增字段按能力分组：
-  - 排版：加粗字重；标题下方间距；按级别开关标题分隔线；按级别的标题颜色（用于 h6 次要色）；代码块行高；行内代码内边距与圆角；`kbd` 字号。
-  - 布局：表格圆角；表格是否撑满；分隔线高度与上下间距；链接下划线方式（始终 / 悬停 / 从不）；有序列表的嵌套编号方式。
-  - 配色：五种提示块各自的左条色与标题色；提示块正文色可设为"继承正文"；表格斑马纹底色；分隔线颜色；`kbd` 的背景、边框与阴影色；行内代码边框（可为空，表示无边框）。
-  - 语法：在现有九个槽位之外，新增常量、实体名、标签名、字符串转义、标记标题、标记列表、链接地址，以及 diff 的新增、删除、变更（各含文字色和背景色）与区段头。
-- 校验规则沿用现有约定：未知字段报错、颜色格式严格、尺寸非负、字号与行高为有限正数、字重在 100–900。
+### 配置迁移
 
-### 4. 内置主题注册与默认值
+| 配置值 | 启动后的行为 | 持久化 |
+|---|---|---|
+| 缺少 markdown_theme | 使用 GitHub | 正常保存配置时记录 github |
+| github | 使用 GitHub | 保持 |
+| paperglow | 规范化为 github，使用 GitHub，不报普通“主题缺失”错误 | 通过现有配置保存机制持久化迁移 |
+| 有效 v2 自定义 ID | 加载所选自定义主题 | 保持 ID |
+| v1、缺失或无效自定义 ID | 使用 GitHub，并提示原主题不能加载及原因 | 保留原 ID，便于修复后恢复 |
 
-- 内置主题由一个变为两个：`github`（显示名 GitHub）和 `paperglow`（显示名 Paperglow），两个 ID 都保留，用户文件不能占用。
-- 新配置的 `markdown_theme` 缺省值改为 `github`。已保存 `paperglow` 的配置保持原值，不迁移。
-- 选中的主题不可用时回退到 `github`，错误提示沿用现有机制，显示缺失的 ID。
-- 用户主题包缺省字段仍从 Paperglow 补齐，不从默认主题补齐。文档需明确说明这一点：一个只写了 `light: {}` 和 `dark: {}` 的用户包，外观是 Paperglow，而不是 GitHub。
-- 设置下拉同时列出两个内置主题，标明"内置"；名称和说明接入现有三种界面语言的本地化。
+迁移只针对配置里的精确 paperglow 值，必须覆盖实际有效的配置目录，包括 --config-dir。不得删除主题文件，不得重置其他设置。迁移应幂等；写入失败时本次运行仍使用 GitHub，显示一次可理解的保存失败提示，不宣称迁移已经持久化。
 
-### 5. 通用文本组件新增能力
+paperglow 保持为历史保留 ID，不能由自定义主题占用，以免与迁移冲突。提示文案称其为历史保留 ID，不声称仍有这个内置主题。
 
-组件改动在 `cloudy-liu/gpui-component` 中进行，叠加在 `4072869e` 之上。该提交尚未推送，除圆角行内代码外还包含按钮、下拉、滑块、提示气泡和组件 `Kbd` 的样式调整，会随本次改动一并进入 fork。组件不感知主题名称，只接收完整样式值。每项新能力的默认值等于现有行为：
+### v2 自定义主题
 
-| 能力 | 说明 |
-|---|---|
-| 分类型提示块 | 按 NOTE / TIP / IMPORTANT / WARNING / CAUTION 分别提供容器样式、标题颜色和图标；未提供时沿用统一提示块样式 |
-| 加粗字重 | 可配置，默认 700 |
-| 链接下划线方式 | 始终 / 悬停 / 从不，默认始终 |
-| 有序列表嵌套编号 | 可选 GitHub 方式（1 → i → a），默认现有方式 |
-| 表格 | 偶数行底色、外框圆角、是否撑满可配置；默认保持现状 |
-| 分隔线 | 高度、颜色、上下间距可配置，默认 2px 边线色 |
-| 行内代码 | 在 `4072869e` 的圆角块基础上，圆角半径和内边距可配置，边框改为可选（GitHub 无边框）；标题内的行内代码继承标题字号 |
-| `kbd` | 与行内代码区分，单独提供背景、边框、内阴影、字号；未提供时与行内代码相同 |
-| 高亮样式背景色 | 语法高亮的单个样式除颜色、字形、字重外支持背景色 |
-| diff 语义 | 内置 diff 语法改用专用的新增、删除、变更、区段头语义；高亮主题未提供这些语义时，回退到现在的"字符串 / 关键字 / 属性"颜色，保证其他使用者外观不变 |
+### 5.1 结构与继承
 
-标题按级别的分隔线、下方间距和颜色，以及代码块行高，已能通过现有按级别的样式覆盖实现，在应用侧完成，组件无需改动。
+主题仍使用本地 UTF-8 YAML，保留既有字段名与分组。schema_version 必须为 2；id、name、light、dark 必填，light/dark 必须为映射。空 light/dark 与省略的 typography/layout 全部采用 GitHub 对应默认值。
 
-### 6. 应用侧映射
+合并语义：对象逐字段递归覆盖；数组整体替换；显式 null 只允许出现在可空字段，使用该字段已有、文档化的语义；省略与 null 不等价。元数据 author、description、license 不从内置主题继承。格式未知字段仍报错。
 
-- 阅读样式解析把新增主题字段映射到组件的新能力；GitHub 主题下 h1 和 h2 都画分隔线，Paperglow 保持只有 h2。
-- GitHub 主题把纸张设为与背景同色、纸张边框透明、圆角和阴影为零，呈现为无卡片的整页；阅读区布局代码无需改动。
-- Mermaid 图表继续使用现有的主题配色映射，不额外复刻 mermaid.js 在 GitHub 上的默认配色。
-- 依赖交付沿用上一轮约定：开发时可用本地路径覆盖联调，但不能提交；最终组件库与组件资源包固定到 fork 上同一个已推送提交，应用从干净 checkout 可构建。
+例如，只覆盖链接颜色的主题，其余颜色和排版来自 GitHub。只有 light: {} 和 dark: {} 的最小主题必须与内置 GitHub 的完整阅读样式相等。
 
-### 7. 交付顺序
+内置 GitHub 默认值必须独立完整加载，不再先以 Paperglow 为底合并。删除 Paperglow 后，不能用隐藏旧主题或改名的旧默认值继续作为用户包基底。
 
-| 阶段 | 交付与完成标准 |
-|---|---|
-| 1. 组件能力 | 第 5 节全部能力在 fork 分支实现，默认行为不变，组件测试通过，推送到 `cloudy-liu/gpui-component`，并向其 ctty7 集成分支开 PR（该分支沿用旧名 `tty7`） |
-| 2. 格式扩展与 Paperglow 回归 | 新增字段可解析、可校验；Paperglow 补全新字段后解析出的阅读样式与改动前一致 |
-| 3. GitHub 主题包与注册 | 内置 `github` 主题、默认值、保留 ID、回退规则与设置下拉完成；取值通过源样式快照校验 |
-| 4. 映射与视觉验收 | 应用侧映射完成；同一份样例与 github.com 渲染并排截图对照，浅色、深色、宽窄阅读区各一组 |
-| 5. 文档与发布准备 | 主题格式文档、默认主题说明、来源署名、CHANGELOG 更新；升级组件 rev；向 `cloudy-liu/ctty7:main` 开 PR |
+### 5.2 v1 与异常处理
+
+遇到 v1 文件，显示文件来源和明确提示：“此主题使用 v1，当前支持 v2。升级后，未填写的样式将使用 GitHub 默认值。”不自动修改文件，也不自动改版本号。文件不能作为有效新主题启用，选中它时依照配置迁移约定回退；修复为有效 v2 后，原 ID 自动恢复。
+
+升级说明要明确：将版本改为 2 表示接受 GitHub 缺省值；如要保留旧外观，作者需要显式填写原先省略的颜色、字体和布局。仅改版本号不保证旧外观不变。本次不提供自动转换工具，也不内置 v1/Paperglow 兼容运行时。
+
+保持现有文件大小上限 256 KiB、ID 字符集、重复 ID 排除、颜色范围和尺寸校验。github 为内置保留 ID，paperglow 为历史保留 ID。其他未知版本明确报不支持，不猜测版本语义。
+
+### 5.3 目录与热加载
+
+保留有效配置目录下的 markdown-themes，只扫描直接子文件。新增主题不自动切换；文件名变化但 ID 不变仍保留选择。热加载沿用 200ms 防抖；两种变体都校验成功后才发布。
+
+当前有效 v2 在运行中损坏、删除、变成 v1 或出现重复 ID 时，本次运行保留最近有效的内存版本并展示错误，不应用无效新文件。重新启动时没有内存旧版本，则回退 GitHub。文件修复后自动恢复。普通自定义主题回退不改写所选 ID，与 Paperglow 的一次迁移区分。
+
+### 模块与交付边界
+
+- 修改主题解析、主题注册表、配置读取与持久化、阅读设置及三语言文案、示例、文档与测试。删除不再使用的 Paperglow 内置资源和纯历史外观回归样本。
+- 替换 Blue Paper 默认示例为以 GitHub 为基底的 v2 示例。保留仍被分发的派生素材所需署名与许可，不改历史发布记录。
+- 不再要求 Paperglow 外观零变化。组件库的通用样式能力与非 GitHub 消费者默认行为继续保留，源码编辑器搜索高亮修复不能回退。
+- 应用和组件资源依赖锁定同一个已推送的 fork 提交，不提交本地依赖路径覆盖。组件没有新增改动时不制造新提交。
+- 在现有应用与组件 PR 上继续交付。验收尚未完成时保持草稿，不合并或发布。
 
 ## Testing Decisions
 
-### 测试入口
+沿用已经约定的高层入口：主题包解析／注册及真实文件加载、应用 Markdown 阅读流程；组件样式有改动时才在 TextView 公开行为入口新增对应测试。配置迁移沿用已有配置加载／保存往返测试，不增加测试专用的生产接口。
 
-只设两处入口，沿用上一轮已确认的边界：
+好测试观察完整解析样式、可选主题、加载提示、配置与文件持久化结果、用户选择／复制及缓冲区状态，不 mock 内部协作者。先例为现有主题加载与热恢复测试、GPUI 阅读窗口测试和配置文件损坏保护测试。源样式断言来自独立固定快照，不从实现复制常量。
 
-1. **应用的 Markdown 阅读流程**：解析主题包、结合实际深浅模式解析阅读样式、在 GPUI 测试窗口中打开文档并切换主题。这是最高层入口，覆盖注册表、默认值、回退、映射和 Paperglow 回归。
-2. **通用文本组件 `TextView` 的公开行为**：给定样式输入，观察渲染结果。新能力跨仓库交付，必须在组件侧单独验证。
+### 7.1 自动化
 
-不为每个颜色常量单独建测试层，也不 mock 渲染器或主题注册表。
+- 空配置得到 GitHub；旧 Paperglow 迁移及再次加载均得到 GitHub，其他配置不变；覆盖迁移保存失败和自定义配置目录。
+- 注册表只有一个内置主题；用户主题仍可注册、选择、重载，两个保留 ID 规则明确。
+- 最小 v2 的浅色、深色、排版和布局均与 GitHub 相等；部分覆盖只改变指定字段；数组替换、null、未知字段和非法值符合规范。
+- v1 文件显示升级错误，原文件字节保持不变；被选中的 v1 回退但保存原 ID；修成 v2 后恢复。
+- 热加载错误保留最近有效版本，重启后正确回退；缺失主题不误走 Paperglow 迁移。
+- GitHub 源样式比对继续通过；应用入口覆盖自定义与 GitHub 切换、深浅模式、字体重排、Mermaid、选区和未保存内容。
+- 组件公开行为测试继续覆盖五种提示块、行内代码换行与选择、kbd、表格、列表、diff 背景及非 GitHub 消费者的默认行为。
+- 最终提交在独立 checkout、无本地依赖覆盖下通过 workspace 测试、构建、格式和 host boundary；组件有修改时运行对应组件验证。
 
-### 好测试的标准
+不保留“Paperglow 外观零变化”作为验收目标；不因此删掉仍验证通用渲染行为的测试。
 
-- 断言外部可观察的结果：解析出的阅读样式、设置中可选的主题、渲染出的元素样式，而不是内部构造步骤。
-- "严格复刻"由**源样式快照比对**证明：测试从仓库中保存的 github-markdown-css 5.9.0 快照里按选择器取值，与内置 GitHub 主题解析后的取值逐项比较。主题文件与断言之间不能互相抄写常量，否则不能作为完成证据。
-- Paperglow 零变化由**差分测试**证明：改动前后用同一份 Paperglow 解析出的阅读样式与高亮主题完全相等。
+### 7.2 视觉与交互
 
-### 覆盖范围
+同一份综合样例在 ctty7 与 GitHub 对照：浅色／深色、宽／窄阅读区；Windows 100% 和 150% DPI 抽样覆盖，额外验证应用 200% 缩放的可读性。包含六级标题、标题内代码、普通及长行内代码、kbd、五种提示块、四层列表、任务项、窄表和超宽表、分隔线、代码及 diff。
 
-| 覆盖组 | 关键观察结果 |
-|---|---|
-| 源样式比对 | 第 2 节中每个有源样式出处的颜色与尺寸，都与快照中对应选择器的取值一致，浅色和深色分别校验 |
-| Paperglow 回归 | 补全新字段后，Paperglow 浅色和深色的阅读样式、高亮主题与改动前相等；现有 Blue Paper 示例主题仍可加载且外观不变 |
-| 注册与默认值 | 空配置得到 `github`；已保存 `paperglow` 保持不变；`github`、`paperglow` 均为保留 ID；选中主题缺失时回退 `github` 并显示原因；只写空变体的用户包外观等于 Paperglow |
-| 格式校验 | 新增字段的类型错误、非法颜色、负尺寸、越界字重给出具体字段错误 |
-| 主题切换 | 在 GitHub 与 Paperglow 之间切换，正文与高亮颜色更新，阅读位置和选区保留 |
-| 组件默认行为 | 未传入新样式的 `TextView` 与改动前渲染一致（提示块、表格、分隔线、链接、加粗、列表编号、行内代码、`kbd`、diff 高亮） |
-| 组件新能力 | 五种提示块各自取色与图标；表格斑马纹与不撑满；分隔线尺寸；链接仅悬停下划线；1 → i → a 编号；无边框圆角行内代码与独立 `kbd`；diff 新增与删除带背景色 |
+检查悬停下划线、复制内容正确、超宽表横向滚动、文档纵向滚动、主题切换前后选区及内容锚点、切回编辑器后的未保存内容和撤销历史。对照只比较 Markdown 内容区。macOS/Linux 视觉状态分别记录，未测不能标为通过。
 
-### 先例
+效果示意不替代 GPUI 原生验收。记录允许的字体和 token 分类差异，其余偏差需修复或形成明确待确认项。
 
-- 应用侧：Markdown 主题模块已有的解析、校验、注册表、热加载测试；Markdown 预览模块中基于 GPUI 测试窗口的阅读流程测试（打开文档、切换深浅、保留选区与滚动）。
-- 组件侧：文本组件的阅读测试文件（提示块识别、HTML 子集、局部样式隔离、同名主题高亮更新）。
+### 7.3 性能与 CI
 
-### 视觉验收
+对代表性长文档和长行内代码执行原生渲染 profiling，与当前 GitHub PR 基线比较；记录文档、环境、首次显示、滚动和主题切换的结果。不编造性能阈值，发现可复现的明显退化需处理并复测。
 
-自动化测试不能替代视觉验收。使用仓库中的 Markdown 综合样例（需补充 `kbd`、`diff` 代码块、四层嵌套列表、五种提示块和宽窄表格），在 github.com 上打开同一文件作为参照，与 ctty7 在相同宽度下并排截图：浅色和深色各一组，宽阅读区和窄于 768px 各一组，Windows 100% 与 150% 缩放抽样。记录字体回退和 tree-sitter 切词造成的已知差异，其余差异视为缺陷。
+已有 macOS CI 失败点为 host::server::pool_tests::closing_the_pool_drops_queued_work，需独立确认原因；尚不能认定由主题变更导致。全平台 CI 的失败或未完成项应明确处理后，才能声称验证通过。
+
+两个 PR 保持草稿直到所需验收和人工评审完成。该规格不授权合并或发布。
 
 ## Out of Scope
 
-- GitHub 的其他主题：Dark Dimmed、高对比、色盲友好。
-- 渲染器目前不支持、且与配色无关的 GitHub 功能：脚注区样式、`<details>`/`<summary>`、`<sup>`/`<sub>`、`<mark>`、emoji 短码、标题悬停锚点图标、数学公式、CSV 表格视图、图片对齐浮动。
-- 用 TextMate 语法引擎替换 tree-sitter 以追求逐 token 一致。
-- 复刻 mermaid.js 在 GitHub 上的图表配色。
-- ctty7 的 Git diff 浮层、源码编辑器、应用界面主题和终端配色。
-- 已保存 `paperglow` 的配置迁移；改变用户主题包的缺省补齐来源。
-- 主题格式版本升级、主题间继承链。
-- 合并 PR 和发布 release。
+- 删除自定义主题能力，或增加独立 Markdown 深浅模式开关。
+- 保留 Paperglow 为隐藏默认值、保留 v1 运行时外观兼容或自动改写用户主题文件。
+- 新增 GitHub Dark Dimmed、高对比、色盲模式或主题商店。
+- 更换 tree-sitter、引入 TextMate、WebView 或完整 CSS 引擎。
+- 增加现有渲染器未支持的脚注、details/summary、sup/sub、mark、数学公式、emoji 短码等能力。
+- 修改源码编辑器、Git diff 浮层、终端或应用界面主题。
+- 合并 PR、打标签、发布 release，或触碰主工作树中其他编辑器主题工作的改动。
 
 ## Further Notes
 
-- 源样式快照：github-markdown-css 5.9.0 的 `github-markdown-light.css` 与 `github-markdown-dark.css`。两份文件结构逐行相同，只有取值不同，便于比对；`kbd` 边框在快照中仍是未展开的 `--borderColor-muted` 变量，按同一文件中 h1/h2 分隔线的展开值 `#d1d9e0b3` / `#3d444db3` 取值。
-- 快照中链接规则先声明下划线、后声明无下划线，以后者为准，悬停时显示下划线，下划线偏移 0.2rem。段落规则先声明 10px、后声明 16px 下边距，以后者为准。
-- 刷新流程：GitHub 改版后，替换快照并运行源样式比对测试，失败项即需要同步的取值。
-- 来源与许可：github-markdown-css（MIT，Sindre Sorhus）；配色源自 GitHub Primer（MIT）；提示块图标为 Octicons（MIT）。随应用保留署名。
-- 组件 fork 的基线 `4072869e` 尚未推送。阶段 1 推送时会把它一并带入 `cloudy-liu/gpui-component`，评审时需要把其中与 Markdown 无关的组件样式调整单独说明。
-- 本规格不拆分实施 tickets；按第 7 节阶段与上方完成标准推进。
+- 本规格替代此前的双内置主题、保留 Paperglow 选择、v1 缺省值继承 Paperglow 等约定。用户已确认保留自定义主题及 v2 / v1 升级策略，并接受 GitHub 固定配色方案。
+- 应用 PR：https://github.com/cloudy-liu/ctty7/pull/88 ，组件 PR：https://github.com/cloudy-liu/gpui-component/pull/4 。只交付到这些 fork，不能向上游开 PR。
+- 实施顺序为独立 GitHub 基底与 v2、配置迁移、设置和资源清理、文档与测试、CI 和视觉验收、更新现有 PR。
+- 效果示意仅用于产品对齐，不能替代原生渲染截图、性能验证或人工评审。

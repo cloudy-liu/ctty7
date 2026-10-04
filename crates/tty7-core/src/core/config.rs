@@ -659,6 +659,9 @@ impl Default for Config {
 pub enum LoadOutcome {
     /// The file parsed (after the usual field-level leniency).
     Parsed,
+    /// The file parsed and GitHub is active, but the Paperglow selection
+    /// could not be migrated on disk. This is not a failed configuration load.
+    MarkdownThemeMigrationFailed,
     /// There is no file (or no config dir yet): the defaults simply are the
     /// config, and saving them is fine.
     Absent,
@@ -718,7 +721,25 @@ impl Config {
         match serde_json::from_str::<Config>(strip_bom(&text)) {
             Ok(mut cfg) => {
                 cfg.sanitize();
-                (cfg, LoadOutcome::Parsed)
+                let mut outcome = LoadOutcome::Parsed;
+                if cfg.markdown_theme == "paperglow" {
+                    cfg.markdown_theme = "github".into();
+                    // Change only the saved selection, preserving even fields
+                    // this version does not know or would otherwise sanitize.
+                    let migrate = || -> std::io::Result<()> {
+                        let mut value: serde_json::Value = serde_json::from_str(strip_bom(&text))?;
+                        value["markdown_theme"] = serde_json::Value::String("github".into());
+                        write_atomic(&path, &serde_json::to_vec_pretty(&value)?)
+                    };
+                    if let Err(error) = migrate() {
+                        log::warn!(
+                            "could not save Markdown theme migration at {}: {error}",
+                            path.display()
+                        );
+                        outcome = LoadOutcome::MarkdownThemeMigrationFailed;
+                    }
+                }
+                (cfg, outcome)
             }
             Err(e) => {
                 // The next `save` overwrites this file wholesale, so handing
@@ -1981,6 +2002,76 @@ mod tests {
 
     fn lock_config_file() -> std::sync::MutexGuard<'static, ()> {
         CONFIG_FILE.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    #[test]
+    fn markdown_paperglow_migration_preserves_other_settings_and_is_persisted_once() {
+        let _guard = lock_config_file();
+        pin_config_dir();
+        let path = Config::path().unwrap();
+        let original = serde_json::json!({
+            "markdown_theme": "paperglow",
+            "font_size": 21.0,
+            "theme": "my-theme",
+            "future_setting": {"keep": true}
+        });
+        std::fs::write(&path, original.to_string()).unwrap();
+        let (loaded, outcome) = Config::load_with_outcome();
+        assert_eq!(loaded.markdown_theme, "github");
+        assert_eq!(loaded.font_size, 21.0);
+        assert_eq!(loaded.theme, "my-theme");
+        assert_eq!(outcome, LoadOutcome::Parsed);
+        let saved = std::fs::read_to_string(&path).unwrap();
+        let mut expected = original;
+        expected["markdown_theme"] = serde_json::json!("github");
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&saved).unwrap(),
+            expected
+        );
+        assert_eq!(Config::load().markdown_theme, "github");
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn markdown_migration_write_failure_keeps_the_file_and_uses_github() {
+        let _guard = lock_config_file();
+        pin_config_dir();
+        let path = Config::path().unwrap();
+        let original = r#"{"markdown_theme":"paperglow","font_size":21}"#;
+        std::fs::write(&path, original).unwrap();
+        // An actual filesystem failure at the existing atomic writer boundary.
+        let blocked = path
+            .parent()
+            .unwrap()
+            .join(format!(".config.json.tmp.{}", std::process::id()));
+        std::fs::create_dir(&blocked).unwrap();
+        let (loaded, outcome) = Config::load_with_outcome();
+        std::fs::remove_dir(&blocked).unwrap();
+        assert_eq!(outcome, LoadOutcome::MarkdownThemeMigrationFailed);
+        assert!(!outcome.failed());
+        assert_eq!(loaded.markdown_theme, "github");
+        assert_eq!(loaded.font_size, 21.0);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        let (recovered, outcome) = Config::load_with_outcome();
+        assert_eq!(outcome, LoadOutcome::Parsed);
+        assert_eq!(recovered.markdown_theme, "github");
+        assert!(std::fs::read_to_string(&path).unwrap().contains("github"));
+        std::fs::remove_file(path).unwrap();
+    }
+
+    #[test]
+    fn markdown_migration_does_not_rewrite_custom_selections() {
+        let _guard = lock_config_file();
+        pin_config_dir();
+        let path = Config::path().unwrap();
+        for id in ["github", "study", "paperglow-custom", "Paperglow"] {
+            let original = serde_json::json!({"markdown_theme": id}).to_string();
+            std::fs::write(&path, &original).unwrap();
+            assert_eq!(Config::load().markdown_theme, id);
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), original);
+        }
+        std::fs::remove_file(path).unwrap();
     }
 
     #[test]

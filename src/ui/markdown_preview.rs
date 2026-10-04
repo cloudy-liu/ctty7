@@ -95,7 +95,6 @@ pub(crate) fn color(color: Color) -> Hsla {
 pub(crate) fn theme_label(entry: &Entry) -> String {
     match (entry.source.is_none(), entry.theme.id.as_str()) {
         (true, "github") => t(L10nKey::SettingsMarkdownGithub).to_owned(),
-        (true, "paperglow") => t(L10nKey::SettingsMarkdownPaperglow).to_owned(),
         _ => entry.theme.name.clone(),
     }
 }
@@ -103,7 +102,6 @@ pub(crate) fn theme_label(entry: &Entry) -> String {
 pub(crate) fn theme_description(entry: &Entry) -> String {
     match (entry.source.is_none(), entry.theme.id.as_str()) {
         (true, "github") => t(L10nKey::SettingsMarkdownGithubDesc).to_owned(),
-        (true, "paperglow") => t(L10nKey::SettingsMarkdownPaperglowDesc).to_owned(),
         _ => entry.theme.description.clone(),
     }
 }
@@ -203,10 +201,6 @@ fn highlight(theme: &Theme, dark: bool, revision: u64) -> Arc<HighlightTheme> {
         },
     })
 }
-
-#[cfg(test)]
-#[path = "../../tests/fixtures/markdown_preview_before_github.rs"]
-mod before_github;
 
 pub(crate) fn reading_style(
     entry: &Entry,
@@ -914,33 +908,36 @@ mod tests {
     use tty7_core::host::{self, Host, HostId, Meta};
 
     #[test]
-    fn paperglow_and_existing_blue_paper_keep_the_pre_github_reading_style() {
-        for source in [
-            markdown_theme::PAPERGLOW,
-            include_str!("../../tests/fixtures/paperglow-before-github.yaml"),
-            include_str!("../../docs/examples/markdown-themes/blue-paper.yaml"),
-        ] {
-            let entry = Entry {
-                theme: Arc::new(markdown_theme::parse(source).unwrap()),
-                source: None,
-                revision: 0,
-            };
-            for dark in [false, true] {
-                for scale in [1., 1.5, 2.] {
-                    assert!(
-                        reading_style(&entry, dark, scale, "Mono".into())
-                            == before_github::reading_style(&entry, dark, scale, "Mono".into()),
-                        "{} dark={dark} scale={scale}",
-                        entry.theme.id
-                    );
-                }
+    fn minimal_v2_has_github_reading_style_at_all_scales_and_modes() {
+        let custom = Entry {
+            theme: Arc::new(
+                markdown_theme::parse(
+                    "schema_version: 2\nid: empty\nname: Empty\nlight: {}\ndark: {}\n",
+                )
+                .unwrap(),
+            ),
+            source: None,
+            revision: 0,
+        };
+        let github = Entry {
+            theme: markdown_theme::builtin(),
+            ..custom.clone()
+        };
+        for dark in [false, true] {
+            for scale in [1., 1.5, 2.] {
+                let mut actual = reading_style(&custom, dark, scale, "Mono".into());
+                let expected = reading_style(&github, dark, scale, "Mono".into());
+                // Theme IDs distinguish highlighter caches, not visible styles.
+                Arc::make_mut(&mut actual.highlight_theme).name =
+                    expected.highlight_theme.name.clone();
+                assert!(actual == expected);
             }
         }
     }
 
     #[test]
     fn markdown_heading_fonts_are_optional_and_independent_of_body_and_code() {
-        let yaml = "schema_version: 1\nid: fonts\nname: Fonts\nlight: {}\ndark: {}\ntypography:\n  fonts: [Body]\n  code_fonts: [Code]\n";
+        let yaml = "schema_version: 2\nid: fonts\nname: Fonts\nlight: {}\ndark: {}\ntypography:\n  fonts: [Body]\n  code_fonts: [Code]\n";
         for headings in [
             "",
             "  heading_fonts: []\n",
@@ -1224,7 +1221,10 @@ mod tests {
                 _ => panic!("diagram SVG must be ready"),
             },
         );
-        for id in ["paperglow", "github"] {
+        let themes = tempfile::tempdir().unwrap();
+        std::fs::write(themes.path().join("custom.yaml"), "schema_version: 2\nid: custom\nname: Custom\nlight: {paper: '#eeeeee'}\ndark: {paper: '#222222'}\n").unwrap();
+        vcx.update(|_, cx| apply_snapshot(markdown_theme::scan(Some(themes.path())), cx));
+        for id in ["custom", "github"] {
             app.update_in(&mut vcx, |app, _, cx| app.set_markdown_theme(id, cx));
             for _ in 0..3 {
                 vcx.update(|window, cx| {

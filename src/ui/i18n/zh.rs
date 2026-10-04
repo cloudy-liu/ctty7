@@ -160,7 +160,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsThemesRejected => "主题文件夹里这些没能加载",
         L10nKey::SettingsMarkdownTheme => "Markdown 阅读主题",
         L10nKey::SettingsMarkdownThemeDesc => {
-            "选择阅读样式，深浅配色自动跟随应用。修改主题文件后自动生效。"
+            "默认使用 GitHub。阅读主题跟随应用深浅模式，不继承应用背景色。自定义 v2 文件修改后自动加载。"
         }
         L10nKey::SettingsMarkdownThemeUnavailable => {
             "无法加载 {requested}，当前使用 {active}。修复主题文件后会自动恢复。"
@@ -169,10 +169,15 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsMarkdownThemeUser => "自定义",
         L10nKey::SettingsMarkdownGithub => "GitHub",
         L10nKey::SettingsMarkdownGithubDesc => {
-            "GitHub 的浅色、深色 Markdown 配色与排版。新配置的默认主题。"
+            "GitHub 的 Markdown 配色与排版，浅色和深色变体随应用模式切换。"
         }
-        L10nKey::SettingsMarkdownPaperglow => "Paperglow",
-        L10nKey::SettingsMarkdownPaperglowDesc => "暖色纸张与陶土色阅读主题，包含浅色和深色配色。",
+        L10nKey::SettingsMarkdownV1Upgrade => {
+            "此主题使用 v1。请升级到 v2，未填写的样式将采用 GitHub 默认值。原文件未被修改。"
+        }
+        L10nKey::SettingsMarkdownMigrationSaveFailed => {
+            "已使用 GitHub，但未能将磁盘上的 Paperglow 选择更新为 GitHub。请检查配置目录是否可写。"
+        }
+        L10nKey::SettingsMarkdownUseGithub => "使用 GitHub",
         L10nKey::EditorCopyCode => "复制代码",
         L10nKey::MarkdownAnchorMissing => "未找到该标题",
         L10nKey::ThemeDuplicateFailed => "无法复制主题",

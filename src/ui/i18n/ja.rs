@@ -180,7 +180,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsThemesRejected => "テーマフォルダから読み込めなかったもの",
         L10nKey::SettingsMarkdownTheme => "Markdown の閲覧テーマ",
         L10nKey::SettingsMarkdownThemeDesc => {
-            "閲覧スタイルを選択します。明暗はアプリに追従し、テーマファイルの変更は自動的に反映されます。"
+            "既定は GitHub です。閲覧テーマはアプリのライト／ダークモードに従いますが、背景色は継承しません。v2 ファイルの変更は自動で反映されます。"
         }
         L10nKey::SettingsMarkdownThemeUnavailable => {
             "{requested} を読み込めません。現在は {active} を使用しています。ファイルを修復すると自動的に復元されます。"
@@ -189,12 +189,15 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsMarkdownThemeUser => "カスタム",
         L10nKey::SettingsMarkdownGithub => "GitHub",
         L10nKey::SettingsMarkdownGithubDesc => {
-            "GitHub のライト・ダーク Markdown 配色と組版。新しい設定の既定テーマです。"
+            "GitHub の Markdown 配色と組版。ライト／ダークの切り替えはアプリのモードに従います。"
         }
-        L10nKey::SettingsMarkdownPaperglow => "Paperglow",
-        L10nKey::SettingsMarkdownPaperglowDesc => {
-            "暖かな紙とテラコッタの閲覧テーマ。ライト・ダーク配色を備えています。"
+        L10nKey::SettingsMarkdownV1Upgrade => {
+            "このテーマは v1 です。v2 に更新すると、省略したスタイルには GitHub の既定値が適用されます。元のファイルは変更されていません。"
         }
+        L10nKey::SettingsMarkdownMigrationSaveFailed => {
+            "GitHub を使用していますが、保存済みの Paperglow 設定を更新できませんでした。設定フォルダーへの書き込み権限を確認してください。"
+        }
+        L10nKey::SettingsMarkdownUseGithub => "GitHub を使用",
         L10nKey::EditorCopyCode => "コードをコピー",
         L10nKey::MarkdownAnchorMissing => "見出しが見つかりません",
         L10nKey::ThemeDuplicateFailed => "テーマを複製できませんでした",
