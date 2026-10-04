@@ -283,6 +283,7 @@ impl Theme {
             ("typography.heading_line_height", t.heading_line_height),
             ("layout.max_width", l.max_width),
             ("layout.compact_below", l.compact_below),
+            ("layout.kbd_line_height", l.kbd_line_height),
         ] {
             if !value.is_finite() || value <= 0. {
                 return Err(format!("{key} must be a finite positive number"));
@@ -361,7 +362,6 @@ impl Theme {
             ("layout.inline_code_padding_y", l.inline_code_padding_y),
             ("layout.kbd_padding", l.kbd_padding),
             ("layout.kbd_radius", l.kbd_radius),
-            ("layout.kbd_line_height", l.kbd_line_height),
             ("layout.rule_height", l.rule_height),
         ] {
             if !value.is_finite() || value < 0. {

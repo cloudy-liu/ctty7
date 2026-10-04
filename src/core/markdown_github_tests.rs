@@ -299,6 +299,7 @@ fn new_theme_fields_reject_invalid_input_and_both_builtins_are_reserved() {
         ("typography", "code_line_height", "0"),
         ("typography", "inline_code_size", ".inf"),
         ("layout", "rule_height", "-1"),
+        ("layout", "kbd_line_height", "0"),
         ("layout", "link_underline", "sometimes"),
         ("layout", "table_fill", "42"),
         ("light", "kbd_border", "bad"),
@@ -324,4 +325,66 @@ fn new_theme_fields_reject_invalid_input_and_both_builtins_are_reserved() {
             .iter()
             .all(|(_, reason)| reason.contains("reserved"))
     );
+}
+
+#[test]
+fn github_selection_and_checked_controls_match_pinned_primer_tokens() {
+    let selection = include_str!("../../tests/fixtures/primer/selection.json5");
+    let background = include_str!("../../tests/fixtures/primer/bgColor.json5");
+    let control = include_str!("../../tests/fixtures/primer/control.json5");
+    assert!(selection.contains("$value: '{bgColor.accent.emphasis}'"));
+    assert!(
+        background
+            .split("accent: {")
+            .nth(1)
+            .unwrap()
+            .split("emphasis: {")
+            .nth(1)
+            .unwrap()
+            .contains("$value: '{base.color.blue.5}'")
+    );
+    assert!(
+        control
+            .split("checked: {")
+            .nth(1)
+            .unwrap()
+            .contains("$value: '{bgColor.accent.emphasis}'")
+    );
+    let alphas = regex::Regex::new(r"alpha:\s*([0-9.]+)")
+        .unwrap()
+        .captures_iter(selection)
+        .map(|capture| capture[1].parse::<f32>().unwrap())
+        .collect::<Vec<_>>();
+    let theme = builtin();
+    for (dark, source, alpha) in [
+        (
+            false,
+            include_str!("../../tests/fixtures/primer/light.json5"),
+            alphas[1],
+        ),
+        (
+            true,
+            include_str!("../../tests/fixtures/primer/dark.json5"),
+            alphas[0],
+        ),
+    ] {
+        let hex = source
+            .split("blue: {")
+            .nth(1)
+            .unwrap()
+            .split("'5': {")
+            .nth(1)
+            .unwrap()
+            .split("hex: '")
+            .nth(1)
+            .unwrap()
+            .split('\'')
+            .next()
+            .unwrap();
+        let accent = parse_color(hex).unwrap();
+        assert_eq!(theme.palette(dark).accent, accent);
+        let mut selected = accent;
+        selected.0[3] = alpha;
+        assert_eq!(theme.palette(dark).selection, selected);
+    }
 }

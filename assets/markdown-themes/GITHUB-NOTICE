@@ -7,6 +7,8 @@ Generated from GitHub's online Light default and Dark default Markdown styles.
 
 Additional semantic tokens: Primer Primitives
 https://github.com/primer/primitives/tree/f48bc063f7bc0fb3e447386a8c259650ce46dea8
+Token paths: src/tokens/functional/color/{selection,bgColor,control}.json5
+and src/tokens/base/color/{light/light,dark/dark}.json5.
 Copyright (c) GitHub, Inc. MIT license; see PRIMER-LICENSE.
 selection.bgColor uses bgColor.accent.emphasis at 0.2 alpha in light mode and
 0.7 alpha in dark mode. control.checked.bgColor.rest uses the same accent.

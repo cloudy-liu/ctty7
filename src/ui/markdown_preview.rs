@@ -1131,6 +1131,85 @@ mod tests {
     }
 
     #[gpui::test]
+    fn markdown_mermaid_theme_switch_replaces_svg_without_reparsing_or_losing_selection(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
+        let content = "# Diagram\n\nWords to select.\n\n```mermaid\nflowchart LR\n A --> B\n```\n";
+        let mut host = DocumentsHost::new(905, "Diagram", None);
+        Arc::get_mut(&mut host)
+            .unwrap()
+            .files
+            .insert("/repo/docs/readme.md".into(), content.as_bytes().to_vec());
+        app.update_in(&mut vcx, |app, window, cx| {
+            init(Default::default(), cx);
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = app.tabs.len() - 1;
+            app.editor_open_on_host(host.clone(), Path::new("/repo/docs/readme.md"), window, cx);
+        });
+        settle(&mut vcx, |cx| {
+            app.read_with(cx, |app, _| {
+                app.tab_code()
+                    .and_then(|code| code.active_file())
+                    .is_some_and(|file| file.reading.is_some())
+            })
+        });
+        let reading = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .clone()
+                .unwrap()
+        });
+        let text = reading.read_with(&vcx, |reading, _| reading.text.clone());
+        text.update(&mut vcx, |text, cx| text.select_all(cx));
+        let parsed = text.read_with(&vcx, |text, _| text.source());
+        assert!(parsed.contains("ctty7-mermaid://0"));
+        let selected = text.read_with(&vcx, |text, _| text.selected_text());
+        let first = reading.read_with(
+            &vcx,
+            |reading, _| match &reading.diagrams["ctty7-mermaid://0"] {
+                TextViewImageSource::Ready(gpui::ImageSource::Image(image)) => image.clone(),
+                _ => panic!("diagram SVG must be ready"),
+            },
+        );
+        for id in ["paperglow", "github"] {
+            app.update_in(&mut vcx, |app, _, cx| app.set_markdown_theme(id, cx));
+            for _ in 0..3 {
+                vcx.update(|window, cx| {
+                    let _ = window.draw(cx);
+                });
+                vcx.run_until_parked();
+            }
+            assert_eq!(text.read_with(&vcx, |text, _| text.source()), parsed);
+            assert_eq!(
+                text.read_with(&vcx, |text, _| text.selected_text()),
+                selected
+            );
+            reading.read_with(&vcx, |reading, cx| {
+                assert_eq!(reading.source.read(cx).text().to_string(), content);
+                assert!(reading.images.is_empty());
+                let TextViewImageSource::Ready(gpui::ImageSource::Image(image)) =
+                    &reading.diagrams["ctty7-mermaid://0"]
+                else {
+                    panic!("diagram")
+                };
+                assert!(!Arc::ptr_eq(image, &first));
+            });
+        }
+        assert!(
+            host.reads
+                .lock()
+                .unwrap()
+                .iter()
+                .all(|path| path.extension().is_some_and(|ext| ext == "md"))
+        );
+    }
+
+    #[gpui::test]
     fn markdown_edits_release_image_budget_and_ignore_old_completions(cx: &mut TestAppContext) {
         let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
         app.update_in(&mut vcx, |app, _, cx| {
