@@ -184,6 +184,14 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         }
         L10nKey::SettingsMarkdownThemeBuiltin => "Built-in",
         L10nKey::SettingsMarkdownThemeUser => "Custom",
+        L10nKey::SettingsMarkdownGithub => "GitHub",
+        L10nKey::SettingsMarkdownGithubDesc => {
+            "GitHub's light and dark Markdown colors and typography. Default for new configurations."
+        }
+        L10nKey::SettingsMarkdownPaperglow => "Paperglow",
+        L10nKey::SettingsMarkdownPaperglowDesc => {
+            "Warm paper and terracotta reading colors, with light and dark variants."
+        }
         L10nKey::EditorCopyCode => "Copy code",
         L10nKey::MarkdownAnchorMissing => "heading not found",
         L10nKey::ThemeDuplicateFailed => "Could not duplicate the theme",

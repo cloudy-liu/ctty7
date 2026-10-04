@@ -6128,10 +6128,11 @@ impl Tty7App {
             None => (vec![active.clone()], Vec::new(), false),
         };
         let app = cx.entity().downgrade();
-        let label = active.theme.name.clone();
+        let label = crate::ui::markdown_preview::theme_label(&active);
         let menu_selected = selected.clone();
         let picker = Button::new("markdown-theme-picker")
             .label(label)
+            .tooltip(crate::ui::markdown_preview::theme_description(&active))
             .icon(IconName::ChevronDown)
             .small()
             .dropdown_menu_with_anchor(gpui::Anchor::TopRight, move |menu, _, _| {
@@ -6151,7 +6152,7 @@ impl Tty7App {
                     let name = if duplicate_name {
                         format!("{} [{}]", entry.theme.name, id)
                     } else {
-                        entry.theme.name.clone()
+                        crate::ui::markdown_preview::theme_label(entry)
                     };
                     let app = app.clone();
                     menu = menu.item(

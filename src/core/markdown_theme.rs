@@ -1,6 +1,10 @@
 //! Local reading-theme packages. Document hosts never participate in loading
 //! application configuration, including when the document itself is remote.
 
+#[cfg(test)]
+#[path = "markdown_github_tests.rs"]
+mod github_tests;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -9,9 +13,10 @@ use std::sync::{Arc, OnceLock};
 use serde::{Deserialize, Deserializer};
 use serde_yaml::Value;
 
-pub const DEFAULT_ID: &str = "paperglow";
+pub const DEFAULT_ID: &str = "github";
 pub const DIRECTORY: &str = "markdown-themes";
 pub const PAPERGLOW: &str = include_str!("../../assets/markdown-themes/paperglow.yaml");
+pub const GITHUB: &str = include_str!("../../assets/markdown-themes/github.yaml");
 const MAX_THEME_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -62,6 +67,13 @@ fn parse_color(value: &str) -> Result<Color, String> {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Typography {
+    pub bold_weight: f32,
+    pub heading_bottom_gap: Option<f32>,
+    pub heading_padding: Option<[f32; 6]>,
+    pub heading_borders: [bool; 6],
+    pub code_line_height: Option<f32>,
+    pub inline_code_size: Option<f32>,
+    pub kbd_size: Option<f32>,
     pub fonts: Vec<String>,
     #[serde(default)]
     pub heading_fonts: Vec<String>,
@@ -79,6 +91,29 @@ pub struct Typography {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Layout {
+    pub paper_border_width: f32,
+    pub code_border_width: f32,
+    pub inline_code_radius: Option<f32>,
+    pub inline_code_padding_x: f32,
+    pub inline_code_padding_y: f32,
+    pub kbd_padding: f32,
+    pub kbd_radius: f32,
+    pub kbd_line_height: f32,
+    pub table_radius: Option<f32>,
+    pub table_gap: Option<f32>,
+    pub table_fill: bool,
+    pub table_padding_x: Option<f32>,
+    pub table_padding_y: Option<f32>,
+    pub rule_height: f32,
+    pub rule_gap: Option<f32>,
+    pub link_underline: LinkUnderline,
+    pub roman_ordered_lists: bool,
+    pub list_indent: Option<f32>,
+    pub list_paragraph_gap: Option<f32>,
+    pub alert_padding_y: Option<f32>,
+    pub alert_padding_x: Option<f32>,
+    pub alert_title_weight: f32,
+    pub alert_title_line_height: Option<f32>,
     pub max_width: f32,
     pub compact_below: f32,
     pub outer_padding: f32,
@@ -90,15 +125,50 @@ pub struct Layout {
     pub code_padding: f32,
     pub code_radius: f32,
     pub quote_padding: f32,
+    pub quote_padding_y: Option<f32>,
     pub quote_border: f32,
     pub quote_radius: f32,
     pub table_padding: f32,
     pub list_gap: f32,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkUnderline {
+    Always,
+    Hover,
+    Never,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DiffStyle {
+    pub foreground: Color,
+    pub background: Option<Color>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AlertPalette {
+    pub border: Color,
+    pub title: Color,
+    pub icon: String,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Syntax {
+    pub constant: Option<Color>,
+    pub entity: Option<Color>,
+    pub tag_name: Option<Color>,
+    pub escape: Option<Color>,
+    pub markup_heading: Option<Color>,
+    pub markup_list: Option<Color>,
+    pub link_uri: Option<Color>,
+    pub diff_added: Option<DiffStyle>,
+    pub diff_deleted: Option<DiffStyle>,
+    pub diff_changed: Option<DiffStyle>,
+    pub diff_hunk: Option<Color>,
     pub keyword: Color,
     pub number: Color,
     pub function: Color,
@@ -113,6 +183,16 @@ pub struct Syntax {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Palette {
+    pub heading_colors: Option<[Color; 6]>,
+    pub heading_border: Option<Color>,
+    pub rule: Option<Color>,
+    pub inline_code_border: Option<Color>,
+    pub kbd_background: Option<Color>,
+    pub kbd_border: Option<Color>,
+    pub kbd_shadow: Option<Color>,
+    pub table_stripe: Option<Color>,
+    pub table_row_border: Option<Color>,
+    pub alerts: Option<[AlertPalette; 5]>,
     pub background: Color,
     pub paper: Color,
     pub paper_border: Color,
@@ -139,10 +219,10 @@ pub struct Palette {
     pub nested_quote_background: Color,
     pub nested_quote_border: Color,
     pub alert_background: Color,
-    pub alert_foreground: Color,
+    pub alert_foreground: Option<Color>,
     pub alert_border: Color,
     pub table_code_background: Color,
-    pub table_hover: Color,
+    pub table_hover: Option<Color>,
     pub syntax: Syntax,
 }
 
@@ -213,6 +293,47 @@ impl Theme {
                 return Err("typography.heading_sizes must contain six positive numbers".into());
             }
         }
+        for (key, value) in [
+            ("typography.bold_weight", t.bold_weight),
+            ("layout.alert_title_weight", l.alert_title_weight),
+        ] {
+            if !value.is_finite() || !(100. ..=900.).contains(&value) {
+                return Err(format!("{key} must be in 100..900"));
+            }
+        }
+        for (key, value) in [
+            ("typography.code_line_height", t.code_line_height),
+            ("typography.inline_code_size", t.inline_code_size),
+            ("typography.kbd_size", t.kbd_size),
+            ("layout.alert_title_line_height", l.alert_title_line_height),
+        ] {
+            if value.is_some_and(|v| !v.is_finite() || v <= 0.) {
+                return Err(format!("{key} must be a finite positive number"));
+            }
+        }
+        for (key, value) in [
+            ("typography.heading_bottom_gap", t.heading_bottom_gap),
+            ("layout.inline_code_radius", l.inline_code_radius),
+            ("layout.table_radius", l.table_radius),
+            ("layout.table_gap", l.table_gap),
+            ("layout.quote_padding_y", l.quote_padding_y),
+            ("layout.table_padding_x", l.table_padding_x),
+            ("layout.table_padding_y", l.table_padding_y),
+            ("layout.rule_gap", l.rule_gap),
+            ("layout.list_indent", l.list_indent),
+            ("layout.list_paragraph_gap", l.list_paragraph_gap),
+            ("layout.alert_padding_x", l.alert_padding_x),
+            ("layout.alert_padding_y", l.alert_padding_y),
+        ] {
+            if value.is_some_and(|v| !v.is_finite() || v < 0.) {
+                return Err(format!("{key} must be a finite nonnegative number"));
+            }
+        }
+        if t.heading_padding
+            .is_some_and(|values| values.into_iter().any(|v| !v.is_finite() || v < 0.))
+        {
+            return Err("typography.heading_padding must contain six nonnegative numbers".into());
+        }
         for value in t.heading_weights {
             if !value.is_finite() || !(100. ..=900.).contains(&value) {
                 return Err("typography.heading_weights must be in 100..900".into());
@@ -234,6 +355,14 @@ impl Theme {
             ("layout.quote_radius", l.quote_radius),
             ("layout.table_padding", l.table_padding),
             ("layout.list_gap", l.list_gap),
+            ("layout.paper_border_width", l.paper_border_width),
+            ("layout.code_border_width", l.code_border_width),
+            ("layout.inline_code_padding_x", l.inline_code_padding_x),
+            ("layout.inline_code_padding_y", l.inline_code_padding_y),
+            ("layout.kbd_padding", l.kbd_padding),
+            ("layout.kbd_radius", l.kbd_radius),
+            ("layout.kbd_line_height", l.kbd_line_height),
+            ("layout.rule_height", l.rule_height),
         ] {
             if !value.is_finite() || value < 0. {
                 return Err(format!("{key} must be a finite nonnegative number"));
@@ -285,10 +414,17 @@ pub fn parse(text: &str) -> Result<Theme, String> {
     Ok(theme)
 }
 
-pub fn builtin() -> Arc<Theme> {
+pub fn paperglow() -> Arc<Theme> {
     static THEME: OnceLock<Arc<Theme>> = OnceLock::new();
     THEME
         .get_or_init(|| Arc::new(parse(PAPERGLOW).expect("valid bundled Paperglow theme")))
+        .clone()
+}
+
+pub fn builtin() -> Arc<Theme> {
+    static THEME: OnceLock<Arc<Theme>> = OnceLock::new();
+    THEME
+        .get_or_init(|| Arc::new(parse(GITHUB).expect("valid bundled GitHub theme")))
         .clone()
 }
 
@@ -354,8 +490,11 @@ pub fn scan(directory: Option<&Path>) -> Snapshot {
                 return Err("theme exceeds 256 KiB".into());
             }
             let theme = parse(&text)?;
-            if theme.id == DEFAULT_ID {
-                return Err("id 'paperglow' is reserved for the built-in theme".into());
+            if theme.id == DEFAULT_ID || theme.id == "paperglow" {
+                return Err(format!(
+                    "id {:?} is reserved for a built-in theme",
+                    theme.id
+                ));
             }
             Ok(theme)
         })();
@@ -406,14 +545,24 @@ pub struct Registry {
 impl Default for Registry {
     fn default() -> Self {
         Self {
-            entries: BTreeMap::from([(
-                DEFAULT_ID.into(),
-                Entry {
-                    theme: builtin(),
-                    source: None,
-                    revision: 0,
-                },
-            )]),
+            entries: BTreeMap::from([
+                (
+                    "paperglow".into(),
+                    Entry {
+                        theme: paperglow(),
+                        source: None,
+                        revision: 0,
+                    },
+                ),
+                (
+                    DEFAULT_ID.into(),
+                    Entry {
+                        theme: builtin(),
+                        source: None,
+                        revision: 0,
+                    },
+                ),
+            ]),
             errors: Vec::new(),
             retained: None,
             revision: 0,
@@ -424,7 +573,10 @@ impl Default for Registry {
 impl Registry {
     pub fn replace(&mut self, snapshot: Snapshot, selected: &str) {
         let previous = self.resolve(selected).clone();
-        let mut entries = BTreeMap::from([(DEFAULT_ID.into(), self.entries[DEFAULT_ID].clone())]);
+        let mut entries = BTreeMap::from([
+            (DEFAULT_ID.into(), self.entries[DEFAULT_ID].clone()),
+            ("paperglow".into(), self.entries["paperglow"].clone()),
+        ]);
         for (id, (path, theme)) in snapshot.themes {
             let old = self
                 .entries
@@ -479,14 +631,37 @@ mod tests {
         "schema_version: 1\nid: study\nname: Study\nlight:\n  link: '#123456'\ndark: {}\n";
 
     #[test]
+    fn github_is_default_while_saved_paperglow_and_empty_user_variants_are_preserved() {
+        let config: tty7_core::core::config::Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.markdown_theme, "github");
+        let saved: tty7_core::core::config::Config =
+            serde_json::from_str(r#"{"markdown_theme":"paperglow"}"#).unwrap();
+        assert_eq!(saved.markdown_theme, "paperglow");
+        let mut registry = Registry::default();
+        registry.replace(Snapshot::default(), "missing-theme");
+        assert_eq!(registry.resolve("missing-theme").theme.id, "github");
+        assert_eq!(registry.resolve("paperglow").theme.id, "paperglow");
+        assert!(registry.errors.iter().any(|(id, _)| id == "missing-theme"));
+        let custom =
+            parse("schema_version: 1\nid: empty\nname: Empty\nlight: {}\ndark: {}\n").unwrap();
+        let paperglow = parse(PAPERGLOW).unwrap();
+        assert_eq!(custom.light, paperglow.light);
+        assert_eq!(custom.dark, paperglow.dark);
+        assert_eq!(custom.typography, paperglow.typography);
+    }
+
+    #[test]
     fn markdown_package_fills_both_variants_without_inheriting_authorship() {
         let theme = parse(CUSTOM).unwrap();
         assert_eq!(theme.light.link, parse_color("#123456").unwrap());
-        assert_eq!(theme.dark, builtin().dark);
-        assert_eq!(theme.typography, builtin().typography);
+        assert_eq!(theme.dark, paperglow().dark);
+        assert_eq!(theme.typography, paperglow().typography);
         assert!(theme.author.is_empty());
-        assert_eq!(builtin().light.background, parse_color("#f7f2eb").unwrap());
-        assert_eq!(builtin().dark.background, parse_color("#222120").unwrap());
+        assert_eq!(
+            paperglow().light.background,
+            parse_color("#f7f2eb").unwrap()
+        );
+        assert_eq!(paperglow().dark.background, parse_color("#222120").unwrap());
     }
 
     #[test]
@@ -579,7 +754,7 @@ mod tests {
             registry.resolve("study").theme.light.link,
             parse_color("#654321").unwrap()
         );
-        assert_eq!(registry.resolve("paperglow").theme.id, DEFAULT_ID);
+        assert_eq!(registry.resolve("paperglow").theme.id, "paperglow");
     }
 
     #[test]

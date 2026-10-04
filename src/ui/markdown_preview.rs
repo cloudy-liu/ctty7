@@ -13,9 +13,14 @@ use gpui::{
 use gpui_component::{
     ActiveTheme as _, ElementExt as _, IconName, Sizable as _, ThemeMode,
     button::{Button, ButtonVariants as _},
-    highlighter::{HighlightTheme, HighlightThemeStyle, SyntaxColors, ThemeStyle},
+    highlighter::{
+        FontWeightContent, HighlightTheme, HighlightThemeStyle, SyntaxColors, ThemeStyle,
+    },
     input::InputState,
-    text::{TextView, TextViewState, TextViewStyle},
+    text::{
+        AlertStyle, InlineCodeStyle, KeyboardStyle, LinkUnderline, TextView, TextViewState,
+        TextViewStyle,
+    },
 };
 
 use crate::core::markdown_document::{self, Target};
@@ -87,6 +92,22 @@ pub(crate) fn color(color: Color) -> Hsla {
     gpui::Rgba { r, g, b, a }.into()
 }
 
+pub(crate) fn theme_label(entry: &Entry) -> String {
+    match (entry.source.is_none(), entry.theme.id.as_str()) {
+        (true, "github") => t(L10nKey::SettingsMarkdownGithub).to_owned(),
+        (true, "paperglow") => t(L10nKey::SettingsMarkdownPaperglow).to_owned(),
+        _ => entry.theme.name.clone(),
+    }
+}
+
+pub(crate) fn theme_description(entry: &Entry) -> String {
+    match (entry.source.is_none(), entry.theme.id.as_str()) {
+        (true, "github") => t(L10nKey::SettingsMarkdownGithubDesc).to_owned(),
+        (true, "paperglow") => t(L10nKey::SettingsMarkdownPaperglowDesc).to_owned(),
+        _ => entry.theme.description.clone(),
+    }
+}
+
 fn refinement(mut element: gpui::Div) -> StyleRefinement {
     element.style().clone()
 }
@@ -106,29 +127,53 @@ fn highlight(theme: &Theme, dark: bool, revision: u64) -> Arc<HighlightTheme> {
             editor_background: Some(color(palette.code_background)),
             editor_foreground: Some(color(palette.code_foreground)),
             syntax: SyntaxColors {
+                title: s
+                    .markup_heading
+                    .map(|c| ThemeStyle::from(color(c)).weight(FontWeightContent::Bold)),
+                punctuation_list_marker: s.markup_list.and_then(token),
+                link_uri: s.link_uri.map(|c| ThemeStyle::from(color(c)).underline()),
+                diff_added: s.diff_added.as_ref().map(|d| {
+                    ThemeStyle::from(color(d.foreground)).background(d.background.map(color))
+                }),
+                diff_deleted: s.diff_deleted.as_ref().map(|d| {
+                    ThemeStyle::from(color(d.foreground)).background(d.background.map(color))
+                }),
+                diff_changed: s.diff_changed.as_ref().map(|d| {
+                    ThemeStyle::from(color(d.foreground)).background(d.background.map(color))
+                }),
+                diff_hunk: s
+                    .diff_hunk
+                    .map(|c| ThemeStyle::from(color(c)).weight(FontWeightContent::Bold)),
+                diff_header: s
+                    .markup_heading
+                    .map(|c| ThemeStyle::from(color(c)).weight(FontWeightContent::Bold)),
+                variable_builtin: s.constant.and_then(token),
                 keyword: token(s.keyword),
-                boolean: token(s.keyword),
+                boolean: token(s.constant.unwrap_or(s.keyword)),
                 preproc: token(s.keyword),
                 number: token(s.number),
-                constant: token(s.number),
-                function: token(s.function),
-                constructor: token(s.function),
+                constant: token(s.constant.unwrap_or(s.number)),
+                function: token(s.entity.unwrap_or(s.function)),
+                constructor: token(s.entity.unwrap_or(s.function)),
                 variable: token(s.variable),
                 variable_special: token(s.variable_special),
-                property: token(s.variable_special),
-                type_: token(s.r#type),
-                enum_: token(s.r#type),
-                variant: token(s.r#type),
+                property: token(s.constant.unwrap_or(s.variable_special)),
+                type_: token(s.entity.unwrap_or(s.r#type)),
+                enum_: token(s.entity.unwrap_or(s.r#type)),
+                variant: token(s.entity.unwrap_or(s.r#type)),
                 comment: token(s.comment),
                 comment_doc: token(s.comment),
                 string: token(s.string),
-                string_escape: token(s.string),
+                string_escape: s
+                    .escape
+                    .map(|c| ThemeStyle::from(color(c)).weight(FontWeightContent::Bold))
+                    .or(token(s.string)),
                 string_regex: token(s.string),
                 string_special: token(s.string),
                 string_special_symbol: token(s.string),
-                tag: token(s.tag),
-                tag_doctype: token(s.tag),
-                attribute: token(s.variable_special),
+                tag: token(s.tag_name.unwrap_or(s.tag)),
+                tag_doctype: token(s.tag_name.unwrap_or(s.tag)),
+                attribute: token(s.entity.unwrap_or(s.variable_special)),
                 operator: token(palette.code_foreground),
                 punctuation: token(palette.code_foreground),
                 punctuation_bracket: token(palette.code_foreground),
@@ -139,6 +184,10 @@ fn highlight(theme: &Theme, dark: bool, revision: u64) -> Arc<HighlightTheme> {
         },
     })
 }
+
+#[cfg(test)]
+#[path = "../../tests/fixtures/markdown_preview_before_github.rs"]
+mod before_github;
 
 pub(crate) fn reading_style(
     entry: &Entry,
@@ -158,6 +207,71 @@ pub(crate) fn reading_style(
         .unwrap_or(mono);
     let mut style = TextViewStyle {
         is_dark: dark,
+        bold_weight: FontWeight(t.bold_weight),
+        link_underline: match l.link_underline {
+            markdown_theme::LinkUnderline::Always => LinkUnderline::Always,
+            markdown_theme::LinkUnderline::Hover => LinkUnderline::Hover,
+            markdown_theme::LinkUnderline::Never => LinkUnderline::Never,
+        },
+        roman_ordered_lists: l.roman_ordered_lists,
+        list_indent: l.list_indent.map(|v| px(v * scale)),
+        list_paragraph_gap: l.list_paragraph_gap.map(|v| px(v * scale)),
+        table_fill: l.table_fill,
+        table_radius: l.table_radius.map(|v| px(v * scale)),
+        table_gap: l.table_gap.map(|v| px(v * scale)),
+        table_stripe: p.table_stripe.map(color),
+        table_row_border: p.table_row_border.map(color),
+        inline_code_border: p.inline_code_border.map(color),
+        inline_code: l.inline_code_radius.map(|radius| InlineCodeStyle {
+            radius: px(radius * scale),
+            padding_x: px(l.inline_code_padding_x * scale),
+            padding_y: px(l.inline_code_padding_y * scale),
+            font_size: px(t.inline_code_size.unwrap_or(t.code_size) * scale),
+        }),
+        keyboard: t.kbd_size.map(|size| KeyboardStyle {
+            background: color(p.kbd_background.unwrap_or(p.inline_code_background)),
+            border: color(p.kbd_border.unwrap_or(p.border)),
+            shadow: color(p.kbd_shadow.unwrap_or(p.border)),
+            radius: px(l.kbd_radius * scale),
+            padding: px(l.kbd_padding * scale),
+            font_size: px(size * scale),
+            line_height: px(l.kbd_line_height * scale),
+        }),
+        alerts: std::array::from_fn(|ix| {
+            p.alerts.as_ref().map(|alerts| AlertStyle {
+                container: refinement(
+                    div()
+                        .bg(color(p.alert_background))
+                        .text_color(color(p.alert_foreground.unwrap_or(p.foreground)))
+                        .border_color(color(alerts[ix].border))
+                        .px(px(l.alert_padding_x.unwrap_or(l.quote_padding) * scale))
+                        .py(px(l.alert_padding_y.unwrap_or(l.quote_padding) * scale)),
+                ),
+                title: refinement(
+                    div()
+                        .text_color(color(alerts[ix].title))
+                        .font_weight(FontWeight(l.alert_title_weight))
+                        .gap(px(8. * scale))
+                        .pb(px(8. * scale))
+                        .line_height(relative(l.alert_title_line_height.unwrap_or(t.line_height))),
+                ),
+                icon: alerts[ix].icon.clone().into(),
+                icon_size: px(16. * scale),
+            })
+        }),
+        horizontal_rule: if l.rule_gap.is_none() && l.rule_height == 2. {
+            StyleRefinement::default()
+        } else {
+            refinement(
+                div()
+                    .h(px(l.rule_height * scale))
+                    .bg(color(p.rule.unwrap_or(p.border))),
+            )
+        },
+        horizontal_rule_container: l
+            .rule_gap
+            .map(|gap| refinement(div().pt(px(gap * scale)).pb(px(gap * scale))))
+            .unwrap_or_default(),
         paragraph_gap: rems(t.paragraph_gap / crate::core::config::UI_FONT_SIZE_DEFAULT),
         highlight_theme: highlight(theme, dark, entry.revision),
         link_color: Some(color(p.link)),
@@ -174,14 +288,14 @@ pub(crate) fn reading_style(
         quote_code_color: Some(color(p.quote_code_foreground)),
         quote_code_background: Some(color(p.quote_code_background)),
         table_code_background: Some(color(p.table_code_background)),
-        table_hover_background: Some(color(p.table_hover)),
+        table_hover_background: p.table_hover.map(color),
         code_block: refinement(
             div()
                 .p(px(l.code_padding * scale))
                 .rounded(px(l.code_radius * scale))
                 .bg(color(p.code_background))
                 .text_color(color(p.code_foreground))
-                .border_1()
+                .border(px(l.code_border_width))
                 .border_color(color(p.code_border))
                 .font_family(code_font)
                 .text_size(px(t.code_size * scale)),
@@ -193,12 +307,13 @@ pub(crate) fn reading_style(
                 .border_l(px(l.quote_border * scale))
                 .border_color(color(p.quote_border))
                 .rounded_r(px(l.quote_radius * scale))
-                .p(px(l.quote_padding * scale)),
+                .p(px(l.quote_padding * scale))
+                .when_some(l.quote_padding_y, |el, padding| el.py(px(padding * scale))),
         ),
         alert: refinement(
             div()
                 .bg(color(p.alert_background))
-                .text_color(color(p.alert_foreground))
+                .text_color(color(p.alert_foreground.unwrap_or(p.foreground)))
                 .border_color(color(p.alert_border)),
         ),
         nested_blockquote: refinement(
@@ -206,7 +321,12 @@ pub(crate) fn reading_style(
                 .bg(color(p.nested_quote_background))
                 .border_color(color(p.nested_quote_border)),
         ),
-        table_cell: refinement(div().p(px(l.table_padding * scale)).border_r_0()),
+        table_cell: refinement(
+            div()
+                .px(px(l.table_padding_x.unwrap_or(l.table_padding) * scale))
+                .py(px(l.table_padding_y.unwrap_or(l.table_padding) * scale))
+                .when(l.table_fill, |el| el.border_r_0()),
+        ),
         table_header: refinement(
             div()
                 .font_weight(FontWeight::SEMIBOLD)
@@ -215,6 +335,9 @@ pub(crate) fn reading_style(
         list_item: refinement(div().pb(px(l.list_gap * scale))),
         ..Default::default()
     };
+    if let Some(line_height) = t.code_line_height {
+        style.code_block.text.line_height = Some(relative(line_height));
+    }
     style.table.overflow.x = Some(gpui::Overflow::Scroll);
     style.code_block.overflow.x = Some(gpui::Overflow::Scroll);
     style.code_block.text.font_fallbacks =
@@ -225,11 +348,21 @@ pub(crate) fn reading_style(
                 .text_size(px(t.heading_sizes[level] * scale))
                 .font_weight(FontWeight(t.heading_weights[level]))
                 .line_height(relative(t.heading_line_height))
-                .text_color(color(p.heading))
+                .text_color(color(
+                    p.heading_colors
+                        .map(|colors| colors[level])
+                        .unwrap_or(p.heading),
+                ))
                 .mt(px(t.heading_gap * scale))
-                .pb(px(t.paragraph_gap * scale * 0.5))
-                .when(level == 1, |el| {
-                    el.border_b_1().border_color(color(p.border))
+                .when_some(t.heading_bottom_gap, |el, gap| el.mb(px(gap * scale)))
+                .pb(px(t
+                    .heading_padding
+                    .map(|values| values[level])
+                    .unwrap_or(t.paragraph_gap * 0.5)
+                    * scale))
+                .when(t.heading_borders[level], |el| {
+                    el.border_b_1()
+                        .border_color(color(p.heading_border.unwrap_or(p.border)))
                 }),
         );
         if let Some(font) = t.heading_fonts.first() {
@@ -249,6 +382,7 @@ pub(crate) struct MarkdownPreview {
     path: PathBuf,
     app: gpui::WeakEntity<Tty7App>,
     images: HashMap<PathBuf, TextViewImageSource>,
+    diagrams: HashMap<String, TextViewImageSource>,
     image_bytes: usize,
     pending_anchor: Option<String>,
     last_position: Option<(usize, Pixels)>,
@@ -274,10 +408,10 @@ impl MarkdownPreview {
         cx: &mut Context<Self>,
     ) -> Self {
         let content = source.read(cx).text().to_string();
-        let processed_content = if mermaid_enabled {
+        let (processed_content, diagrams) = if mermaid_enabled {
             Self::preprocess_mermaid(&content, cx)
         } else {
-            content
+            (content, HashMap::new())
         };
         let text = cx.new(|cx| {
             TextViewState::markdown_with_extensions(&processed_content, extensions(), cx)
@@ -287,7 +421,7 @@ impl MarkdownPreview {
             cx.observe_global::<gpui_component::Theme>(|_, cx| cx.notify()),
         ];
         cx.on_release(|this, cx| {
-            for image in this.images.values() {
+            for image in this.images.values().chain(this.diagrams.values()) {
                 if let TextViewImageSource::Ready(source) = image {
                     source.remove_asset(cx);
                 }
@@ -300,6 +434,7 @@ impl MarkdownPreview {
             path,
             app,
             images: HashMap::new(),
+            diagrams,
             image_bytes: 0,
             pending_anchor: None,
             last_position: None,
@@ -332,11 +467,17 @@ impl MarkdownPreview {
         self.last_position = None;
         self.restore_position = None;
         let content = self.source.read(cx).text().to_string();
-        let processed_content = if self.mermaid_enabled {
+        for diagram in self.diagrams.values() {
+            if let TextViewImageSource::Ready(source) = diagram {
+                source.remove_asset(cx);
+            }
+        }
+        let (processed_content, diagrams) = if self.mermaid_enabled {
             Self::preprocess_mermaid(&content, cx)
         } else {
-            content
+            (content, HashMap::new())
         };
+        self.diagrams = diagrams;
         self.text
             .update(cx, |state, cx| state.set_text(&processed_content, cx));
         cx.notify();
@@ -381,6 +522,9 @@ impl MarkdownPreview {
         url: &gpui::SharedUri,
         cx: &mut Context<Self>,
     ) -> TextViewImageSource {
+        if let Some(diagram) = self.diagrams.get(url.as_ref()) {
+            return diagram.clone();
+        }
         let path =
             match markdown_document::resolve(&self.path, url.as_ref(), self.host.id().is_local()) {
                 Ok(Target::Web(url)) => {
@@ -482,29 +626,43 @@ impl MarkdownPreview {
     /// Replace ```` ```mermaid ```` fences with inline SVG rendered in the
     /// active Markdown theme. A diagram that fails to render stays a plain
     /// code block, followed by an HTML comment carrying the error.
-    fn preprocess_mermaid(content: &str, cx: &mut Context<Self>) -> String {
+    fn preprocess_mermaid(
+        content: &str,
+        cx: &mut Context<Self>,
+    ) -> (String, HashMap<String, TextViewImageSource>) {
         static MERMAID_FENCE: LazyLock<regex::Regex> = LazyLock::new(|| {
             regex::Regex::new(r"(?m)^```mermaid[ \t]*\n([\s\S]*?)^```")
                 .expect("mermaid fence regex is valid")
         });
 
         if !MERMAID_FENCE.is_match(content) {
-            return content.to_string();
+            return (content.to_string(), HashMap::new());
         }
         let theme = current(cx).theme;
         let dark = cx.theme().mode.is_dark();
 
-        MERMAID_FENCE
+        let mut diagrams = HashMap::new();
+        let processed = MERMAID_FENCE
             .replace_all(content, |caps: &regex::Captures| {
                 let source = &caps[1];
                 match crate::ui::markdown_mermaid::render_mermaid(source, &theme, dark) {
-                    Ok(svg) => format!("\n{svg}\n"),
+                    Ok(svg) => {
+                        let url = format!("ctty7-mermaid://{}", diagrams.len());
+                        diagrams.insert(
+                            url.clone(),
+                            TextViewImageSource::Ready(gpui::ImageSource::Image(Arc::new(
+                                gpui::Image::from_bytes(gpui::ImageFormat::Svg, svg.into_bytes()),
+                            ))),
+                        );
+                        format!("\n![Mermaid diagram]({url})\n")
+                    }
                     Err(err) => {
                         format!("```mermaid\n{source}```\n<!-- Mermaid render error: {err} -->")
                     }
                 }
             })
-            .into_owned()
+            .into_owned();
+        (processed, diagrams)
     }
 }
 
@@ -528,8 +686,29 @@ impl Render for MarkdownPreview {
             mono.clone(),
         );
         if self.style_key.as_ref() != Some(&key) {
-            self.restore_position = self.last_position;
+            self.restore_position = self
+                .text
+                .read(cx)
+                .reading_position(self.scroll.bounds().top())
+                .or(self.last_position);
             self.style = reading_style(&entry, dark, scale, mono);
+            if self.style_key.is_some() && self.mermaid_enabled {
+                let content = self.source.read(cx).text().to_string();
+                let (processed, diagrams) = Self::preprocess_mermaid(&content, cx);
+                for diagram in self.diagrams.values() {
+                    if let TextViewImageSource::Ready(source) = diagram {
+                        source.remove_asset(cx);
+                    }
+                }
+                self.diagrams = diagrams;
+                // Stable diagram URLs retain parsed text, byte selections and
+                // source revision while the underlying SVG changes palette.
+                self.text.update(cx, |text, cx| {
+                    if text.source().as_ref() != processed.as_str() {
+                        text.set_text(&processed, cx);
+                    }
+                });
+            }
             self.style_key = Some(key);
         }
         let palette = entry.theme.palette(dark);
@@ -594,7 +773,7 @@ impl Render for MarkdownPreview {
         let card = card
             .when(!compact, |el| {
                 el.rounded(px(layout.radius * scale))
-                    .border_1()
+                    .border(px(layout.paper_border_width))
                     .border_color(color(palette.paper_border))
                     .shadow(vec![BoxShadow {
                         color: color(palette.shadow),
@@ -685,6 +864,31 @@ mod tests {
         time::{Duration, Instant},
     };
     use tty7_core::host::{self, Host, HostId, Meta};
+
+    #[test]
+    fn paperglow_and_existing_blue_paper_keep_the_pre_github_reading_style() {
+        for source in [
+            markdown_theme::PAPERGLOW,
+            include_str!("../../tests/fixtures/paperglow-before-github.yaml"),
+            include_str!("../../docs/examples/markdown-themes/blue-paper.yaml"),
+        ] {
+            let entry = Entry {
+                theme: Arc::new(markdown_theme::parse(source).unwrap()),
+                source: None,
+                revision: 0,
+            };
+            for dark in [false, true] {
+                for scale in [1., 1.5, 2.] {
+                    assert!(
+                        reading_style(&entry, dark, scale, "Mono".into())
+                            == before_github::reading_style(&entry, dark, scale, "Mono".into()),
+                        "{} dark={dark} scale={scale}",
+                        entry.theme.id
+                    );
+                }
+            }
+        }
+    }
 
     #[test]
     fn markdown_heading_fonts_are_optional_and_independent_of_body_and_code() {

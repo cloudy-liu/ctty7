@@ -167,6 +167,12 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsMarkdownThemeBuiltin => "内置",
         L10nKey::SettingsMarkdownThemeUser => "自定义",
+        L10nKey::SettingsMarkdownGithub => "GitHub",
+        L10nKey::SettingsMarkdownGithubDesc => {
+            "GitHub 的浅色、深色 Markdown 配色与排版。新配置的默认主题。"
+        }
+        L10nKey::SettingsMarkdownPaperglow => "Paperglow",
+        L10nKey::SettingsMarkdownPaperglowDesc => "暖色纸张与陶土色阅读主题，包含浅色和深色配色。",
         L10nKey::EditorCopyCode => "复制代码",
         L10nKey::MarkdownAnchorMissing => "未找到该标题",
         L10nKey::ThemeDuplicateFailed => "无法复制主题",

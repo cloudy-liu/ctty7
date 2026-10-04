@@ -1851,6 +1851,7 @@ mod tests {
         app.update_in(&mut vcx, |app, window, cx| {
             app.set_theme_follow_system(false, window, cx);
             app.set_preset("light", window, cx);
+            app.set_markdown_theme("paperglow", cx);
             crate::ui::markdown_preview::apply_snapshot(markdown_theme::scan(Some(dir.path())), cx);
             app.editor_install_file(
                 host,
@@ -2056,14 +2057,13 @@ mod tests {
             vcx.run_until_parked();
         }
         let updated = reading.read_with(&vcx, |reading, cx| {
-            reading
-                .text
-                .read(cx)
-                .reading_position(reading.scroll.bounds().top())
-                .unwrap()
+            let target = reading.text.read(cx).block_bounds(position.0).unwrap();
+            reading.scroll.bounds().top() - target.top()
         });
-        assert_eq!(updated.0, position.0);
-        assert!((updated.1 - position.1).abs() < px(1.));
+        // The previous block can grow into the gap above this anchor after
+        // reflow. Verify the saved content anchor rather than reclassifying
+        // whichever block now touches the viewport's first pixel.
+        assert!((updated - position.1).abs() < px(1.));
 
         // A fragment can also bring an already-open source editor back to its
         // existing preview, without creating a second source buffer.

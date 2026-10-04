@@ -574,7 +574,7 @@ impl Default for Config {
             ui_font_size: default_ui_font_size(),
             theme: "light".to_string(),
             theme_preset: "light".to_string(),
-            markdown_theme: "paperglow".to_string(),
+            markdown_theme: "github".to_string(),
             theme_follow_system: false,
             theme_preset_light: "light".to_string(),
             theme_preset_dark: "dark".to_string(),

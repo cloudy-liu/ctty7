@@ -187,6 +187,14 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsMarkdownThemeBuiltin => "組み込み",
         L10nKey::SettingsMarkdownThemeUser => "カスタム",
+        L10nKey::SettingsMarkdownGithub => "GitHub",
+        L10nKey::SettingsMarkdownGithubDesc => {
+            "GitHub のライト・ダーク Markdown 配色と組版。新しい設定の既定テーマです。"
+        }
+        L10nKey::SettingsMarkdownPaperglow => "Paperglow",
+        L10nKey::SettingsMarkdownPaperglowDesc => {
+            "暖かな紙とテラコッタの閲覧テーマ。ライト・ダーク配色を備えています。"
+        }
         L10nKey::EditorCopyCode => "コードをコピー",
         L10nKey::MarkdownAnchorMissing => "見出しが見つかりません",
         L10nKey::ThemeDuplicateFailed => "テーマを複製できませんでした",
