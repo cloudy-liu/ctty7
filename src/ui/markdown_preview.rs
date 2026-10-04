@@ -112,6 +112,25 @@ fn refinement(mut element: gpui::Div) -> StyleRefinement {
     element.style().clone()
 }
 
+fn available_reading_font(
+    fonts: &[String],
+    available: &[String],
+    fallback: SharedString,
+) -> SharedString {
+    for family in fonts {
+        if cfg!(target_os = "macos") && family == ".AppleSystemUIFont" {
+            return ".SystemUIFont".into();
+        }
+        if available
+            .iter()
+            .any(|name| name.eq_ignore_ascii_case(family))
+        {
+            return family.clone().into();
+        }
+    }
+    fallback
+}
+
 fn highlight(theme: &Theme, dark: bool, revision: u64) -> Arc<HighlightTheme> {
     let palette = theme.palette(dark);
     let s = &palette.syntax;
@@ -394,6 +413,7 @@ pub(crate) struct MarkdownPreview {
     width: Pixels,
     style_key: Option<(String, u64, bool, u32, SharedString)>,
     style: TextViewStyle,
+    available_fonts: Option<Vec<String>>,
     mermaid_enabled: bool,
     _subscriptions: Vec<Subscription>,
 }
@@ -446,6 +466,7 @@ impl MarkdownPreview {
             width: px(0.),
             style_key: None,
             style: TextViewStyle::default(),
+            available_fonts: None,
             mermaid_enabled,
             _subscriptions: subscriptions,
         }
@@ -685,6 +706,32 @@ impl Render for MarkdownPreview {
             scale.to_bits(),
             mono.clone(),
         );
+        let available = self
+            .available_fonts
+            .get_or_insert_with(|| window.text_system().all_font_names());
+        let body_font = if entry.theme.typography.resolve_font_stack {
+            available_reading_font(
+                &entry.theme.typography.fonts,
+                available,
+                ".SystemUIFont".into(),
+            )
+        } else {
+            entry
+                .theme
+                .typography
+                .fonts
+                .first()
+                .cloned()
+                .map(SharedString::from)
+                .unwrap_or_else(|| cx.theme().font_family.clone())
+        };
+        let code_font =
+            available_reading_font(&entry.theme.typography.code_fonts, available, mono.clone());
+        let heading_font = available_reading_font(
+            &entry.theme.typography.heading_fonts,
+            available,
+            body_font.clone(),
+        );
         if self.style_key.as_ref() != Some(&key) {
             self.restore_position = self
                 .text
@@ -692,6 +739,13 @@ impl Render for MarkdownPreview {
                 .reading_position(self.scroll.bounds().top())
                 .or(self.last_position);
             self.style = reading_style(&entry, dark, scale, mono);
+            if entry.theme.typography.resolve_font_stack {
+                self.style.code_block.text.font_family = Some(code_font.clone());
+                self.style.inline_code_font = Some(code_font);
+                for heading in &mut self.style.headings {
+                    heading.text.font_family = Some(heading_font.clone());
+                }
+            }
             if self.style_key.is_some() && self.mermaid_enabled {
                 let content = self.source.read(cx).text().to_string();
                 let (processed, diagrams) = Self::preprocess_mermaid(&content, cx);
@@ -725,12 +779,6 @@ impl Render for MarkdownPreview {
         } else {
             layout.outer_padding * scale
         };
-        let body_font = typography
-            .fonts
-            .first()
-            .cloned()
-            .map(SharedString::from)
-            .unwrap_or_else(|| cx.theme().font_family.clone());
         let copy_color = color(palette.muted);
         let link_owner = cx.weak_entity();
         let image_owner = cx.weak_entity();

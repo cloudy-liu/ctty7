@@ -7,6 +7,7 @@ author: Paperglow
 description: Warm paper and terracotta reading colors, with light and dark variants.
 license: Apache-2.0
 typography:
+  resolve_font_stack: false
   bold_weight: 700
   heading_bottom_gap: null
   heading_padding: null

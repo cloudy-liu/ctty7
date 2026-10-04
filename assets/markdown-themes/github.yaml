@@ -8,6 +8,7 @@ author: GitHub, Sindre Sorhus
 description: GitHub's light and dark Markdown colors and typography.
 license: MIT
 typography:
+  resolve_font_stack: true
   # .AppleSystemUIFont is the native equivalent of -apple-system on macOS.
   # Chinese fallbacks at the end are non-GitHub values.
   fonts: [.AppleSystemUIFont, Segoe UI, Noto Sans, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji, Microsoft YaHei, PingFang SC, Noto Sans SC]

@@ -67,6 +67,7 @@ fn parse_color(value: &str) -> Result<Color, String> {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Typography {
+    pub resolve_font_stack: bool,
     pub bold_weight: f32,
     pub heading_bottom_gap: Option<f32>,
     pub heading_padding: Option<[f32; 6]>,
