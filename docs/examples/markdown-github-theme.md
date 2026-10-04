@@ -16,7 +16,7 @@ Body text includes **semibold**, *emphasis*, ~~deleted text~~, a
 
 A paragraph with `padded inline code`, adjacent `chips`, and
 <kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>P</kbd>. Select across these
-elements and copy the result, then switch between GitHub and Paperglow.
+elements and copy the result, then switch between GitHub and an installed v2 custom theme.
 
 > Ordinary quotation with **emphasis**, `code`, and a [link](https://github.com).
 >

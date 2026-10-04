@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- GitHub reading defaults now follow live website measurements for content width, 32px padding, persistent link underlines and heading code spacing. (cloudy-liu/ctty7#85)
+
 - Markdown previews now offer GitHub Light and Dark styles, including typed alerts, padded inline code, keyboard keys, striped tables and diff span backgrounds. GitHub is the only built-in reading theme; saved Paperglow selections migrate to it. Custom packages require v2 and inherit GitHub defaults; v1 files remain untouched and show upgrade instructions. (cloudy-liu/ctty7#85)
 
 - **Mermaid diagram support in Markdown preview**. Code blocks with `mermaid`

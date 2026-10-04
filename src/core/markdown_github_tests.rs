@@ -1,5 +1,67 @@
 use super::*;
 
+#[test]
+fn github_defaults_match_live_site_layout_and_link_behavior() {
+    let theme = builtin();
+    let live: serde_json::Value = serde_json::from_str(include_str!(
+        "../../tests/fixtures/github-live-2026-10-05/light.json"
+    ))
+    .unwrap();
+    let body = &live["styles"][0];
+    let content_width: f32 = body["maxWidth"]
+        .as_str()
+        .unwrap()
+        .trim_end_matches("px")
+        .parse()
+        .unwrap();
+    let padding: f32 = live["parents"][1]["padding"]
+        .as_str()
+        .unwrap()
+        .trim_end_matches("px")
+        .parse()
+        .unwrap();
+    // The native card includes padding; GitHub's article content cap excludes it.
+    assert_eq!(
+        theme.layout.max_width - 2. * theme.layout.padding,
+        content_width
+    );
+    assert_eq!(theme.layout.padding, padding);
+    assert_eq!(theme.layout.compact_padding, padding);
+    let link = live["styles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["selector"] == "article p a")
+        .unwrap();
+    assert_eq!(link["textDecorationLine"], "underline");
+    assert_eq!(theme.layout.link_underline, LinkUnderline::Always);
+    let heading_code = live["styles"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["selector"] == "article h2 code")
+        .unwrap();
+    let size = theme.typography.heading_sizes[1];
+    for (actual, property) in [
+        (
+            theme.layout.heading_code_padding_x_em.unwrap() * size,
+            "paddingLeft",
+        ),
+        (
+            theme.layout.heading_code_padding_y_em.unwrap() * size,
+            "paddingTop",
+        ),
+    ] {
+        let expected: f32 = heading_code[property]
+            .as_str()
+            .unwrap()
+            .trim_end_matches("px")
+            .parse()
+            .unwrap();
+        assert!((actual - expected).abs() < 0.001);
+    }
+}
+
 // Read the last applicable declaration, including comma-separated selectors.
 // This snapshot has no media-query-dependent values in the selectors below.
 fn css<'a>(source: &'a str, selector: &str, property: &str) -> &'a str {
@@ -301,6 +363,8 @@ fn new_theme_fields_reject_invalid_input_and_builtin_and_legacy_ids_are_reserved
         ("layout", "rule_height", "-1"),
         ("layout", "kbd_line_height", "0"),
         ("layout", "link_underline", "sometimes"),
+        ("layout", "heading_code_padding_x_em", "-1"),
+        ("layout", "heading_code_padding_y_em", ".inf"),
         ("layout", "table_fill", "42"),
         ("light", "kbd_border", "bad"),
     ] {

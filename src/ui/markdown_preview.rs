@@ -241,6 +241,20 @@ pub(crate) fn reading_style(
             padding_y: px(l.inline_code_padding_y * scale),
             font_size: px(t.inline_code_size.unwrap_or(t.code_size) * scale),
         }),
+        heading_inline_code: std::array::from_fn(|ix| {
+            let radius = l.inline_code_radius?;
+            let size = t.heading_sizes[ix] * scale;
+            Some(InlineCodeStyle {
+                radius: px(radius * scale),
+                padding_x: px(l
+                    .heading_code_padding_x_em
+                    .map_or(l.inline_code_padding_x * scale, |em| em * size)),
+                padding_y: px(l
+                    .heading_code_padding_y_em
+                    .map_or(l.inline_code_padding_y * scale, |em| em * size)),
+                font_size: px(size),
+            })
+        }),
         keyboard: t.kbd_size.map(|size| KeyboardStyle {
             background: color(p.kbd_background.unwrap_or(p.inline_code_background)),
             border: color(p.kbd_border.unwrap_or(p.border)),
@@ -1131,8 +1145,9 @@ mod tests {
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
-        let position = reading.read_with(&vcx, |reading, _| {
-            reading.scroll.bounds().origin + point(px(30.), px(28.))
+        // Hit the heading itself, independently of reading-card padding.
+        let position = text.read_with(&vcx, |text, _| {
+            text.anchor_bounds("selection-test").unwrap().origin + point(px(15.), px(12.))
         });
         vcx.simulate_mouse_move(position, None, gpui::Modifiers::default());
         vcx.simulate_event(gpui::MouseDownEvent {

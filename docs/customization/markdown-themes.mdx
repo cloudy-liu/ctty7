@@ -41,7 +41,9 @@ dark:
 
 可直接复制 [Blue Links 示例](https://github.com/cloudy-liu/ctty7/blob/main/docs/examples/markdown-themes/blue-links.yaml)，或参考 [GitHub 全量默认值](https://github.com/cloudy-liu/ctty7/blob/main/assets/markdown-themes/github.yaml)。复制内置文件时必须修改 `id`。只有 `light: {}` 和 `dark: {}` 的 v2 用户包显示完整 GitHub 样式。对象逐字段覆盖，数组整体替换；省略字段采用 GitHub 值，显式 `null` 仅用于可空字段，并不等同于省略。
 
-所有尺寸均为应用缩放 100% 时的逻辑像素；行高是倍数。系统 DPI 由 GPUI 处理，无需把配置值再乘以屏幕缩放比例。
+尺寸默认采用应用缩放 100% 时的逻辑像素；行高和 `_em` 字段是倍数。系统 DPI 由 GPUI 处理，无需把配置值再乘以屏幕缩放比例。
+
+GitHub 默认正文最大宽度为 1012px，左右留白各 32px；`max_width: 1076` 包含这些留白。宽窄窗口均保留 32px，正文链接默认始终带下划线。`heading_code_padding_x_em` 和 `heading_code_padding_y_em` 控制标题代码相对于标题字号的内边距，默认分别为 0.2 和 0；设为 `null` 时使用正文代码的固定内边距。
 
 | 分组 | 字段与作用 |
 |---|---|
@@ -68,7 +70,7 @@ dark:
 | `light.alerts` / `dark.alerts` | 按 NOTE、TIP、IMPORTANT、WARNING、CAUTION 顺序的五项数组；每项包含 `border`、`title`、`icon`（应用已有的图标资源路径）；`alert_foreground: null` 沿用正文颜色 |
 | `syntax` | `constant`、`entity`、`tag_name`、`escape`、`markup_heading`、`markup_list`、`link_uri`、`diff_hunk`；`diff_added/deleted/changed` 各包含 `foreground` 与可选 `background` |
 
-GitHub 采用 16px 系统字体、1.5 倍正文行高、600 加粗字重、悬停链接下划线、五色提示块、斑马纹表格，以及独立的行内代码和按键外观。阅读区最大宽度为 980px，宽屏内边距 45px，窄于 768px 时为 15px。原生字体栅格化与 tree-sitter 的语法分类可能和浏览器有差异。
+GitHub 采用 16px 系统字体、1.5 倍正文行高、600 加粗字重、默认链接下划线、五色提示块、斑马纹表格，以及独立的行内代码和按键外观。正文最大宽度为 1012px，外围留白固定为 32px。原生字体栅格化与 tree-sitter 的语法分类尚未完成官网一致性验收。
 
 未知字段、类型错误、不支持的版本、非法颜色和超过 256 KiB 的主题文件会显示为加载错误。所有字体都从本机选择，字体缺失时使用离线回退。
 
@@ -110,4 +112,4 @@ v1 主题不再加载。设置会显示文件来源和升级提示，原文件�
 
 任意 CSS 选择器、脚本、网页字体、可执行插件、主题商店和多层继承不在第一版范围。Mermaid、数学公式、打印与 PDF 导出也不由阅读主题包提供。
 
-GitHub 样式以 [github-markdown-css 5.9.0](https://github.com/sindresorhus/github-markdown-css/tree/v5.9.0) 为固定快照，选择与强调色来自 Primer，提示图标来自 Octicons；三者均采用 MIT。来源与许可保存在 `assets/markdown-themes/GITHUB-NOTICE` 及对应许可文件中。更新快照与视觉验收步骤见 [GitHub 主题验证记录](https://github.com/cloudy-liu/ctty7/blob/main/docs/testing/markdown-github-theme.md)。
+当前布局、链接与标题代码参数以 2026-10-05 官网实测为依据；[github-markdown-css 5.9.0](https://github.com/sindresorhus/github-markdown-css/tree/v5.9.0)、Primer 和 Octicons 保留为辅助来源。来源与许可保存在 `assets/markdown-themes/GITHUB-NOTICE` 及对应许可文件中。实测记录与尚未完成的对齐项见 [GitHub 主题验证记录](https://github.com/cloudy-liu/ctty7/blob/main/docs/testing/markdown-github-theme.md)。

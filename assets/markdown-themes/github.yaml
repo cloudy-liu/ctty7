@@ -1,5 +1,5 @@
-# github-markdown-css 5.9.0, generated from GitHub's Light/Dark default styles.
-# See tests/fixtures/github-markdown-css-5.9.0 and GITHUB-NOTICE/GITHUB-LICENSE.
+# GitHub Light/Dark defaults, verified against github.com on 2026-10-05.
+# See tests/fixtures/github-live-2026-10-05 and GITHUB-NOTICE/GITHUB-LICENSE.
 # Sizes are CSS computed values at 16px in logical pixels.
 schema_version: 2
 id: github
@@ -30,11 +30,12 @@ typography:
   inline_code_size: 13.6
   kbd_size: 11
 layout:
-  max_width: 980
+  # 1012px content cap plus 32px padding on each side.
+  max_width: 1076
   compact_below: 768
   outer_padding: 0
-  padding: 45
-  compact_padding: 15
+  padding: 32
+  compact_padding: 32
   radius: 0
   paper_border_width: 0
   shadow_blur: 0
@@ -45,6 +46,8 @@ layout:
   inline_code_radius: 6
   inline_code_padding_x: 5.44
   inline_code_padding_y: 2.72
+  heading_code_padding_x_em: 0.2
+  heading_code_padding_y_em: 0
   kbd_padding: 4
   kbd_radius: 6
   kbd_line_height: 10
@@ -64,7 +67,7 @@ layout:
   table_fill: false
   rule_height: 4
   rule_gap: 24
-  link_underline: hover
+  link_underline: always
   roman_ordered_lists: true
   list_indent: 32
   list_gap: 4

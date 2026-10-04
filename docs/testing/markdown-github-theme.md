@@ -53,6 +53,41 @@ changed for Markdown in the component passed their formatting check.
 
 ## Visual comparison
 
+### Live website audit, 2026-10-05
+
+Final Windows tests passed without local dependency overrides: application
+workspace 2,930 passed / 6 ignored; component workspace 296 passed / 2 ignored.
+The application pins component revision `31660d5d2446d6abf8ee27a157a62836c0d91d84`.
+
+Chrome DevTools MCP captured the actual GitHub Markdown file preview in an
+isolated signed-out context at 1280px and 600px widths. Light and Dark default
+computed styles are committed in `tests/fixtures/github-live-2026-10-05`.
+The repository README article was checked separately for layout agreement.
+
+This found and corrected three differences from the third-party CSS example:
+
+- Body links are underlined by default and remain underlined on hover.
+- The content cap is 1012px with 32px surrounding padding at both widths.
+  The native card includes padding and therefore has a 1076px total cap.
+- Heading code inherits heading size with 0.2em horizontal and zero vertical
+  padding, independently of body inline-code padding.
+
+The new live-layout regression failed on the old 890px effective content cap.
+Per-heading code metrics have a native layout test covering reflow and
+preservation of selected text. These tests do not replace screenshot comparison.
+
+The selection test also exposed a native bounds bug: an unpositioned observer
+recorded heading and block bounds after their text, shifting anchors down by
+the content height. Markdown observers now explicitly cover their parent's
+top-left corner. A regression checks anchor/block origins before and after
+heading-code reflow; it failed on the old bounds.
+
+Still unverified or different: native pixel rasterization and spacing,
+heading hover permalink controls, native task checkbox appearance, exact
+syntax token boundaries and Mermaid renderer output. Chrome CDP inspects
+webpages; it does not capture ctty7's native GPUI window. No native automation
+tool is currently exposed in this session. Full website parity remains open.
+
 Use [the acceptance sample](../examples/markdown-github-theme.md) unchanged in
 ctty7 and on its GitHub file page. Compare the rendered Markdown area, excluding
 application chrome. Repeat Light default and Dark default at wide and narrow
@@ -63,9 +98,9 @@ five alerts, nested lists, task states, narrow/overflowing tables, a horizontal
 rule, code and diff. Hover a link and switch between GitHub and a v2 custom theme while
 partially selected and scrolled. Return to the editor and verify unsaved text.
 
-Color values and layout dimensions must match the pinned sources. Native font
-rasterization and tree-sitter versus TextMate token classification are accepted
-differences. Mermaid uses the documented Primer palette roles for this renderer.
+Color values and layout dimensions must match the recorded website observations.
+Native font rasterization, tree-sitter versus TextMate token classification and
+Mermaid output remain parity gaps until verified or explicitly accepted by the user.
 
 The native/browser screenshot matrix and macOS/Linux visual checks have not yet
 been verified. This record does not claim pixel-level visual acceptance.

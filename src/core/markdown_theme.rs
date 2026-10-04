@@ -106,6 +106,9 @@ pub struct Layout {
     pub inline_code_radius: Option<f32>,
     pub inline_code_padding_x: f32,
     pub inline_code_padding_y: f32,
+    /// Heading code padding in multiples of the heading font size.
+    pub heading_code_padding_x_em: Option<f32>,
+    pub heading_code_padding_y_em: Option<f32>,
     pub kbd_padding: f32,
     pub kbd_radius: f32,
     pub kbd_line_height: f32,
@@ -325,6 +328,14 @@ impl Theme {
         for (key, value) in [
             ("typography.heading_bottom_gap", t.heading_bottom_gap),
             ("layout.inline_code_radius", l.inline_code_radius),
+            (
+                "layout.heading_code_padding_x_em",
+                l.heading_code_padding_x_em,
+            ),
+            (
+                "layout.heading_code_padding_y_em",
+                l.heading_code_padding_y_em,
+            ),
             ("layout.table_radius", l.table_radius),
             ("layout.table_gap", l.table_gap),
             ("layout.quote_padding_y", l.quote_padding_y),

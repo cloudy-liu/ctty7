@@ -1,5 +1,11 @@
 GitHub Markdown reading theme
 
+Live verification: github.com on 2026-10-05, using Chrome CDP in an
+isolated signed-out context, Light default and Dark default. Captured
+computed styles are in tests/fixtures/github-live-2026-10-05.
+Content width, container padding, default link underlines and heading
+code padding follow this capture instead of the third-party snapshot.
+
 CSS snapshot: github-markdown-css 5.9.0
 https://github.com/sindresorhus/github-markdown-css/tree/v5.9.0
 Copyright (c) Sindre Sorhus. MIT license; see GITHUB-LICENSE.
