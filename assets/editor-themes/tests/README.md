@@ -19,7 +19,7 @@ byte within those ranges against the reference. Separate regressions cover
 embedded HTML/JavaScript, JSX, TSX, Rust Markdown fences and the Python import,
 variable and magic-variable cases reported in the screenshots.
 
-Other tests compare 11 editor/control colors per appearance directly with the
+Other tests compare 11 editor/control colors for each of the two palettes directly with the
 upstream JSON, compile all 38 private language queries, and verify that shared
 language registrations remain unchanged. No TextMate or Node runtime is
 required to build or run tty7 or these tests.

@@ -920,6 +920,40 @@ mod tests {
         });
     }
 
+    // macOS refreshes native appearance inside apply_theme; the cached transition
+    // is the Windows/Linux application boundary exercised by this test.
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn source_palette_follows_system_only_when_the_app_does(cx: &mut TestAppContext) {
+        let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            cx.global_mut::<Config>().theme_preset_light = "light".into();
+            cx.global_mut::<Config>().theme_preset_dark = "one_dark_pro".into();
+            for (system_dark, background) in [(false, 0xfafafa), (true, 0x282c34)] {
+                cx.set_global(SystemAppearance { dark: system_dark });
+                app.set_theme_follow_system(true, window, cx);
+                assert_eq!(
+                    crate::ui::editor_theme::current(cx)
+                        .highlight_theme
+                        .style
+                        .editor_background,
+                    Some(gpui::rgb(background).into())
+                );
+            }
+            app.set_theme_follow_system(false, window, cx);
+            app.set_preset("light", window, cx);
+            cx.set_global(SystemAppearance { dark: true });
+            apply_theme(Some(window), cx);
+            assert_eq!(
+                crate::ui::editor_theme::current(cx)
+                    .highlight_theme
+                    .style
+                    .editor_background,
+                Some(gpui::rgb(0xfafafa).into())
+            );
+        });
+    }
+
     #[test]
     fn windows_background_appearance_falls_back_by_build() {
         use crate::core::config::WindowBackdrop;

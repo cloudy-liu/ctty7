@@ -1,32 +1,16 @@
 //! Source editor colors are independent of the terminal and Markdown reader.
 
-use crate::core::config::Config;
+use crate::core::config::{
+    Config, EDITOR_FONT_SIZE_DEFAULT, EDITOR_FONT_SIZE_MAX, EDITOR_FONT_SIZE_MIN,
+    EDITOR_LINE_HEIGHT_DEFAULT, EDITOR_LINE_HEIGHT_MAX, EDITOR_LINE_HEIGHT_MIN,
+};
 use crate::ui::{
     app::Tty7App,
-    i18n::L10nKey,
     presets::{ActiveAccent, match_wash_targets, wash},
 };
-use gpui::{App, Context, rgb};
+use gpui::{App, Context, SharedString, Window, rgb};
 use gpui_component::{ActiveTheme as _, ThemeMode, input::CodeEditorStyle};
 use std::sync::{Arc, OnceLock};
-
-pub(crate) const CHOICES: [(&str, L10nKey); 3] = [
-    ("auto", L10nKey::SettingsEditorThemeAuto),
-    ("atom_one_dark", L10nKey::SettingsEditorThemeDark),
-    ("atom_one_light", L10nKey::SettingsEditorThemeLight),
-];
-
-pub(crate) fn known(id: &str) -> bool {
-    CHOICES.iter().any(|(choice, _)| *choice == id)
-}
-
-pub(crate) fn label(id: &str) -> L10nKey {
-    CHOICES
-        .iter()
-        .find(|(choice, _)| *choice == id)
-        .map(|(_, label)| *label)
-        .unwrap_or(L10nKey::SettingsEditorThemeAuto)
-}
 
 struct Palettes {
     dark: Arc<CodeEditorStyle>,
@@ -51,14 +35,26 @@ fn palettes() -> &'static Palettes {
     })
 }
 
+pub(crate) fn resolved_name(cx: &App) -> &'static str {
+    if cx.theme().mode == ThemeMode::Dark {
+        "Atom One Dark"
+    } else {
+        "Atom One Light"
+    }
+}
+
+pub(crate) fn font_family(cx: &App) -> SharedString {
+    let config = cx.global::<Config>();
+    match config.editor_font_family.as_str() {
+        "default" => cx.theme().mono_font_family.clone(),
+        "terminal" => config.font_family.clone().into(),
+        family => family.to_owned().into(),
+    }
+}
+
 pub(crate) fn current(cx: &App) -> Arc<CodeEditorStyle> {
-    let dark = match cx.global::<Config>().editor_theme.as_str() {
-        "atom_one_dark" => true,
-        "atom_one_light" => false,
-        _ => cx.theme().mode == ThemeMode::Dark,
-    };
     let palettes = palettes();
-    let mut style = if dark {
+    let mut style = if cx.theme().mode == ThemeMode::Dark {
         palettes.dark.clone()
     } else {
         palettes.light.clone()
@@ -210,10 +206,52 @@ fn extra_highlights(language: &str) -> &'static str {
 }
 
 impl Tty7App {
-    pub(crate) fn set_editor_theme(&mut self, id: &str, cx: &mut Context<Self>) {
-        if known(id) {
-            self.update_config(cx, |config| config.editor_theme = id.to_owned());
+    pub(crate) fn change_focused_font_size(
+        &mut self,
+        delta: f32,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.editor_source_has_focus(window, cx) {
+            self.set_editor_font_size(cx.global::<Config>().editor_font_size + delta, cx);
+        } else {
+            self.change_font_size(delta, cx);
+        }
+    }
+
+    pub(crate) fn reset_focused_font_size(&mut self, window: &Window, cx: &mut Context<Self>) {
+        if self.editor_source_has_focus(window, cx) {
+            self.set_editor_font_size(EDITOR_FONT_SIZE_DEFAULT, cx);
+        } else {
+            self.reset_font_size(cx);
+        }
+    }
+    pub(crate) fn set_editor_font_family(&mut self, family: String, cx: &mut Context<Self>) {
+        if !family.trim().is_empty() {
+            self.update_config(cx, |config| {
+                config.editor_font_family = family.trim().into()
+            });
             cx.refresh_windows();
         }
+    }
+
+    pub(crate) fn set_editor_font_size(&mut self, size: f32, cx: &mut Context<Self>) {
+        let size = if size.is_finite() {
+            size.clamp(EDITOR_FONT_SIZE_MIN, EDITOR_FONT_SIZE_MAX)
+        } else {
+            EDITOR_FONT_SIZE_DEFAULT
+        };
+        self.update_config(cx, |config| config.editor_font_size = size);
+        cx.refresh_windows();
+    }
+
+    pub(crate) fn set_editor_line_height(&mut self, height: f32, cx: &mut Context<Self>) {
+        let height = if height.is_finite() {
+            height.clamp(EDITOR_LINE_HEIGHT_MIN, EDITOR_LINE_HEIGHT_MAX)
+        } else {
+            EDITOR_LINE_HEIGHT_DEFAULT
+        };
+        self.update_config(cx, |config| config.editor_line_height = height);
+        cx.refresh_windows();
     }
 }

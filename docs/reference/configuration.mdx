@@ -38,8 +38,16 @@ failing the file.
 | `font_size` | number | `15` | Terminal text size in px (4–256). |
 | `line_height` | number | `1.4` | Multiple of the font size (0.5–4). |
 | `ui_font_size` | number | `16` | The interface's root size in px (12–24). |
+| `editor_font_family` | string | `"default"` | Source editor font: platform default, `"terminal"` to follow `font_family`, or an installed family name. Independent of color themes. |
+| `editor_font_size` | number | `13` | Source editor text size in px (8–72), independent of terminal and interface sizes. |
+| `editor_line_height` | number | `1.5` | Source editor line height as a multiple of its font size (1–3). |
 
 [More about fonts →](/customization/fonts)
+
+Source editor colors automatically use Atom One Dark or Atom One Light based
+on the application's resolved appearance. The retired `editor_theme` key is
+ignored on load and omitted on save, including old fixed-mode and One Dark Pro
+values. Source typography remains independently configurable.
 
 ## Theme and window
 
@@ -47,7 +55,6 @@ failing the file.
 |---|---|---|---|
 | `theme_preset` | string | `"light"` | Active theme id. |
 | `markdown_theme` | string | `"paperglow"` | Independent [Markdown reading theme](/customization/markdown-themes) package ID; its light/dark variant follows the active app mode. |
-| `editor_theme` | string | `"auto"` | Source editor palette: `auto` follows the app appearance; `atom_one_dark` or `atom_one_light` fixes the editor appearance. Unknown strings fall back to `auto` without being overwritten. |
 | `theme_follow_system` | bool | `false` | Follow the OS appearance. |
 | `theme_preset_light` | string | `"light"` | Used when following the system. |
 | `theme_preset_dark` | string | `"dark"` | Used when following the system. |

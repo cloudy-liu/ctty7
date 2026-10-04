@@ -5284,6 +5284,8 @@ impl Tty7App {
         let mut subs = Vec::new();
         let (font_select, font_bold_select, font_italic_select) =
             self.build_font_selects(&mut subs, window, cx);
+        let (editor_font_select, editor_font_size_input, editor_line_height_input) =
+            self.build_editor_typography_controls(&mut subs, window, cx);
         let language_select = self.build_language_select(&mut subs, window, cx);
         #[cfg(target_os = "windows")]
         let window_backdrop_select = self.build_window_backdrop_select(&mut subs, window, cx);
@@ -5356,6 +5358,13 @@ impl Tty7App {
             font_select,
             font_bold_select,
             font_italic_select,
+            editor_font_select,
+            editor_font_size_input,
+            editor_line_height_input,
+            editor_typography_values: Cell::new((
+                cx.global::<Config>().editor_font_size,
+                cx.global::<Config>().editor_line_height,
+            )),
             language_select,
             #[cfg(target_os = "windows")]
             window_backdrop_select,
@@ -7579,15 +7588,15 @@ impl Render for Tty7App {
                 .on_action(cx.listener(|this, _: &ActivateTab9, window, cx| {
                     this.activate_visual(8, window, cx)
                 }))
-                .on_action(cx.listener(|this, _: &IncreaseFontSize, _window, cx| {
-                    this.change_font_size(FONT_SIZE_STEP, cx)
+                .on_action(cx.listener(|this, _: &IncreaseFontSize, window, cx| {
+                    this.change_focused_font_size(FONT_SIZE_STEP, window, cx)
                 }))
-                .on_action(cx.listener(|this, _: &DecreaseFontSize, _window, cx| {
-                    this.change_font_size(-FONT_SIZE_STEP, cx)
+                .on_action(cx.listener(|this, _: &DecreaseFontSize, window, cx| {
+                    this.change_focused_font_size(-FONT_SIZE_STEP, window, cx)
                 }))
-                .on_action(
-                    cx.listener(|this, _: &ResetFontSize, _window, cx| this.reset_font_size(cx)),
-                )
+                .on_action(cx.listener(|this, _: &ResetFontSize, window, cx| {
+                    this.reset_focused_font_size(window, cx)
+                }))
                 .on_action(cx.listener(|this, _: &TogglePalette, window, cx| {
                     this.toggle_palette(window, cx)
                 }))

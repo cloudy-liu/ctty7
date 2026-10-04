@@ -15,7 +15,7 @@ resolver includes these search colors in the complete style passed to `Input`
 once, so a later theme setter cannot overwrite the search visibility fix.
 
 The component and asset packages are pinned together to
-`cloudy-liu/gpui-component@833b0e084a12a3a0561d1e844b307e120cb37123`.
+`cloudy-liu/gpui-component@a8bc7a71b974cbf190b86622837e46e4508070e7`.
 This existing component revision supplies the instance color interface.
 
 ## Automated regression coverage
@@ -29,9 +29,9 @@ cargo fmt --all -- --check
 
 The regression test exercises the final editor theme resolver and fails with
 the bundled search fills that would overwrite the search visibility fix.
-It checks all three editor preferences against every built-in application theme,
-with Rust and plain-text palettes and colored, gray and editor-background-colored
-accents. This includes fixed editor appearances opposite to the application.
+It checks the automatically resolved Atom One palette for every built-in application
+theme with colored, gray and editor-background-colored accents. One Dark Pro and
+other dark application themes use Atom One Dark; light themes use Atom One Light.
 It requires at least 1.2:1 luminance contrast between the two match fills,
 at least 1.89:1 between the
 current match and the editor background, and at least 2.95:1 between the
@@ -47,8 +47,8 @@ forward and backward through the results using Enter, Shift+Enter and the
 search panel arrows. Check that one match uses the accent fill, its position
 follows the counter, and the remaining matches use the neutral fill.
 
-Repeat with Automatic and both fixed editor themes in a light and a dark app,
-switch themes with the search open, and select some source text to check its
-usual selection color. Automated
+Repeat with light and dark application themes, including One Dark Pro, Dracula
+and Nord. Switch themes with the search open, and select some source text to
+check its usual selection color. Automated
 color tests do not replace this native window inspection, especially with
 custom image or gradient backgrounds.

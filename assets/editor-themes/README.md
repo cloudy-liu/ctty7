@@ -1,12 +1,12 @@
-# Atom One editor palettes
+# Source editor palettes
 
-The bundled palettes adapt the MIT-licensed Atom One themes by Mahmoud Ali:
+The bundled palettes adapt these MIT-licensed themes:
 
 - [Atom One Dark 2.3.0](https://github.com/akamud/vscode-theme-onedark/tree/a8be970644982221f9b61fb1c4b3da74b4beab79), license in `LICENSE-dark`.
 - [Atom One Light 2.3.0](https://github.com/akamud/vscode-theme-onelight/tree/5866e900db932d580e978a58db42f65cde07998b), license in `LICENSE-light`.
 
 The complete upstream JSON files are retained under `upstream/`, including
-each theme's 74 UI colors and 211 ordered TextMate rules. Regenerate the
+each Atom One theme's 74 UI colors and 211 ordered TextMate rules. Regenerate the
 editor palettes from the repository root with:
 
 ```powershell
@@ -26,13 +26,13 @@ selections, cursor, whitespace, and syntax colors. Auxiliary diagnostic colors
 use the palette's red, gold, blue, green, and comment roles. Their backgrounds
 use a 15% tint. These are tty7 adaptations, not additional upstream theme keys.
 Fold controls and scrollbars use the editor's muted text, selection, background,
-and border colors. Their colors remain local when app and editor modes differ.
+and border colors. These controls use the source palette rather than application colors.
 
 The JSON retains the upstream search colors as source data. At runtime, search
 fills use the resolved editor background and foreground with tty7's contrast
 targets. Ordinary matches are neutral; the current match uses the application
 accent with a contrast fallback. Both fills are opaque and keep the search
-visibility fix from cloudy-liu/ctty7#87 when app and editor appearances differ.
+visibility fix from cloudy-liu/ctty7#87 in both editor appearances.
 
 Editor-only query additions distinguish language-specific roles. Every bundled
 language receives a private registry identifier, including embedded JavaScript,
@@ -56,3 +56,12 @@ readable foreground text; canonical labels such as `javascript` and `rust`
 receive the editor-specific injected colors.
 
 The themes are embedded at compile time. No theme download occurs at runtime.
+
+The application's resolved light/dark appearance selects Atom One Light or
+Atom One Dark for every source editor. The One Dark Pro application preset
+uses Atom One Dark, just like other dark presets. Each Atom palette owns the
+complete opaque editor and gutter background, syntax, selection and caret.
+There are no independent fixed-mode editor choices. The retired `editor_theme`
+configuration key is ignored on load and omitted on save.
+Font family, font size and line height remain independent user preferences;
+their instance-local styles do not change the component's global mono font.
