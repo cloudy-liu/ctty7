@@ -168,3 +168,19 @@ visual checks remain open. Native font rasterization, all syntax token boundarie
 and pure-Rust Mermaid geometry have not been established as identical to GitHub.
 The user-approved application background is an intentional exception to website
 background parity; the PR remains a draft pending the outstanding matrix.
+
+## Mermaid background follow-up
+
+A focused output regression checks the final SVG root background for flowchart,
+sequence and grouped flowchart diagrams in both light/dark modes, with builtin
+and custom palettes: 12 combinations. Builtin canvases are transparent; custom
+canvases match their configured background. Restoring the renderer's former
+default output setting makes this test fail with a white builtin canvas, so the
+check detects the reported background class rather than only successful rendering.
+Native computer-use inspection of the latest executable confirmed transparent
+canvases for inline and expanded diagrams in Harbor Dark and Light; the inline
+canvas also followed Rosé Pine Dawn's warm reading background without a white
+rectangle. Node fills
+remain Mermaid's own gray/dark and lavender/light colors, as required by the
+approved preservation of element colors. This follow-up did not reproduce a new
+white-canvas defect; it does not establish xAI/Grok styling equivalence.

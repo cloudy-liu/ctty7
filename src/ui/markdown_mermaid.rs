@@ -196,6 +196,47 @@ mod tests {
     use super::*;
 
     #[test]
+    fn diagram_canvas_matches_the_builtin_and_custom_background_contract() {
+        let custom = crate::core::markdown_theme::parse(
+            "schema_version: 2\nid: diagram-background-test\nname: Diagram background test\nlight:\n  background: '#f2e9df'\n  paper: '#fffaf3'\ndark:\n  background: '#172a3a'\n  paper: '#20384d'\n",
+        )
+        .unwrap();
+        let builtin = crate::core::markdown_theme::builtin();
+        let background = regex::Regex::new(r#"background-color:\s*([^;"<>]+)"#).unwrap();
+        for (name, source) in [
+            (
+                "flowchart",
+                "flowchart LR\n A[Start] -->|Continue| B[Finish]",
+            ),
+            (
+                "sequence",
+                "sequenceDiagram\n Alice->>Bob: Hello\n Bob-->>Alice: Reply",
+            ),
+            (
+                "cluster",
+                "flowchart LR\n subgraph Group\n A[Start] --> B[Finish]\n end",
+            ),
+        ] {
+            for dark in [false, true] {
+                for (theme, expected) in [
+                    (builtin.as_ref(), "transparent".to_string()),
+                    (&custom, color_to_hex(&custom.palette(dark).background)),
+                ] {
+                    let svg = render_mermaid(source, theme, dark).unwrap();
+                    let root = &svg[..svg.find('>').unwrap()];
+                    let actual = background.captures(root).map(|c| c[1].trim().to_string());
+                    assert_eq!(
+                        actual.as_deref(),
+                        Some(expected.as_str()),
+                        "{name}, theme={}, dark={dark}, root={root}",
+                        theme.id
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
     fn diagram_labels_are_portable_to_the_native_svg_renderer() {
         let svg = render_mermaid(
             "flowchart LR\n A[Visible label] --> B[Another label]",
