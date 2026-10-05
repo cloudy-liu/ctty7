@@ -1794,9 +1794,7 @@ impl Tty7App {
                     // Aligned with the label column of a real row at this
                     // depth: 6 for the row's own inset, INDENT for the depth,
                     // then the chevron and icon cells and their gaps.
-                    .pl(px(6.0
-                        + row.depth.saturating_sub(1) as f32 * INDENT
-                        + LABEL_LEAD))
+                    .pl(px(6.0 + row.depth as f32 * INDENT + LABEL_LEAD))
                     .h(px(FILE_ROW_H))
                     .flex_shrink_0()
                     .line_height(relative(1.))
@@ -1912,7 +1910,7 @@ impl Tty7App {
             .id(row.selection().element_id())
             .items_center()
             .gap_1()
-            .pl(px(6.0 + row.depth.saturating_sub(1) as f32 * INDENT))
+            .pl(px(6.0 + row.depth as f32 * INDENT))
             .pr_1()
             .h(px(FILE_ROW_H))
             .flex_shrink_0()

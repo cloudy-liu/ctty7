@@ -82,7 +82,7 @@ the content height. Markdown observers now explicitly cover their parent's
 top-left corner. A regression checks anchor/block origins before and after
 heading-code reflow; it failed on the old bounds.
 
-Still unverified or different: native pixel rasterization and spacing,
+At the time of that audit, the remaining gaps were native pixel rasterization and spacing,
 heading hover permalink controls, native task checkbox appearance, exact
 syntax token boundaries and Mermaid renderer output. Chrome CDP inspects
 webpages; it does not capture ctty7's native GPUI window. No native automation
@@ -102,13 +102,14 @@ Color values and layout dimensions must match the recorded website observations.
 Native font rasterization, tree-sitter versus TextMate token classification and
 Mermaid output remain parity gaps until verified or explicitly accepted by the user.
 
-The native/browser screenshot matrix and macOS/Linux visual checks have not yet
-been verified. This record does not claim pixel-level visual acceptance.
+The complete native/browser screenshot matrix and macOS/Linux visual checks
+remain unverified. The later Windows run below does not claim pixel-level parity.
 
-The reading background follows the selected Markdown palette, not the
-application background. GitHub stays white in light mode and `#0d1117` in dark
-mode even if an application theme uses other colors. No application palette
-blending is part of the visual acceptance target.
+The original audit used GitHub's white / `#0d1117` reading backgrounds.
+On 2026-10-05 the user approved a revised acceptance target: the builtin's
+outer and body surfaces follow the active application background, without a
+new setting; other GitHub element colors and typography stay independent.
+Custom v2 packages retain their configured background and paper colors.
 
 The old macOS CI failure in `closing_the_pool_drops_queued_work` was reproduced
 by allowing a second worker to run before close. Its corrected test occupies
@@ -116,3 +117,54 @@ all workers first, then verifies that closing drops the queued closure. The
 production pool is unchanged. The corrected test passed 30 standalone
 repetitions; removing queue clearing made it fail, confirming that it still
 detects the behavior it protects.
+
+## Native bugfix verification, 2026-10-05
+
+The application uses the pushed Git component revision
+`02d0885016cda0703a88c9ce8ad0b3a5aca81af6`, without a local path override.
+`cargo test --workspace --locked -j 1` passed: 2,949 tests plus 13 CLI end-to-end
+cases, 7 ignored, no failures. Git for Windows `bin` and `usr/bin` were on PATH
+for the existing shell integration tests. The component workspace passed 299
+tests with 2 documentation tests ignored; example targets compiled. Windows
+component tests used `RUST_MIN_STACK=8388608`. Formatting and the application
+host-boundary check passed.
+
+Native computer-use testing covered Windows at 175% display scale with application
+font size 16 and editor font size 14. Light and Harbor Dark reading surfaces,
+wide and narrow reading panes, the repository README and the unchanged acceptance
+sample were exercised. Heading inline code no longer overlaps its preceding text;
+body code chips and long table cells stay on one line, and table scrolling reaches
+the last column. Heading hover links, gray readonly tasks, five alert titles and
+icons, Rust and diff highlighting, and full image-failure labels were checked.
+Workspace child chevrons are one 14-logical-pixel step below the root.
+
+Mermaid labels now appear in native SVG output. Light/default and dark node
+palettes use a transparent outer canvas. Copying a diagram was checked by pasting
+its original fence content into the source buffer and undoing that temporary
+edit without saving. Expand, zoom in/out, horizontal pan, reset, close and focus
+recovery were exercised. Native testing found an initially invisible dialog;
+adding the component dialog layer to the application root fixed it. Source mode
+was checked with Atom One Light and Atom One Dark after theme changes.
+
+The heading regression runs through deferred layout and fails with the old
+ambient font-size lookup. Application tests also cover opening an anchor before
+the initial background parse completes, selection, unsaved edits, undo, theme
+reflow, and reading-position restoration. The reported original README stack
+overflow was not reproduced; the Windows GUI now reserves 8 MiB rather than the
+linker's 1 MiB default, with a linked-PE regression checking the reserve.
+
+The manual GPUI headless opening profile measured installation / response frame /
+content drawn, respectively: README 25 / 30 / 406 ms; acceptance sample
+12 / 18 / 662 ms; Chinese README 7 / 10 / 209 ms. Initial parsing and Mermaid work
+run in the background, and source grammar loading waits for source mode. Thirty
+warm switches took 3.018 s, about 101 ms per switch. These measurements establish
+shorter initial UI blocking, not instant complete rendering or an overall warm
+switch speedup; they exclude native GPU presentation. The former synchronous
+profile stopped at the first draw, so its timing is not a comparable complete-page
+measurement.
+
+Windows 100%/150% display scale, application zoom 200%, and macOS/Linux native
+visual checks remain open. Native font rasterization, all syntax token boundaries
+and pure-Rust Mermaid geometry have not been established as identical to GitHub.
+The user-approved application background is an intentional exception to website
+background parity; the PR remains a draft pending the outstanding matrix.

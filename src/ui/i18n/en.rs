@@ -177,7 +177,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsThemesRejected => "Not loaded from the themes folder",
         L10nKey::SettingsMarkdownTheme => "Markdown reading theme",
         L10nKey::SettingsMarkdownThemeDesc => {
-            "GitHub is the default. Reading themes follow the app's light/dark mode, not its background color. Custom v2 files reload automatically."
+            "GitHub follows the app background and light/dark mode. Custom v2 themes keep their own backgrounds and reload automatically."
         }
         L10nKey::SettingsMarkdownThemeUnavailable => {
             "Could not load {requested}. Currently using {active}. The selected theme will return when its file is repaired."
@@ -197,6 +197,9 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsMarkdownUseGithub => "Use GitHub",
         L10nKey::EditorCopyCode => "Copy code",
         L10nKey::MarkdownAnchorMissing => "heading not found",
+        L10nKey::MarkdownExpandDiagram => "Expand diagram",
+        L10nKey::MarkdownZoomIn => "Zoom in",
+        L10nKey::MarkdownZoomOut => "Zoom out",
         L10nKey::ThemeDuplicateFailed => "Could not duplicate the theme",
         L10nKey::ThemeSaveFailed => "Could not save the theme",
         L10nKey::OpenInFileManagerFailed => "Could not open {path}",

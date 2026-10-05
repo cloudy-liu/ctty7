@@ -5,7 +5,7 @@ description: "GitHub 默认预览、v2 自定义主题、旧主题升级和热�
 
 打开 `.md` 或 `.markdown` 文件会直接显示预览，扩展名不区分大小写。点击文档状态栏的“编辑”进入源码，再点击“预览”查看当前缓冲区，包括尚未保存的修改。两种模式共用同一个缓冲区，保留撤销历史、保存和冲突处理。
 
-GitHub 是唯一内置主题，使用 GitHub Light default / Dark default 的配色与排版。已保存 `paperglow` 的配置会自动迁移到 `github`；迁移只改变阅读主题选择。若保存失败，本次运行仍使用 GitHub，并提示迁移未保存。预览使用应用当前实际生效的深浅模式，应用主题选择器的临时预览及取消也会同步。Markdown 阅读主题有独立的配置项，可以和任意应用主题搭配。它只跟随应用的深浅模式，不继承应用的具体背景色：GitHub 浅色背景为 `#ffffff`，深色为 `#0d1117`，因此与应用界面可能存在色差。
+GitHub 是唯一内置主题，使用 GitHub Light default / Dark default 的文字、元素颜色与排版。内置主题的正文背景跟随当前应用背景，减少阅读区与界面的色差；代码块、行内代码、引用、告警和表格仍保留各自的 GitHub 样式，不增加背景开关。自定义主题继续使用包内的 `background` 和 `paper` 配置。已保存 `paperglow` 的配置会自动迁移到 `github`；迁移只改变阅读主题选择。若保存失败，本次运行仍使用 GitHub，并提示迁移未保存。应用实际深浅模式、主题临时预览及取消会同步到阅读区。
 
 ## 安装与选择
 
@@ -39,7 +39,7 @@ dark:
 
 ## 完整格式
 
-可直接复制 [Blue Links 示例](https://github.com/cloudy-liu/ctty7/blob/main/docs/examples/markdown-themes/blue-links.yaml)，或参考 [GitHub 全量默认值](https://github.com/cloudy-liu/ctty7/blob/main/assets/markdown-themes/github.yaml)。复制内置文件时必须修改 `id`。只有 `light: {}` 和 `dark: {}` 的 v2 用户包显示完整 GitHub 样式。对象逐字段覆盖，数组整体替换；省略字段采用 GitHub 值，显式 `null` 仅用于可空字段，并不等同于省略。
+可直接复制 [Blue Links 示例](https://github.com/cloudy-liu/ctty7/blob/main/docs/examples/markdown-themes/blue-links.yaml)，或参考 [GitHub 全量默认值](https://github.com/cloudy-liu/ctty7/blob/main/assets/markdown-themes/github.yaml)。复制内置文件时必须修改 `id`。只有 `light: {}` 和 `dark: {}` 的 v2 用户包继承完整 GitHub 参数，包括官网的白色／深色背景；内置主题跟随应用背景的处理不覆盖用户包。对象逐字段覆盖，数组整体替换；省略字段采用 GitHub 值，显式 `null` 仅用于可空字段，并不等同于省略。
 
 尺寸默认采用应用缩放 100% 时的逻辑像素；行高和 `_em` 字段是倍数。系统 DPI 由 GPUI 处理，无需把配置值再乘以屏幕缩放比例。
 

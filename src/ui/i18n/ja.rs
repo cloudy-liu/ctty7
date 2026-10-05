@@ -180,7 +180,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsThemesRejected => "テーマフォルダから読み込めなかったもの",
         L10nKey::SettingsMarkdownTheme => "Markdown の閲覧テーマ",
         L10nKey::SettingsMarkdownThemeDesc => {
-            "既定は GitHub です。閲覧テーマはアプリのライト／ダークモードに従いますが、背景色は継承しません。v2 ファイルの変更は自動で反映されます。"
+            "GitHub はアプリの背景とライト／ダークモードに従います。カスタム v2 テーマは独自の背景を保ち、変更は自動で反映されます。"
         }
         L10nKey::SettingsMarkdownThemeUnavailable => {
             "{requested} を読み込めません。現在は {active} を使用しています。ファイルを修復すると自動的に復元されます。"
@@ -200,6 +200,9 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsMarkdownUseGithub => "GitHub を使用",
         L10nKey::EditorCopyCode => "コードをコピー",
         L10nKey::MarkdownAnchorMissing => "見出しが見つかりません",
+        L10nKey::MarkdownExpandDiagram => "図を拡大",
+        L10nKey::MarkdownZoomIn => "拡大",
+        L10nKey::MarkdownZoomOut => "縮小",
         L10nKey::ThemeDuplicateFailed => "テーマを複製できませんでした",
         L10nKey::ThemeSaveFailed => "テーマを保存できませんでした",
         L10nKey::OpenInFileManagerFailed => "{path} を開けませんでした",

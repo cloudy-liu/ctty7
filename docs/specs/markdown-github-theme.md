@@ -4,7 +4,7 @@ ctty7 的 Markdown 阅读应采用 GitHub Light / Dark。此前规格保留 Pape
 
 ## Solution
 
-GitHub 成为唯一内置 Markdown 阅读主题。旧 Paperglow 选择自动迁移到 GitHub。自定义主题采用 v2，缺省值来自 GitHub；v1 提示升级且保留原文件。Markdown 跟随应用实际深浅模式，但保持 GitHub 自己的完整配色，接受与应用主题背景存在色差，不增加自动套用应用背景的选项。
+GitHub 成为唯一内置 Markdown 阅读主题。旧 Paperglow 选择自动迁移到 GitHub。自定义主题采用 v2，缺省值来自 GitHub；v1 提示升级且保留原文件。2026-10-05 用户确认调整背景方案：内置 GitHub 的阅读区外层与正文背景默认采用当前应用背景，不增加开关；其余文字、元素颜色和排版保留 GitHub 参数。自定义主题的背景继续按包内配置。
 
 ## User Stories
 
@@ -40,7 +40,7 @@ GitHub 成为唯一内置 Markdown 阅读主题。旧 Paperglow 选择自动迁�
 
 GitHub 是一个主题包，ID 为 github，显示名为 GitHub，包含 Light default 和 Dark default 两个变体。应用实际处于浅色时采用 Light，深色时采用 Dark。应用跟随系统、临时预览主题和取消预览时，Markdown 同步实际生效的模式。不新增独立的 Markdown 深浅开关，不增加 github-light、github-dark 配置 ID。
 
-新配置、未保存主题的配置默认 GitHub。旧 Paperglow 选择迁移成 GitHub。背景是完整的白色或 GitHub 深色页面，没有暖色纸张、外层卡片边框、圆角或阴影。阅读主题只控制 Markdown 阅读区，不改变应用界面、终端和源码编辑器配色。
+新配置、未保存主题的配置默认 GitHub。旧 Paperglow 选择迁移成 GitHub。内置主题的正文背景与当前应用背景统一，没有外层卡片边框、圆角或阴影。GitHub 源调色板仍完整保留，运行时只替换内置主题的外层与纸张背景；自定义包仍使用自己的背景。阅读主题不改变应用界面、终端和源码编辑器配色。
 
 ### 2.2 设置
 
@@ -54,17 +54,18 @@ GitHub 是一个主题包，ID 为 github，显示名为 GitHub，包含 Light d
 
 ### 3.1 核对来源
 
-2026-10-05 用户将目标收紧为与 GitHub 官网默认样式及行为完全一致。以 Chrome CDP 实测的官网结果为优先依据，记录日期、模式、视口与源 URL；github-markdown-css 5.9.0、Primer token 与 Octicons 保留为辅助来源及许可记录，不能替代官网实测。
+2026-10-05 用户先要求对照 GitHub 官网样式与行为，随后明确接受正文背景跟随应用的例外；不能将这个版本称为全部像素与官网一致。其他元素继续以 Chrome CDP 实测的官网结果为优先依据，记录日期、模式、视口与源 URL；github-markdown-css 5.9.0、Primer token 与 Octicons 保留为辅助来源及许可记录，不能替代官网实测。
 
 官网实测已经修正正文宽度、外围留白、默认链接下划线及标题代码内边距。原始计算样式保存于 tests/fixtures/github-live-2026-10-05；不能以新主题文件复制出的常量作为独立验证证据。
 
-字体栅格化、语法分类、标题悬停链接、任务复选框和 Mermaid 输出差异不再被视为自动通过的例外，均须记录并解决或获得用户明确接受。当前尚无原生窗口截图验收，不能宣称完整一致。此前 Out of Scope 中的渲染能力限制描述现有实现边界，不代表本次严格一致目标已完成。
+字体栅格化、语法分类、标题悬停链接、任务复选框和 Mermaid 输出差异均须记录并解决或获得用户明确接受。Windows 原生窗口验收结果记录在 docs/testing/markdown-github-theme.md；未覆盖的平台与 DPI 不得宣称通过。此前 Out of Scope 中的渲染能力限制描述现有实现边界，不代表严格一致目标已完成。
 
 ### 3.2 主要配色
 
 | 用途 | Light | Dark |
 |---|---|---|
-| 页面和阅读区背景 | #ffffff | #0d1117 |
+| GitHub 源背景（自定义包缺省值） | #ffffff | #0d1117 |
+| 内置主题运行时页面和阅读区背景 | 当前应用背景 | 当前应用背景 |
 | 正文和主要标题 | #1f2328 | #f0f6fc |
 | 次要文字及 h6 | #59636e | #9198a1 |
 | 链接 | #0969da | #4493f8 |
@@ -104,7 +105,7 @@ GitHub 是一个主题包，ID 为 github，显示名为 GitHub，包含 Light d
 | 分隔线 | 高 4，上下间距 24 |
 | 链接 | 默认始终显示下划线，悬停保持同色与下划线 |
 
-任务项继续只展示选中状态。代码复制、正文选择和现有键盘滚动行为保留。Mermaid 当前使用现有渲染器的 Primer 角色映射，与 GitHub mermaid.js 的输出差距属于未完成验收项。
+任务项采用灰色、只读的复选框。标题提供悬停锚点链接，代码复制、正文选择和现有键盘滚动行为保留。内置 GitHub 的 Mermaid 使用渲染器的 default/dark 主题，背景透明以显示应用底色，文字转换为原生 SVG 可绘制形式；自定义主题继续使用包内语义颜色。图表提供复制、展开、缩放、平移和复位操作；渲染器与 GitHub mermaid.js 的字体栅格化和布局仍须分别核验。
 
 ### 配置迁移
 

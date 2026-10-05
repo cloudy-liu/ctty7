@@ -18,8 +18,8 @@ use gpui_component::{
     },
     input::InputState,
     text::{
-        AlertStyle, InlineCodeStyle, KeyboardStyle, LinkUnderline, TextView, TextViewState,
-        TextViewStyle,
+        AlertStyle, InlineCodeStyle, KeyboardStyle, LinkUnderline, TaskCheckboxStyle, TextView,
+        TextViewState, TextViewStyle,
     },
 };
 
@@ -44,6 +44,9 @@ fn extensions() -> gpui_component::text::MarkdownExtensions {
 }
 
 impl Global for Registry {}
+
+struct ReadingFonts(Arc<Vec<String>>);
+impl Global for ReadingFonts {}
 
 impl crate::ui::app::Tty7App {
     pub(crate) fn set_markdown_theme(&mut self, id: &str, cx: &mut Context<Self>) {
@@ -129,6 +132,25 @@ fn available_reading_font(
     fallback
 }
 
+fn rust_reading_language() -> SharedString {
+    static LANGUAGE: std::sync::OnceLock<SharedString> = std::sync::OnceLock::new();
+    LANGUAGE
+        .get_or_init(|| {
+            let registry = gpui_component::highlighter::LanguageRegistry::singleton();
+            let mut config = registry.language("rust").expect("bundled Rust grammar");
+            config.name = "ctty7-markdown-rust".into();
+            let captures = regex::Regex::new(r"@type(?:\.[A-Za-z0-9_.-]+)?\b").unwrap();
+            config.highlights = format!(
+                "(reference_type \"&\" @github.rust.reference)\n{}",
+                captures.replace_all(&config.highlights, "@github.rust.type")
+            )
+            .into();
+            registry.register("ctty7-markdown-rust", &config);
+            config.name
+        })
+        .clone()
+}
+
 fn highlight(theme: &Theme, dark: bool, revision: u64) -> Arc<HighlightTheme> {
     let palette = theme.palette(dark);
     let s = &palette.syntax;
@@ -178,6 +200,23 @@ fn highlight(theme: &Theme, dark: bool, revision: u64) -> Arc<HighlightTheme> {
                 type_: token(s.entity.unwrap_or(s.r#type)),
                 enum_: token(s.entity.unwrap_or(s.r#type)),
                 variant: token(s.entity.unwrap_or(s.r#type)),
+                captures: [
+                    (
+                        "github.rust.type".into(),
+                        ThemeStyle::from(color(
+                            if s.r#type == markdown_theme::builtin().palette(dark).syntax.r#type {
+                                palette.code_foreground
+                            } else {
+                                s.r#type
+                            },
+                        )),
+                    ),
+                    (
+                        "github.rust.reference".into(),
+                        ThemeStyle::from(color(s.constant.unwrap_or(s.number))),
+                    ),
+                ]
+                .into(),
                 comment: token(s.comment),
                 comment_doc: token(s.comment),
                 string: token(s.string),
@@ -219,6 +258,16 @@ pub(crate) fn reading_style(
         .map(SharedString::from)
         .unwrap_or(mono);
     let mut style = TextViewStyle {
+        code_block_languages: [("rust".into(), rust_reading_language())].into(),
+        heading_permalink_icon: Some("icons/github/link.svg".into()),
+        task_checkbox: Some(TaskCheckboxStyle {
+            size: px(13. * scale),
+            radius: px(2. * scale),
+            border: gpui::rgb(if dark { 0x858585 } else { 0x767676 }).into(),
+            background: gpui::rgb(if dark { 0x3b3b3b } else { 0xffffff }).into(),
+            checked_background: gpui::rgb(if dark { 0x6b6b6b } else { 0xc8c8c8 }).into(),
+            foreground: gpui::rgb(if dark { 0xaaaaaa } else { 0xffffff }).into(),
+        }),
         is_dark: dark,
         bold_weight: FontWeight(t.bold_weight),
         link_underline: match l.link_underline {
@@ -421,12 +470,18 @@ pub(crate) struct MarkdownPreview {
     width: Pixels,
     style_key: Option<(String, u64, bool, u32, SharedString)>,
     style: TextViewStyle,
-    available_fonts: Option<Vec<String>>,
+    available_fonts: Option<Arc<Vec<String>>>,
     mermaid_enabled: bool,
+    diagram_generation: u64,
+    diagram_task: Option<gpui::Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl MarkdownPreview {
+    pub(crate) fn is_loading(&self, cx: &App) -> bool {
+        self.text.read(cx).source().is_empty() && self.source.read(cx).text().len() != 0
+    }
+
     pub(crate) fn new(
         source: Entity<InputState>,
         host: SharedHost,
@@ -436,13 +491,19 @@ impl MarkdownPreview {
         cx: &mut Context<Self>,
     ) -> Self {
         let content = source.read(cx).text().to_string();
-        let (processed_content, diagrams) = if mermaid_enabled {
-            Self::preprocess_mermaid(&content, cx)
+        let processed_content = if mermaid_enabled {
+            Self::mermaid_placeholders(&content).0
         } else {
-            (content, HashMap::new())
+            content.clone()
         };
         let text = cx.new(|cx| {
-            TextViewState::markdown_with_extensions(&processed_content, extensions(), cx)
+            // Use the component's streaming parser for the initial document.
+            // Parsing markdown-rs on the UI thread delays the click response;
+            // this reading pane owns its scroll extent and can reflow when the
+            // background parse lands (unlike an item measured by an outer list).
+            let mut text = TextViewState::markdown_with_extensions("", extensions(), cx);
+            text.push_str(&processed_content, cx);
+            text
         });
         let subscriptions = vec![
             cx.observe_global::<Registry>(|_, cx| cx.notify()),
@@ -456,13 +517,13 @@ impl MarkdownPreview {
             }
         })
         .detach();
-        Self {
+        let mut this = Self {
             source,
             host,
             path,
             app,
             images: HashMap::new(),
-            diagrams,
+            diagrams: HashMap::new(),
             image_bytes: 0,
             pending_anchor: None,
             last_position: None,
@@ -476,8 +537,12 @@ impl MarkdownPreview {
             style: TextViewStyle::default(),
             available_fonts: None,
             mermaid_enabled,
+            diagram_generation: 0,
+            diagram_task: None,
             _subscriptions: subscriptions,
-        }
+        };
+        this.start_diagrams(content, cx);
+        this
     }
 
     pub(crate) fn sync(&mut self, revision: u64, cx: &mut Context<Self>) {
@@ -496,19 +561,7 @@ impl MarkdownPreview {
         self.last_position = None;
         self.restore_position = None;
         let content = self.source.read(cx).text().to_string();
-        for diagram in self.diagrams.values() {
-            if let TextViewImageSource::Ready(source) = diagram {
-                source.remove_asset(cx);
-            }
-        }
-        let (processed_content, diagrams) = if self.mermaid_enabled {
-            Self::preprocess_mermaid(&content, cx)
-        } else {
-            (content, HashMap::new())
-        };
-        self.diagrams = diagrams;
-        self.text
-            .update(cx, |state, cx| state.set_text(&processed_content, cx));
+        self.start_diagrams(content, cx);
         cx.notify();
     }
 
@@ -655,34 +708,103 @@ impl MarkdownPreview {
     /// Replace ```` ```mermaid ```` fences with inline SVG rendered in the
     /// active Markdown theme. A diagram that fails to render stays a plain
     /// code block, followed by an HTML comment carrying the error.
-    fn preprocess_mermaid(
-        content: &str,
-        cx: &mut Context<Self>,
-    ) -> (String, HashMap<String, TextViewImageSource>) {
+    fn mermaid_fences() -> &'static regex::Regex {
         static MERMAID_FENCE: LazyLock<regex::Regex> = LazyLock::new(|| {
             regex::Regex::new(r"(?m)^```mermaid[ \t]*\n([\s\S]*?)^```")
                 .expect("mermaid fence regex is valid")
         });
+        &MERMAID_FENCE
+    }
 
-        if !MERMAID_FENCE.is_match(content) {
-            return (content.to_string(), HashMap::new());
+    fn mermaid_placeholders(content: &str) -> (String, usize) {
+        let mut count = 0;
+        let processed = Self::mermaid_fences()
+            .replace_all(content, |_: &regex::Captures| {
+                let image = format!("\n![Mermaid diagram](ctty7-mermaid://{count})\n");
+                count += 1;
+                image
+            })
+            .into_owned();
+        (processed, count)
+    }
+
+    fn start_diagrams(&mut self, content: String, cx: &mut Context<Self>) {
+        self.diagram_generation = self.diagram_generation.wrapping_add(1);
+        self.diagram_task.take();
+        let (processed, count) = if self.mermaid_enabled {
+            Self::mermaid_placeholders(&content)
+        } else {
+            (content.clone(), 0)
+        };
+        for image in self.diagrams.values() {
+            if let TextViewImageSource::Ready(source) = image {
+                source.remove_asset(cx);
+            }
         }
+        self.diagrams = (0..count)
+            .map(|i| (format!("ctty7-mermaid://{i}"), TextViewImageSource::Loading))
+            .collect();
+        self.text
+            .update(cx, |text, cx| text.set_text(&processed, cx));
+        if count == 0 {
+            return;
+        }
+        let generation = self.diagram_generation;
         let theme = current(cx).theme;
         let dark = cx.theme().mode.is_dark();
-
-        let mut diagrams = HashMap::new();
-        let processed = MERMAID_FENCE
-            .replace_all(content, |caps: &regex::Captures| {
-                let source = &caps[1];
-                match crate::ui::markdown_mermaid::render_mermaid(source, &theme, dark) {
-                    Ok(svg) => {
-                        let url = format!("ctty7-mermaid://{}", diagrams.len());
-                        diagrams.insert(
-                            url.clone(),
+        let render = cx
+            .background_executor()
+            .spawn(async move { Self::preprocess_mermaid(&content, &theme, dark) });
+        self.diagram_task = Some(cx.spawn(async move |this, cx| {
+            let (processed, diagrams) = render.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.diagram_generation != generation {
+                    return;
+                }
+                this.restore_position = this
+                    .text
+                    .read(cx)
+                    .reading_position(this.scroll.bounds().top())
+                    .or(this.last_position);
+                this.diagrams = diagrams
+                    .into_iter()
+                    .map(|(url, svg)| {
+                        (
+                            url,
                             TextViewImageSource::Ready(gpui::ImageSource::Image(Arc::new(
                                 gpui::Image::from_bytes(gpui::ImageFormat::Svg, svg.into_bytes()),
                             ))),
-                        );
+                        )
+                    })
+                    .collect();
+                this.text
+                    .update(cx, |text, cx| text.set_text(&processed, cx));
+                cx.notify();
+            });
+        }));
+    }
+
+    fn preprocess_mermaid(
+        content: &str,
+        theme: &Theme,
+        dark: bool,
+    ) -> (String, HashMap<String, String>) {
+        let mermaid_fence = Self::mermaid_fences();
+
+        if !mermaid_fence.is_match(content) {
+            return (content.to_string(), HashMap::new());
+        }
+
+        let mut diagrams = HashMap::new();
+        let mut index = 0;
+        let processed = mermaid_fence
+            .replace_all(content, |caps: &regex::Captures| {
+                let source = &caps[1];
+                let url = format!("ctty7-mermaid://{index}");
+                index += 1;
+                match crate::ui::markdown_mermaid::render_mermaid(source, theme, dark) {
+                    Ok(svg) => {
+                        diagrams.insert(url.clone(), svg);
                         format!("\n![Mermaid diagram]({url})\n")
                     }
                     Err(err) => {
@@ -714,9 +836,14 @@ impl Render for MarkdownPreview {
             scale.to_bits(),
             mono.clone(),
         );
-        let available = self
-            .available_fonts
-            .get_or_insert_with(|| window.text_system().all_font_names());
+        let available = self.available_fonts.get_or_insert_with(|| {
+            if let Some(fonts) = cx.try_global::<ReadingFonts>() {
+                return fonts.0.clone();
+            }
+            let fonts = Arc::new(window.text_system().all_font_names());
+            cx.set_global(ReadingFonts(fonts.clone()));
+            fonts
+        });
         let body_font = if entry.theme.typography.resolve_font_stack {
             available_reading_font(
                 &entry.theme.typography.fonts,
@@ -756,24 +883,24 @@ impl Render for MarkdownPreview {
             }
             if self.style_key.is_some() && self.mermaid_enabled {
                 let content = self.source.read(cx).text().to_string();
-                let (processed, diagrams) = Self::preprocess_mermaid(&content, cx);
-                for diagram in self.diagrams.values() {
-                    if let TextViewImageSource::Ready(source) = diagram {
-                        source.remove_asset(cx);
-                    }
-                }
-                self.diagrams = diagrams;
-                // Stable diagram URLs retain parsed text, byte selections and
-                // source revision while the underlying SVG changes palette.
-                self.text.update(cx, |text, cx| {
-                    if text.source().as_ref() != processed.as_str() {
-                        text.set_text(&processed, cx);
-                    }
-                });
+                self.start_diagrams(content, cx);
             }
             self.style_key = Some(key);
         }
         let palette = entry.theme.palette(dark);
+        // The user requested an integrated reading surface while retaining
+        // GitHub's text and element colors. Explicit custom paper colors remain
+        // part of the custom-theme contract.
+        let reading_background: gpui::Background = if entry.theme.id == markdown_theme::DEFAULT_ID {
+            cx.theme().tokens.background.into()
+        } else {
+            color(palette.background).into()
+        };
+        let paper_background = if entry.theme.id == markdown_theme::DEFAULT_ID {
+            reading_background
+        } else {
+            color(palette.paper).into()
+        };
         let typography = &entry.theme.typography;
         let layout = &entry.theme.layout;
         let compact = self.width < px(layout.compact_below * scale);
@@ -790,6 +917,7 @@ impl Render for MarkdownPreview {
         let copy_color = color(palette.muted);
         let link_owner = cx.weak_entity();
         let image_owner = cx.weak_entity();
+        let diagram_owner = cx.weak_entity();
         let text = TextView::new(&self.text)
             .markdown_extensions(extensions())
             .selectable(true)
@@ -801,6 +929,59 @@ impl Render for MarkdownPreview {
                 image_owner
                     .update(cx, |this, cx| this.image_source(url, cx))
                     .unwrap_or(TextViewImageSource::Failed("document closed".into()))
+            })
+            .image_actions(move |url, _, cx| {
+                diagram_owner
+                    .update(cx, |this, cx| {
+                        let TextViewImageSource::Ready(image) = this.diagrams.get(url.as_ref())?
+                        else {
+                            return None;
+                        };
+                        let index: usize = url.strip_prefix("ctty7-mermaid://")?.parse().ok()?;
+                        let content = this.source.read(cx).text().to_string();
+                        let code: SharedString =
+                            Self::mermaid_fences().captures_iter(&content).nth(index)?[1]
+                                .to_owned()
+                                .into();
+                        let expanded_image = image.clone();
+                        Some(
+                            div()
+                                .flex()
+                                .gap_1()
+                                .child(
+                                    Button::new("expand-diagram")
+                                        .icon(IconName::Maximize)
+                                        .ghost()
+                                        .xsmall()
+                                        .text_color(copy_color)
+                                        .tooltip(t(L10nKey::MarkdownExpandDiagram))
+                                        .on_click(move |_, window, cx| {
+                                            cx.stop_propagation();
+                                            crate::ui::markdown_mermaid::open_diagram(
+                                                expanded_image.clone(),
+                                                window,
+                                                cx,
+                                            );
+                                        }),
+                                )
+                                .child(
+                                    Button::new("copy-diagram")
+                                        .icon(IconName::Copy)
+                                        .ghost()
+                                        .xsmall()
+                                        .text_color(copy_color)
+                                        .tooltip(t(L10nKey::EditorCopyCode))
+                                        .on_click(move |_, _, cx| {
+                                            cx.stop_propagation();
+                                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                                                code.to_string(),
+                                            ));
+                                        }),
+                                ),
+                        )
+                    })
+                    .ok()
+                    .flatten()
             })
             .code_block_actions(move |block, _, _| {
                 let code = block.code();
@@ -823,7 +1004,7 @@ impl Render for MarkdownPreview {
             .line_height(relative(typography.line_height))
             .font_family(body_font)
             .text_color(color(palette.foreground))
-            .bg(color(palette.paper));
+            .bg(paper_background);
         card.style().text.font_fallbacks =
             Some(gpui::FontFallbacks::from_fonts(typography.fonts.clone()));
         let card = card
@@ -839,6 +1020,9 @@ impl Render for MarkdownPreview {
                         inset: false,
                     }])
             })
+            .when(self.is_loading(cx), |card| {
+                card.child(t(L10nKey::PanelLoading))
+            })
             .child(text);
         let entity = cx.weak_entity();
         let scroll = self.scroll.clone();
@@ -848,7 +1032,7 @@ impl Render for MarkdownPreview {
                 .id("markdown-reading")
                 .size_full()
                 .key_context("MarkdownPreview")
-                .bg(color(palette.background))
+                .bg(reading_background)
                 .overflow_y_scroll()
                 .track_scroll(&scroll)
                 .p(px(outer))
@@ -863,6 +1047,11 @@ impl Render for MarkdownPreview {
                             this.width = bounds.size.width;
                             this.restore_position = this.restore_position.or(this.last_position);
                             cx.notify();
+                            return;
+                        }
+                        // An anchor requested while opening the file must wait
+                        // for its initial background parse and first layout.
+                        if this.is_loading(cx) {
                             return;
                         }
                         if let Some(anchor) = this.pending_anchor.take() {

@@ -996,6 +996,32 @@ mod config_reload_tests {
     }
 }
 
+#[cfg(all(test, windows, target_env = "msvc"))]
+mod windows_stack_tests {
+    #[test]
+    fn windows_gui_executable_reserves_eight_mib_for_the_main_thread() {
+        // Check the linked image, so an ignored dependency Cargo configuration
+        // or a missing linker argument cannot silently restore the 1 MiB default.
+        let image = std::fs::read(std::env::current_exe().unwrap()).unwrap();
+        assert_eq!(&image[..2], b"MZ");
+        let pe = u32::from_le_bytes(image[0x3c..0x40].try_into().unwrap()) as usize;
+        assert_eq!(&image[pe..pe + 4], b"PE\0\0");
+        let optional = pe + 24;
+        let magic = u16::from_le_bytes(image[optional..optional + 2].try_into().unwrap());
+        let reserve = match magic {
+            0x20b => u64::from_le_bytes(image[optional + 72..optional + 80].try_into().unwrap()),
+            0x10b => {
+                u32::from_le_bytes(image[optional + 72..optional + 76].try_into().unwrap()) as u64
+            }
+            _ => panic!("unsupported PE optional header {magic:#x}"),
+        };
+        assert!(
+            reserve >= 8 * 1024 * 1024,
+            "Windows GUI main-thread stack reserve is {reserve} bytes; expected at least 8 MiB"
+        );
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::merge_paths;

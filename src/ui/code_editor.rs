@@ -65,11 +65,20 @@ pub(crate) struct OpenFile {
     pub(crate) preview: bool,
     pub(crate) wrap: bool,
     pub(crate) reading: Option<Entity<crate::ui::markdown_preview::MarkdownPreview>>,
+    source_highlighter_ready: std::cell::Cell<bool>,
     _sub: Subscription,
     _observe: Subscription,
 }
 
 impl OpenFile {
+    fn prepare_source(&self, cx: &mut Context<Tty7App>) {
+        if !self.source_highlighter_ready.replace(true) {
+            self.input.update(cx, |input, cx| {
+                input.set_highlighter("markdown", cx);
+            });
+        }
+    }
+
     fn label(&self) -> SharedString {
         self.path
             .file_name()
@@ -500,6 +509,7 @@ impl Tty7App {
         };
         match navigation {
             EditorNavigation::Source { line, column } => {
+                file.prepare_source(cx);
                 let input = file.input.clone();
                 file.preview = false;
                 input.update(cx, |input, cx| input.focus(window, cx));
@@ -690,7 +700,13 @@ impl Tty7App {
         let language = language_for_path(&path);
         let input = cx.new(|cx| {
             InputState::new(window, cx)
-                .code_editor(language)
+                // Markdown opens in reading mode. Defer the source grammar and
+                // its embedded-language parsers until the editor is visible.
+                .code_editor(if language == "markdown" {
+                    "text"
+                } else {
+                    language
+                })
                 .multi_line(true)
                 .tab_size(TabSize {
                     tab_size: 4,
@@ -758,6 +774,7 @@ impl Tty7App {
                 preview: reading.is_some(),
                 wrap: false,
                 reading,
+                source_highlighter_ready: std::cell::Cell::new(language != "markdown"),
                 _sub: sub,
                 _observe: observe,
             },
@@ -824,6 +841,7 @@ impl Tty7App {
             {
                 reading.read(cx).focus_handle(cx).focus(window, cx);
             } else {
+                f.prepare_source(cx);
                 f.input.update(cx, |input, cx| input.focus(window, cx));
             }
         }
@@ -1203,6 +1221,7 @@ impl Tty7App {
                 reading.into_any_element()
             }
             Some(f) => {
+                f.prepare_source(cx);
                 let input = f.input.clone();
                 Input::new(&input)
                     .editor_style(editor_search_style(
@@ -1641,6 +1660,156 @@ mod tests {
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
+    }
+
+    #[gpui::test]
+    fn markdown_opening_keeps_an_anchor_while_its_background_parse_is_pending(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, mut vcx) = markdown_window(cx);
+        let host: SharedHost = tty7_core::host::local::LocalHost::new();
+        let path = PathBuf::from("/markdown-tests/background.md");
+        let content = (0..40)
+            .map(|n| format!("## Section {n}\n\nParagraph {n}.\n\n"))
+            .collect::<String>();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(host.clone(), path.clone(), content, None, window, cx);
+            let reading = app
+                .tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .clone()
+                .unwrap();
+            assert!(
+                reading.read(cx).is_loading(cx),
+                "opening must enqueue the parse"
+            );
+            app.editor_open_markdown_link(host, &path, Some("section-30".into()), window, cx);
+        });
+        let reading = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .clone()
+                .unwrap()
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            reading.read_with(cx, |reading, cx| !reading.is_loading(cx))
+        });
+        for _ in 0..4 {
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            vcx.run_until_parked();
+        }
+        reading.read_with(&vcx, |reading, cx| {
+            let target = reading.text.read(cx).anchor_bounds("section-30").unwrap();
+            assert!((target.top() - reading.scroll.bounds().top() - px(12.)).abs() < px(1.));
+            assert!(reading.scroll.offset().y < px(-300.));
+        });
+        vcx.update(|window, cx| {
+            assert!(
+                gpui_component::Root::read(window, cx)
+                    .notification
+                    .read(cx)
+                    .notifications()
+                    .is_empty(),
+                "opening must not report a missing anchor"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn repository_readme_opens_and_draws_in_preview(cx: &mut TestAppContext) {
+        let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("README.md");
+        let host: SharedHost = tty7_core::host::local::LocalHost::new();
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_open_on_host(host, &path, window, cx)
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            app.read_with(cx, |app, _| {
+                app.tab_code().is_some_and(|code| !code.files.is_empty())
+            })
+        });
+        for _ in 0..3 {
+            vcx.update(|window, cx| {
+                window.refresh();
+                let _ = window.draw(cx);
+            });
+            vcx.run_until_parked();
+        }
+        app.read_with(&vcx, |app, _| {
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(file.preview);
+            assert!(file.reading.is_some());
+        });
+    }
+
+    #[gpui::test]
+    #[ignore = "manual Markdown opening and switching profile; run with --ignored --nocapture"]
+    fn markdown_open_profile(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let host: SharedHost = tty7_core::host::local::LocalHost::new();
+        for filename in [
+            "README.md",
+            "docs/examples/markdown-github-theme.md",
+            "README.zh-CN.md",
+        ] {
+            let source = std::fs::read_to_string(filename).unwrap();
+            let started = std::time::Instant::now();
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.editor_install_file(host.clone(), filename.into(), source, None, window, cx)
+            });
+            let installed = started.elapsed();
+            vcx.update(|window, cx| {
+                window.refresh();
+                let _ = window.draw(cx);
+            });
+            let response_frame = started.elapsed();
+            wait_for_markdown(&mut vcx, |cx| {
+                app.read_with(cx, |app, cx| {
+                    !app.tab_code()
+                        .unwrap()
+                        .active_file()
+                        .unwrap()
+                        .reading
+                        .as_ref()
+                        .unwrap()
+                        .read(cx)
+                        .is_loading(cx)
+                })
+            });
+            vcx.update(|window, cx| {
+                window.refresh();
+                let _ = window.draw(cx);
+            });
+            eprintln!(
+                "Markdown profile {filename}: install={installed:?}, response frame={response_frame:?}, content drawn={:?}",
+                started.elapsed()
+            );
+        }
+        let started = std::time::Instant::now();
+        for _ in 0..10 {
+            for filename in [
+                "README.md",
+                "docs/examples/markdown-github-theme.md",
+                "README.zh-CN.md",
+            ] {
+                app.update_in(&mut vcx, |app, window, cx| {
+                    assert!(app.editor_activate_open(host.id(), Path::new(filename), window, cx))
+                });
+                vcx.update(|window, cx| {
+                    window.refresh();
+                    let _ = window.draw(cx);
+                });
+            }
+        }
+        eprintln!("Markdown profile 30 warm switches: {:?}", started.elapsed());
     }
 
     #[gpui::test]

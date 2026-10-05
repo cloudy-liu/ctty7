@@ -160,7 +160,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsThemesRejected => "主题文件夹里这些没能加载",
         L10nKey::SettingsMarkdownTheme => "Markdown 阅读主题",
         L10nKey::SettingsMarkdownThemeDesc => {
-            "默认使用 GitHub。阅读主题跟随应用深浅模式，不继承应用背景色。自定义 v2 文件修改后自动加载。"
+            "GitHub 默认跟随应用背景和深浅模式。自定义 v2 主题保留自己的背景，修改后自动加载。"
         }
         L10nKey::SettingsMarkdownThemeUnavailable => {
             "无法加载 {requested}，当前使用 {active}。修复主题文件后会自动恢复。"
@@ -180,6 +180,9 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsMarkdownUseGithub => "使用 GitHub",
         L10nKey::EditorCopyCode => "复制代码",
         L10nKey::MarkdownAnchorMissing => "未找到该标题",
+        L10nKey::MarkdownExpandDiagram => "展开图表",
+        L10nKey::MarkdownZoomIn => "放大",
+        L10nKey::MarkdownZoomOut => "缩小",
         L10nKey::ThemeDuplicateFailed => "无法复制主题",
         L10nKey::ThemeSaveFailed => "无法保存主题",
         L10nKey::OpenInFileManagerFailed => "无法打开 {path}",
