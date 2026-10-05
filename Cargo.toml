@@ -107,11 +107,10 @@ toml = "0.8"
 # gpui's own clipboard code, so pinning it here adds no new native code.
 image = "0.25"
 
-# HTTP client for the startup update check (`core::update`): one GET to the
-# GitHub releases API to see if a newer version has shipped. `reqwest_client`
-# wraps Zed's `zed-reqwest` fork behind gpui's `http_client` trait (re-exported
-# as `gpui::http_client`) and manages its own tokio runtime. That reqwest+rustls
-# stack is *already* compiled into the tree via `gpui-component-assets`, so this
+# HTTP client for update checks and GPUI's remote Markdown images.
+# `reqwest_client` wraps Zed's `zed-reqwest` fork behind the HTTP trait
+# re-exported as `gpui::http_client` and manages its own Tokio runtime.
+# The reqwest+rustls stack is already compiled via `gpui-component-assets`, so this
 # pins no new native code — it only exposes what we're already building. Pinned
 # to gpui's rev so the shared `http_client`/`zed-reqwest` versions stay aligned.
 reqwest_client = { git = "https://github.com/zed-industries/zed", rev = "1d217ee39d381ac101b7cf49d3d22451ac1093fe" }

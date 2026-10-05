@@ -184,3 +184,40 @@ rectangle. Node fills
 remain Mermaid's own gray/dark and lavender/light colors, as required by the
 approved preservation of element colors. This follow-up did not reproduce a new
 white-canvas defect; it does not establish xAI/Grok styling equivalence.
+
+## Remote README images and animation support
+
+GPUI now receives the application HTTP client at GUI startup. Remote Markdown
+images previously used GPUI's unconfigured client and showed their alt text.
+The client shares the updater's proxy normalization and user-agent policy.
+The proxy selection applies at launch; changing it requires a GUI restart.
+
+A real loopback HTTP fixture exercises the GPUI image loader, rather than a
+substitute decoder. It fetches a static SVG and an animated GIF, checks the
+SVG dimensions and preserves both GIF frames. A second check verifies the
+configured bare proxy is normalized for GPUI. Omitting client installation
+makes the HTTP image test fail before the fixture can serve an image.
+
+README's `readme-typing-svg.demolab.com` title is an animated SVG with SMIL
+`<animate>` and a `textPath`; it is not a GIF. The native resvg path renders
+static SVG only and does not run SMIL or CSS animation. Repairing HTTP image
+loading does not add SVG animation support. A browser can play the original
+image; native animated GIF/WebP use a separate multi-frame decoder. Remote
+service errors and unsupported SVG content can still produce alt text.
+
+Native Windows verification on 2026-10-05 used the independently built GUI
+and its file-panel reading view. README's remote release, build and license
+badges loaded, but the animated title remained blank across observations.
+The SVG service returned HTTP 200; browser samples of its animated path
+changed length over time. Its `path0` has no static `d` attribute: SMIL
+supplies that geometry, so ignoring animation also removes the title text.
+
+The local two-frame GIF control stayed on its red first frame in the reading
+view, even with the window active. The component's visible image element
+does not have the stable ID that GPUI needs for animation state and repaint
+scheduling. Frame decoding alone therefore does not establish playback.
+Local copies of the service SVG also hit a separate format-detection gap:
+the validator does not recognize SVG preceded by an XML comment.
+
+These checks verify the HTTP repair, but SVG animation, GIF playback in the
+reading view, and comment-prefixed local SVG loading remain unresolved.

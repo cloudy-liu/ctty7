@@ -672,6 +672,9 @@ fn main() {
         // orphaned-daemon trap the tray is meant to prevent.
         .with_quit_mode(QuitMode::Explicit)
         .run(move |cx| {
+            if let Err(error) = crate::core::http::init(cx, config.http_proxy.as_deref()) {
+                log::error!("failed to initialize the GUI HTTP client: {error:#}");
+            }
             gpui_component::init(cx);
             register_bundled_fonts(cx);
             cx.activate(true);
