@@ -4,7 +4,7 @@
 
 发布目标：`cloudy-liu/ctty7` 的 GitHub Issues，标签 `ready-for-agent`。
 
-当前阶段：fork PR 评审与验收。用户已批准在独立 worktree 中实施，并在实现后授权提交、推送和创建 fork PR。范围包括默认 Paperglow 配色、用户主题文件、设置选择、动态加载，以及本文列出的 Markdown 和 README 兼容能力。用户已确认 Markdown 预览范围和两处测试入口；验证结果及尚待人工验收的项目记录在 [实现验证记录](../testing/markdown-preview.md)。
+归档状态：基础预览已合入主分支，Paperglow 已由 GitHub 与 v2 主题取代。后续 issue #85 于 2026-10-06 随 PR #91 合并关闭。本文保留原规格及当时的验收清单，不作为当前待办；最终范围见 [GitHub 验证记录](../testing/markdown-github-theme.md)，未完成事项见 [项目状态](../maintenance/status.md)。
 
 ## Problem Statement
 

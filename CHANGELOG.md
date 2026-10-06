@@ -15,15 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Markdown previews now offer GitHub Light and Dark styles, including typed alerts, padded inline code, keyboard keys, striped tables and diff span backgrounds. GitHub is the only built-in reading theme; saved Paperglow selections migrate to it. Custom packages require v2 and inherit GitHub defaults; v1 files remain untouched and show upgrade instructions. (cloudy-liu/ctty7#85)
 
-- **Mermaid diagram support in Markdown preview**. Code blocks with `mermaid`
-  language identifier are now rendered as inline SVG diagrams. Supports all
-  Mermaid diagram types: flowcharts, sequence diagrams, class diagrams, state
-  diagrams, Git graphs, Gantt charts, pie charts, and more. Diagrams automatically
-  inherit colors from the active Markdown theme, adapting seamlessly to light/dark
-  mode switches. The integration uses the `merman` headless renderer with full
-  theme mapping from Paperglow palette to diagram elements (canvas, surface, text,
-  borders, actors, notes, activation bars). See `docs/mermaid-support.md` for
-  usage examples and theme customization.
+- Mermaid fences render as inline SVG diagrams with source-copy and expanded
+  viewing controls. GitHub reading uses Mermaid's default/dark element colors
+  on a transparent canvas; custom v2 themes supply their own reading palette.
+  Rendering runs in the background and supports the syntax provided by `merman`.
+  See [Mermaid support](docs/mermaid-support.md). (cloudy-liu/ctty7#80, cloudy-liu/ctty7#85)
 
 - **Documents dock beside the terminal** (#625). Opening a file, toggling the
   code panel or opening a diff no longer covers the workspace: the document

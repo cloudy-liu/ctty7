@@ -2,6 +2,10 @@
 
 > 历史记录：主题组成、配置迁移及文件格式已由 [规格 #85](https://github.com/cloudy-liu/ctty7/issues/85) 更新。当前使用唯一内置 GitHub 与 v2 自定义主题，见 [阅读主题文档](../customization/markdown-themes.mdx)。
 
+后续 issue #85 已于 2026-10-06 随 PR #91 合并关闭。下文待验收项描述历史运行，
+最终平台截图、取消的 DPI/200% 范围和保留限制以 [GitHub 验证记录](markdown-github-theme.md)
+为准。真实 SSH/SFTP 与接近 4 MiB 文档的滚动检查不由截图矩阵覆盖；见 [项目状态](../maintenance/status.md)。
+
 验证日期：2026-09-13。当前执行环境为 Windows，Rust 目标为 `x86_64-pc-windows-msvc`。
 
 ## 实现与依赖

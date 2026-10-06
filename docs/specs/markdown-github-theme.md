@@ -1,3 +1,9 @@
+## Status
+
+2026-10-06：应用 PR #88、#91 及组件 PR #4 已合并，issue #85 已关闭。
+macOS/Linux 原生截图矩阵与最终 CI 已完成；新增 Windows DPI 与应用 200% 检查由用户取消。
+验收范围和限制见[验证记录](../testing/markdown-github-theme.md)，剩余工作见[项目状态](../maintenance/status.md)。
+
 ## Problem Statement
 
 ctty7 的 Markdown 阅读应采用 GitHub Light / Dark。此前规格保留 Paperglow，并让自定义主题缺省字段继续继承 Paperglow，造成默认主题、升级行为与自定义主题基底不一致。用户希望删除 Paperglow，保留自定义能力，同时明确旧主题升级和阅读区与应用背景的关系。
@@ -188,7 +194,7 @@ paperglow 保持为历史保留 ID，不能由自定义主题占用，以免与�
 
 此前 macOS CI 的 host::server::pool_tests::closing_the_pool_drops_queued_work 竞态已修正；本轮仍须以最新提交的跨平台 CI 结果为准。全平台 CI 的失败或未完成项应明确处理后，才能声称验证通过。
 
-原始规格不授权合并或发布。2026-10-06 用户随后明确要求完成剩余工作、合并并关闭 #85，又取消 Windows DPI 与 200% 缩放验收。PR #88 和组件 PR #4 已合并；后续修复通过新的 fork PR 交付，在最新 CI 和原生截图检查完成后合并并关闭 #85。不发布 release。
+原始规格不授权合并或发布。2026-10-06 用户随后明确要求完成剩余工作、合并并关闭 #85，又取消 Windows DPI 与 200% 缩放验收。PR #88 和组件 PR #4 已合并；后续修复通过 PR #91 交付，最终 CI 与原生截图检查完成后已合并并关闭 #85。未发布 release。
 
 ## Out of Scope
 
@@ -200,7 +206,7 @@ paperglow 保持为历史保留 ID，不能由自定义主题占用，以免与�
 
 ## Further Notes
 
-- 严格一致目标仍有开放项：标题悬停锚点、任务框外观、语法分类、Mermaid，以及原生窗口截图和字体布局验收。脚注、details/summary、sup/sub、mark、数学公式、emoji 短码等未支持能力也不能计入“全部一致”；若需要调整渲染引擎，需另行形成可评审实现方案。本轮 CDP 校准未实现这些能力。
+- 标题悬停锚点、任务框外观、代表性语法与 Mermaid 修正、平台原生截图已在后续验收中处理。原生字体栅格化、所有语言的语法分类及 Mermaid 横向几何仍不保证与浏览器完全一致。脚注、details/summary、sup/sub、mark、数学公式、emoji 短码等未支持能力不计入本次完成范围；参见验证记录中的限制。
 
 - 本规格替代此前的双内置主题、保留 Paperglow 选择、v1 缺省值继承 Paperglow 等约定。用户已确认保留自定义主题及 v2 / v1 升级策略，并接受 GitHub 固定配色方案。
 - 应用 PR：https://github.com/cloudy-liu/ctty7/pull/88 ，组件 PR：https://github.com/cloudy-liu/gpui-component/pull/4 。只交付到这些 fork，不能向上游开 PR。

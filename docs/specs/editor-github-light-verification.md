@@ -115,6 +115,13 @@ its prior focus; the source/reading regression failed before this correction
 and passed afterward. All 18 editor-focused tests passed on the corrected
 branch, and its locked Windows workspace build passed.
 
+The 2026-10-06 follow-up rebuilt the Windows application and checked the
+corrected footer in a docked source pane. Its long path stayed on one line,
+with wrapping controls and the cursor label visible. Opening and dismissing
+the palette returned focus to the source: Right moved line 13, column 9 to
+column 10 without another click. PR #90's nine CI jobs passed on `73e99d52`,
+and its merge closed issue #89 as completed.
+
 ## Verification limits
 
 macOS/Linux native source-editor visual acceptance was not performed. Their
