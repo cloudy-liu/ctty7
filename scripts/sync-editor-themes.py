@@ -1,4 +1,4 @@
-"""Regenerate the bundled Atom One palettes from the pinned MIT sources.
+"""Regenerate Atom One Dark and GitHub Light from pinned MIT sources.
 
 Run from the repository root. TextMate scopes are selected explicitly: rule
 names are not identifiers and can be duplicated in the upstream theme.
@@ -14,11 +14,10 @@ from urllib.request import urlopen
 DEST = Path(__file__).resolve().parent.parent / "assets" / "editor-themes"
 SOURCES = {
     "dark": ("onedark", "a8be970644982221f9b61fb1c4b3da74b4beab79", "OneDark"),
-    "light": ("onelight", "5866e900db932d580e978a58db42f65cde07998b", "OneLight"),
 }
 FINGERPRINTS = {
     "dark": "53dbe439275f8b382dd9aabc1cc72a5447ed71b8aa47ab370b5dde50e795df7b",
-    "light": "deb60ce3c0c7d084d96205b70c166a0449695f63f12afcc84de37cade650a4cf",
+    "light": "48fb837fba28845d316d0b2686e6263270017474aafcad64ac3beaafe3d86b29",
 }
 
 # These are Tree-sitter roles, paired with authored TextMate scopes.
@@ -152,6 +151,118 @@ def generate(mode, data):
     }
 
 
+def generate_github(data):
+    tokens = data["tokens"]
+    foreground = tokens["codeMirror-fgColor"]
+    # GitHub's website editor tokens, mapped to the existing capture vocabulary.
+    groups = {
+        "keyword": "keyword conditional exception include repeat storageclass import cImport preproc tag.doctype operator",
+        "entity": "function function.builtin function.method.builtin constructor method",
+        "variable": "type enum variant variable variable.special variable.builtin variable.member property field",
+        "support": "type.builtin string.escape escape attribute label",
+        "constant": "constant number boolean float string.special.symbol",
+        "string": "string string.special character text.literal text.code.span",
+        "comment": "comment comment.doc",
+    }
+    syntax = {}
+    for token, captures in groups.items():
+        for capture in captures.split():
+            syntax[capture] = {"color": tokens[f"codeMirror-syntax-fgColor-{token}"]}
+    for capture in ROLES:
+        syntax.setdefault(capture, {"color": foreground})
+    for capture in ["punctuation.bracket", "punctuation.delimiter", "punctuation.special", "punctuation.list_marker"]:
+        syntax[capture] = {"color": foreground}
+    for capture, token in {
+        "tag": "prettylights-syntax-entityTag", "string.regex": "prettylights-syntax-stringRegexp",
+        "string.special.regex": "prettylights-syntax-stringRegexp", "link_text": "fgColor-accent",
+        "link_uri": "prettylights-syntax-string", "text.uri": "prettylights-syntax-string",
+        "text.reference": "fgColor-accent", "title": "prettylights-syntax-markup-heading",
+    }.items():
+        syntax[capture] = {"color": tokens[token]}
+    syntax["emphasis"] = {"color": foreground, "font_style": "italic"}
+    syntax["emphasis.strong"] = {"color": foreground, "font_weight": 700}
+    syntax["embedded"] = {"color": foreground}
+    # Share capture names with the dark palette, never its colors or TextMate rules.
+    for language, overrides in OVERRIDES.items():
+        for capture in overrides:
+            base = capture
+            while base not in syntax and "." in base:
+                base = base.rsplit(".", 1)[0]
+            syntax[f"{language}.{capture}"] = syntax.get(base, syntax["primary"]).copy()
+    for language, captures in {
+        "python": "variable constant property constructor variable.parameter type.parameter",
+        "javascript": "variable variable.parameter punctuation.key_value variable.builtin",
+        "typescript": "variable variable.parameter punctuation.key_value variable.builtin",
+        "tsx": "variable variable.parameter punctuation.key_value variable.builtin",
+        "c": "variable property", "cpp": "variable property",
+        "java": "namespace variable.argument", "ruby": "variable",
+        "sql": "variable field parameter type",
+        "make": "string operator", "toml": "operator",
+        "diff": "constant attribute keyword string variable.builtin",
+    }.items():
+        for capture in captures.split():
+            syntax[f"{language}.{capture}"] = {"color": foreground}
+    for language, capture, token in [
+        ("python", "variable.builtin", "codeMirror-syntax-fgColor-support"),
+        ("python", "constant.builtin", "codeMirror-syntax-fgColor-constant"),
+        ("javascript", "variable.constant", "codeMirror-syntax-fgColor-constant"),
+        ("typescript", "variable.constant", "codeMirror-syntax-fgColor-constant"),
+        ("tsx", "variable.constant", "codeMirror-syntax-fgColor-constant"),
+        ("javascript", "string.special", "prettylights-syntax-stringRegexp"),
+        ("typescript", "string.special", "prettylights-syntax-stringRegexp"),
+        ("tsx", "string.special", "prettylights-syntax-stringRegexp"),
+        ("rust", "type.builtin", "codeMirror-syntax-fgColor-support"),
+        ("rust", "variable.parameter", "codeMirror-syntax-fgColor-variable"),
+        ("rust", "attribute", "codeMirror-syntax-fgColor-variable"),
+        ("css", "type", "codeMirror-syntax-fgColor-constant"),
+        ("css", "property", "codeMirror-syntax-fgColor-support"),
+        ("css", "string.special", "codeMirror-syntax-fgColor-constant"),
+        ("css", "attribute.id", "codeMirror-syntax-fgColor-entity"),
+        ("css", "constant.color", "codeMirror-syntax-fgColor-constant"),
+        ("css", "constant.builtin", "codeMirror-syntax-fgColor-constant"),
+        ("c", "type.builtin", "codeMirror-syntax-fgColor-keyword"),
+        ("cpp", "type.builtin", "codeMirror-syntax-fgColor-keyword"),
+        ("java", "type.builtin", "codeMirror-syntax-fgColor-keyword"),
+        ("go", "namespace", "codeMirror-syntax-fgColor-variable"),
+        ("ruby", "constructor", "codeMirror-syntax-fgColor-variable"),
+        ("make", "constant", "codeMirror-syntax-fgColor-variable"),
+        ("toml", "type", "codeMirror-syntax-fgColor-support"),
+        ("toml", "property", "codeMirror-syntax-fgColor-support"),
+        ("markdown", "punctuation.heading", "prettylights-syntax-markup-heading"),
+        ("markdown", "title.setext", "prettylights-syntax-markup-heading"),
+        ("markdown_inline", "link_uri", "prettylights-syntax-string"),
+        ("diff", "markup.inserted", "prettylights-syntax-markup-inserted-text"),
+        ("diff", "markup.deleted", "prettylights-syntax-markup-deleted-text"),
+    ]:
+        syntax[f"{language}.{capture}"] = {"color": tokens[token]}
+    style = {
+        "editor.background": tokens["codeMirror-bgColor"], "editor.foreground": foreground,
+        "editor.gutter.background": tokens["codeMirror-gutters-bgColor"],
+        "editor.active_line.background": tokens["codeMirror-activeline-bgColor"],
+        "editor.line_number": tokens["codeMirror-lineNumber-fgColor"],
+        "editor.active_line_number": foreground,
+        "editor.invisible": tokens["borderColor-default"], "syntax": syntax,
+    }
+    for status, token in [("error", "fgColor-danger"), ("warning", "fgColor-attention"),
+                          ("info", "fgColor-accent"), ("success", "fgColor-success"), ("hint", "fgColor-muted")]:
+        color = tokens[token]
+        style.update({status: color, status + ".border": color, status + ".background": color + "26"})
+    return {
+        "highlight_theme": {"name": data["name"], "appearance": "light", "style": style},
+        "selection": tokens["codeMirror-selection-bgColor"], "caret": tokens["codeMirror-cursor-fgColor"],
+        "search_match": tokens["bgColor-attention-muted"], "search_match_active": tokens["codeMirror-selection-bgColor"],
+        "muted_foreground": tokens["fgColor-muted"], "border": tokens["borderColor-default"],
+    }
+
+
+def load_source(source, mode):
+    data = json.loads(source.read_text(encoding="utf-8"))
+    fingerprint = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if fingerprint != FINGERPRINTS[mode]:
+        raise ValueError(f"{source} does not match the pinned upstream theme")
+    return data
+
+
 def main():
     upstream = DEST / "upstream"
     upstream.mkdir(exist_ok=True)
@@ -159,12 +270,12 @@ def main():
         source = upstream / f"{filename}.json"
         if not source.exists():
             source.write_bytes(urlopen(f"https://raw.githubusercontent.com/akamud/vscode-theme-{repo}/{commit}/themes/{filename}.json").read())
-        data = json.loads(source.read_text(encoding="utf-8"))
-        fingerprint = hashlib.sha256(json.dumps(data, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-        if fingerprint != FINGERPRINTS[mode]:
-            raise ValueError(f"{source} does not match the pinned upstream theme")
+        data = load_source(source, mode)
         (DEST / f"atom-one-{mode}.json").write_bytes((json.dumps(generate(mode, data), indent=2) + "\n").encode("utf-8"))
         print(f"{mode}: retained {len(data['tokenColors'])} upstream rules; generated explicit scope mappings")
+    light = generate_github(load_source(upstream / "GitHubLight.json", "light"))
+    (DEST / "github-light.json").write_bytes((json.dumps(light, indent=2) + "\n").encode("utf-8"))
+    print("light: generated GitHub website editor token mappings")
 
 
 if __name__ == "__main__":

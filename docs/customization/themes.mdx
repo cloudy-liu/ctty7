@@ -24,19 +24,19 @@ YAML packages and editing them with live reload.
 ## Code editor colors
 
 Source files opened from the sidebar, including Markdown source mode, use
-paired Atom One palettes automatically:
+GitHub Light or Atom One Dark automatically:
 
 | Resolved application appearance | Source editor palette | Editor background |
 |---|---|---|
 | Dark, including One Dark Pro, Dracula and Nord | Atom One Dark | `#282C34` |
-| Light | Atom One Light | `#FAFAFA` |
+| Light | GitHub Light | `#FFFFFF` |
 
 The editor follows the application's effective light or dark appearance,
 including custom themes, system appearance when enabled, and temporary theme
 previews. Canceling a preview restores the editor colors. Switching between
 application themes of the same appearance keeps the same source palette.
 
-The Atom palette owns the complete source background, gutter, syntax,
+The source palette owns the complete source background, gutter, syntax,
 selection and caret colors. Its background is opaque across source text,
 line numbers and empty space, so wallpaper, gradients and transparency do not
 change code contrast. The application theme chooses the variant rather than
@@ -54,7 +54,7 @@ colors, file-tree colors, diffs and Markdown reading themes retain their own
 appearance behavior.
 
 The palettes are adapted from [Atom One Dark](https://github.com/akamud/vscode-theme-onedark)
-and [Atom One Light](https://github.com/akamud/vscode-theme-onelight). Highlighting
+and [GitHub's default light website editor tokens](https://github.com/primer/primitives). Highlighting
 uses Tree-sitter; language-server hints and bracket-pair coloring are separate
 editor features.
 

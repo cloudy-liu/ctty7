@@ -181,7 +181,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsMarkdownTheme => "Markdown の閲覧テーマ",
         L10nKey::SettingsEditorTheme => "コードエディタの配色",
         L10nKey::SettingsEditorThemeDesc => {
-            "アプリの明暗に応じて Atom One Dark または Light を自動で使用し、背景も同じ配色にします。フォント設定は個別に保存します。"
+            "アプリがライトモードなら GitHub Light、ダークモードなら Atom One Dark を自動で使用し、背景も同じ配色にします。フォント設定は個別に保存します。"
         }
         L10nKey::SettingsEditorThemeResolved => "現在の配色：{active}。",
         L10nKey::SettingsEditorFont => "エディタのフォント",
@@ -200,7 +200,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
             "コード エディタ フォント サイズ 行間 高さ 等幅 font size"
         }
         L10nKey::SettingsSearchEditorThemeKeywords => {
-            "コード エディタ ソース 構文 ハイライト テーマ atom one dark light"
+            "コード エディタ ソース 構文 ハイライト テーマ github light atom one dark"
         }
         L10nKey::SettingsMarkdownThemeDesc => {
             "GitHub はアプリの背景とライト／ダークモードに従います。カスタム v2 テーマは独自の背景を保ち、変更は自動で反映されます。"

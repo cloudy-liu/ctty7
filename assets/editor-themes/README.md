@@ -3,11 +3,12 @@
 The bundled palettes adapt these MIT-licensed themes:
 
 - [Atom One Dark 2.3.0](https://github.com/akamud/vscode-theme-onedark/tree/a8be970644982221f9b61fb1c4b3da74b4beab79), license in `LICENSE-dark`.
-- [Atom One Light 2.3.0](https://github.com/akamud/vscode-theme-onelight/tree/5866e900db932d580e978a58db42f65cde07998b), license in `LICENSE-light`.
+- [GitHub default light website tokens](https://github.com/primer/primitives), captured on 2026-10-06, license in `LICENSE-light`.
 
-The complete upstream JSON files are retained under `upstream/`, including
-each Atom One theme's 74 UI colors and 211 ordered TextMate rules. Regenerate the
-editor palettes from the repository root with:
+The complete Atom One Dark JSON is retained under `upstream/`, including its
+74 UI colors and 211 ordered TextMate rules. `GitHubLight.json` records resolved
+tokens from GitHub's published light stylesheet, its URL, capture date and raw
+stylesheet checksum. Regenerate the editor palettes from the repository root with:
 
 ```powershell
 python scripts/sync-editor-themes.py
@@ -15,15 +16,28 @@ python scripts/sync-editor-themes.py
 
 The script checks a SHA-256 fingerprint of the parsed source before generating
 colors. With the bundled sources present, regeneration needs no network.
-Mappings select explicit TextMate scopes, preserving the last matching rule;
+Dark mappings select explicit TextMate scopes, preserving the last matching rule;
 upstream rule names are not unique and must not be used as identifiers.
-Language-qualified Tree-sitter captures preserve overrides such as ordinary
-Python/JavaScript identifiers using the foreground, JSON literals using cyan,
-and Rust types using cyan. Exact subroles precede generic capture fallbacks.
+Language-qualified Tree-sitter captures preserve overrides and embedded code.
+Both palettes use the same capture vocabulary. Exact subroles precede generic
+capture fallbacks.
+
+GitHub Light uses website CodeMirror tokens for its white background, dark
+foreground and caret, gray line numbers, active line and blue selection. Syntax
+uses red keywords, purple functions, dark blue strings, blue constants and
+brown variable/type roles. Ordinary Python and JavaScript identifiers use the
+foreground. Tags, regular expressions, links and Markdown roles use the
+corresponding website prettylights tokens where CodeMirror has no specific key.
+These are Tree-sitter role adaptations, not a browser editor runtime.
+The current website CodeMirror comment token is `#1F2328`; the read-only code
+viewer instead uses `#59636E` comments and a different purple entity token.
+The light editor deliberately follows CodeMirror for these shared roles.
 
 The palettes retain the authored editor backgrounds, text, line numbers,
-selections, cursor, whitespace, and syntax colors. Auxiliary diagnostic colors
-use the palette's red, gold, blue, green, and comment roles. Their backgrounds
+selections, cursor and syntax colors. GitHub Light uses the website border token
+for invisible characters and borders, and the foreground for active line numbers.
+Auxiliary diagnostic colors use Atom syntax roles in dark mode and GitHub's
+danger, attention, accent, success and muted tokens in light mode. Their backgrounds
 use a 15% tint. These are tty7 adaptations, not additional upstream theme keys.
 Fold controls and scrollbars use the editor's muted text, selection, background,
 and border colors. These controls use the source palette rather than application colors.
@@ -42,7 +56,7 @@ and C++, and incompatible Kotlin patterns are removed. Local-binding captures
 used for reference tracking do not participate in visual capture precedence.
 
 The [reference corpus](tests/README.md) compares actual highlighter ranges
-against TextMate colors in 21 languages, in both appearances. All 38 bundled
+against authored dark TextMate colors and light website token values in 21 languages. All 38 bundled
 language queries are checked for successful compilation and isolation.
 CMake, C#, GraphQL, Protocol Buffers and Swift currently ship no highlight
 queries in the component; they retain readable foreground text, as does plain
@@ -57,9 +71,9 @@ receive the editor-specific injected colors.
 
 The themes are embedded at compile time. No theme download occurs at runtime.
 
-The application's resolved light/dark appearance selects Atom One Light or
+The application's resolved light/dark appearance selects GitHub Light or
 Atom One Dark for every source editor. The One Dark Pro application preset
-uses Atom One Dark, just like other dark presets. Each Atom palette owns the
+uses Atom One Dark, just like other dark presets. Each source palette owns the
 complete opaque editor and gutter background, syntax, selection and caret.
 There are no independent fixed-mode editor choices. The retired `editor_theme`
 configuration key is ignored on load and omitted on save.

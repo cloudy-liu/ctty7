@@ -31,7 +31,7 @@ The regression test exercises the final editor theme resolver and fails with
 the bundled search fills that would overwrite the search visibility fix.
 It checks the automatically resolved Atom One palette for every built-in application
 theme with colored, gray and editor-background-colored accents. One Dark Pro and
-other dark application themes use Atom One Dark; light themes use Atom One Light.
+other dark application themes use Atom One Dark; light themes use GitHub Light.
 It requires at least 1.2:1 luminance contrast between the two match fills,
 at least 1.89:1 between the
 current match and the editor background, and at least 2.95:1 between the

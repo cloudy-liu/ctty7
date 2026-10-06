@@ -24,10 +24,9 @@ fn palettes() -> &'static Palettes {
             "../../assets/editor-themes/atom-one-dark.json"
         ))
         .expect("bundled Atom One Dark palette");
-        let light: CodeEditorStyle = serde_json::from_str(include_str!(
-            "../../assets/editor-themes/atom-one-light.json"
-        ))
-        .expect("bundled Atom One Light palette");
+        let light: CodeEditorStyle =
+            serde_json::from_str(include_str!("../../assets/editor-themes/github-light.json"))
+                .expect("bundled GitHub Light palette");
         Palettes {
             dark: Arc::new(dark),
             light: Arc::new(light),
@@ -39,7 +38,7 @@ pub(crate) fn resolved_name(cx: &App) -> &'static str {
     if cx.theme().mode == ThemeMode::Dark {
         "Atom One Dark"
     } else {
-        "Atom One Light"
+        "GitHub Light"
     }
 }
 

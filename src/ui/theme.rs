@@ -929,7 +929,7 @@ mod tests {
         app.update_in(&mut vcx, |app, window, cx| {
             cx.global_mut::<Config>().theme_preset_light = "light".into();
             cx.global_mut::<Config>().theme_preset_dark = "one_dark_pro".into();
-            for (system_dark, background) in [(false, 0xfafafa), (true, 0x282c34)] {
+            for (system_dark, background) in [(false, 0xffffff), (true, 0x282c34)] {
                 cx.set_global(SystemAppearance { dark: system_dark });
                 app.set_theme_follow_system(true, window, cx);
                 assert_eq!(
@@ -949,7 +949,7 @@ mod tests {
                     .highlight_theme
                     .style
                     .editor_background,
-                Some(gpui::rgb(0xfafafa).into())
+                Some(gpui::rgb(0xffffff).into())
             );
         });
     }
