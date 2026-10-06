@@ -23,7 +23,7 @@ def capture(binary, output, dark, width, scale, anchor):
         log_stream = log.open("w", encoding="utf-8")
         process = subprocess.Popen(
             [str(binary), "--config-dir", temporary, "--markdown-visual", str(options)],
-            stdout=subprocess.DEVNULL, stderr=log_stream,
+            stdout=log_stream, stderr=log_stream,
         )
         try:
             deadline = time.monotonic() + 45
@@ -31,7 +31,8 @@ def capture(binary, output, dark, width, scale, anchor):
                 if "NATIVE_MARKDOWN_READY" in log.read_text(encoding="utf-8"):
                     break
                 if process.poll() is not None:
-                    raise RuntimeError(f"{name}: fixture exited before drawing: {log.read_text()}")
+                    raise RuntimeError(f"{name}: fixture exited before drawing with code "
+                                       f"{process.returncode}: {log.read_text()}")
                 time.sleep(0.1)
             else:
                 raise TimeoutError(f"{name}: no native ready marker")

@@ -105,6 +105,8 @@ jobs:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
       # `--locked` on the build so a Cargo.lock that disagrees with Cargo.toml
       # fails here instead of being silently rewritten. Without it the drift is
@@ -157,7 +159,12 @@ jobs:
       - name: Capture macOS native Markdown matrix
         if: runner.os == 'macOS'
         timeout-minutes: 10
-        run: python3 scripts/markdown-native-visual.py target/${{ matrix.target }}/debug/tty7-app native-markdown-macos
+        run: |
+          binary=target/${{ matrix.target }}/debug/tty7-app
+          if ! codesign --verify --verbose=2 "$binary"; then
+            codesign --force --sign - "$binary"
+          fi
+          python3 scripts/markdown-native-visual.py "$binary" native-markdown-macos
 
       - name: Upload native Markdown visual evidence
         if: always() && runner.os != 'Windows'

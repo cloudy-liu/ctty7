@@ -38,11 +38,17 @@ struct Fixture {
 impl Render for Fixture {
     fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         window.set_rem_size(px(16. * self.scale));
-        div().size_full().child(self.reading.clone())
+        div()
+            .flex()
+            .w(window.viewport_size().width)
+            .h(window.viewport_size().height)
+            .overflow_hidden()
+            .child(self.reading.clone())
     }
 }
 
 pub(crate) fn run(path: &std::ffi::OsStr) {
+    eprintln!("NATIVE_MARKDOWN_START os={}", std::env::consts::OS);
     let options: Options = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
     assert!((400. ..=1600.).contains(&options.width));
     assert!((400. ..=1600.).contains(&options.height));
@@ -51,6 +57,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
     let started = std::time::Instant::now();
     gpui_platform::application().with_assets(crate::ui::assets::Assets)
         .with_quit_mode(QuitMode::Explicit).run(move |cx| {
+            eprintln!("NATIVE_MARKDOWN_APPLICATION_READY");
             gpui_component::init(cx);
             crate::register_bundled_fonts(cx);
             let mut config = Config::default();
@@ -84,9 +91,6 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 let view = cx.new(|cx| MarkdownPreview::new(input,
                     tty7_core::host::local::LocalHost::new(), options.source.clone(),
                     owner.downgrade(), true, cx));
-                if !options.anchor.is_empty() {
-                    view.update(cx, |view, cx| view.navigate_anchor(options.anchor.clone(), cx));
-                }
                 window.focus(&view.focus_handle(cx), cx);
                 reading = Some(view.clone());
                 let fixture = cx.new(|_| Fixture { reading: view, _owner: owner, scale: options.scale });
@@ -105,20 +109,44 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     assert!(std::time::Instant::now() < deadline, "Markdown parse timed out");
                 }
                 cx.background_executor().timer(Duration::from_secs(2)).await;
-                handle.update(cx, |_, window, cx| {
+                // Navigate after the bounded viewport and scroll extent have been laid out.
+                // This fixture starts a fresh native window for every requested section.
+                if !options.anchor.is_empty() {
+                    reading.update(cx, |view, cx| view.navigate_anchor(options.anchor.clone(), cx));
+                    cx.background_executor().timer(Duration::from_secs(2)).await;
+                }
+                cx.update_window(handle.into(), |_, window, cx| {
                     window.refresh();
+                    let _ = window.draw(cx);
+                    window.refresh();
+                }).unwrap();
+                cx.background_executor().timer(Duration::from_millis(200)).await;
+                cx.update_window(handle.into(), |_, window, cx| {
                     eprintln!("native Markdown: os={}, dpi_scale={}, app_scale={}, viewport={:?}, ready={:?}",
                         std::env::consts::OS, window.scale_factor(), options.scale,
                         window.viewport_size(), started.elapsed());
                     let view = reading.read(cx);
                     assert!(!view.text.read(cx).source().is_empty());
+                    if !options.anchor.is_empty() {
+                        let target = view.text.read(cx).anchor_bounds(&options.anchor)
+                            .expect("requested heading must be laid out");
+                        let viewport = view.scroll.bounds();
+                        eprintln!("native anchor: requested={}, offset={:?}, target={:?}, viewport={:?}",
+                            options.anchor, view.scroll.offset(), target, viewport);
+                        assert!((viewport.size.height - window.viewport_size().height).abs() < px(2.),
+                            "Markdown scroll container must fit the native window");
+                        assert!(view.scroll.offset().y < px(-100.)
+                            && target.top() < viewport.bottom() && target.bottom() > viewport.top(),
+                            "requested Markdown heading is outside the captured viewport");
+                    }
                     if let Some(output) = &options.output {
                         #[cfg(target_os = "macos")]
                         {
                             let screenshot = window.render_to_image().unwrap();
-                            let distinct = screenshot.pixels().filter(|p| p[0].abs_diff(p[1]) > 20
-                                || p[1].abs_diff(p[2]) > 20).count();
-                            assert!(distinct > 200, "native Markdown screenshot has no colored content");
+                            let (min, max) = screenshot.pixels()
+                                .map(|p| u32::from(p[0]) + u32::from(p[1]) + u32::from(p[2]))
+                                .fold((765, 0), |(min, max), value| (min.min(value), max.max(value)));
+                            assert!(max - min > 96, "native Markdown screenshot has no visible content");
                             screenshot.save(output).unwrap();
                         }
                         #[cfg(not(target_os = "macos"))]

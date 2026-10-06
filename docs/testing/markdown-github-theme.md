@@ -364,7 +364,14 @@ The opt-in `markdown-visual-tests` feature launches the production reading view
 with real platform executors and font shaping. `scripts/markdown-native-visual.py`
 captures both modes at 1076px and 500px, at the top, lists/tasks and code/diff
 anchors. CI captures macOS Metal output and Linux X11 windows under Xvfb,
-checks that images are nonempty and uploads screenshots and logs. The screenshot
+checks that the scroll container fits the window, that the requested heading
+is visible, and that images are nonempty, then uploads screenshots and logs.
+The fixture binds its root to the native viewport and waits for layout before
+navigating; an earlier unbounded root produced duplicate top-of-document captures
+and those captures are not evidence for the requested sections. Native Windows
+probes for wide code and narrow dark lists failed before the correction and pass
+with the heading at 12px in the bounded viewport. These probes used the existing
+175% display scale, which was confirmed rather than changed. The screenshot
 matrix deliberately excludes the cancelled 200% checks.
 
 This acceptance does not establish identical browser/native glyph rasterization,
