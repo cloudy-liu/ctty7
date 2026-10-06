@@ -75,6 +75,7 @@
     "fgColor-danger": "#D1242F",
     "fgColor-attention": "#9A6700",
     "fgColor-success": "#1A7F37",
-    "bgColor-attention-muted": "#FFF8C5"
+    "bgColor-attention-muted": "#FFF8C5",
+    "selection-bgColor": "#0969DA33"
   }
 }

@@ -19,21 +19,20 @@ colors. With the bundled sources present, regeneration needs no network.
 Dark mappings select explicit TextMate scopes, preserving the last matching rule;
 upstream rule names are not unique and must not be used as identifiers.
 Language-qualified Tree-sitter captures preserve overrides and embedded code.
-Both palettes use the same capture vocabulary. Exact subroles precede generic
+Both palettes share 157 capture names. Four additional light subroles fall back
+to their existing parent styles in Atom One Dark. Exact subroles precede generic
 capture fallbacks.
 
-GitHub Light uses website CodeMirror tokens for its white background, dark
-foreground and caret, gray line numbers, active line and blue selection. Syntax
-uses red keywords, purple functions, dark blue strings, blue constants and
-brown variable/type roles. Ordinary Python and JavaScript identifiers use the
-foreground. Tags, regular expressions, links and Markdown roles use the
-corresponding website prettylights tokens where CodeMirror has no specific key.
+GitHub Light syntax uses the website file-viewer prettylights tokens, including
+red keywords, deep purple functions (`#6639BA`), dark blue strings, blue constants
+and gray comments (`#59636E`). Rust variables, parameters and types use the
+foreground; fields and references use blue, and bare variants use brown.
+Called constructors such as `Some(...)` use the function color. Other languages
+retain their existing role adaptations with the file-viewer color values.
+Selection uses the website selection token (`#0969DA33`). Background, foreground,
+caret, line numbers and active-line colors retain the website CodeMirror control
+tokens where the file viewer has no equivalent editable control.
 These are Tree-sitter role adaptations, not a browser editor runtime.
-Comments and documentation comments use the website code-display token
-`prettylights-syntax-comment` (`#59636E`) to match GitHub's gray comments.
-The captured CodeMirror comment token is `#1F2328`, but is not used for comments.
-Functions retain the CodeMirror purple entity token; GitHub's code viewer uses
-a different purple entity token.
 
 The palettes retain the authored editor backgrounds, text, line numbers,
 selections, cursor and syntax colors. GitHub Light uses the website border token
@@ -58,7 +57,8 @@ and C++, and incompatible Kotlin patterns are removed. Local-binding captures
 used for reference tracking do not participate in visual capture precedence.
 
 The [reference corpus](tests/README.md) compares actual highlighter ranges
-against authored dark TextMate colors and light website token values in 21 languages. All 38 bundled
+against authored dark TextMate colors and light website token values in 21 languages,
+plus 70 actual GitHub file-viewer color ranges for the reference Rust function. All 38 bundled
 language queries are checked for successful compilation and isolation.
 CMake, C#, GraphQL, Protocol Buffers and Swift currently ship no highlight
 queries in the component; they retain readable foreground text, as does plain

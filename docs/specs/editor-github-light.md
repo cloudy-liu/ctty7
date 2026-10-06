@@ -45,8 +45,8 @@ appearance and independent source typography behavior.
 ## Implementation Decisions
 
 1. Resolve the complete editor palette from the application's effective light or dark mode through the existing source appearance module. Keep the automatic two-palette contract and read-only active-palette settings row.
-2. Replace the Atom One Light palette and its generation inputs with GitHub default light website editor tokens captured from the current published stylesheet. Preserve source URL, capture date, license and a content fingerprint. Retain the pinned Atom One Dark source and generated dark bytes.
-3. Use GitHub's white background and dark foreground, together with its editor syntax and control colors. Map those roles onto the existing Tree-sitter capture vocabulary, including language-qualified captures. Keep syntax registrations isolated from the Markdown reader.
+2. Replace the Atom One Light palette and its generation inputs with GitHub default light file-viewer syntax and editable control tokens captured from the current published stylesheet. Preserve source URL, capture date, license and a content fingerprint. Retain the pinned Atom One Dark source and generated dark bytes.
+3. Use GitHub's white background and dark foreground, together with its file-viewer syntax and editable control colors. Map those roles onto the existing Tree-sitter capture vocabulary, including language-qualified captures. Keep syntax registrations isolated from the Markdown reader.
 4. Retain the existing search contrast calculation. Ordinary matches use the editor contrast budget; the current match uses the application accent with the existing fallback.
 5. Keep source and gutter backgrounds opaque. Apply colors to the existing input instance without replacing document state or introducing another system appearance listener.
 6. Update English, Chinese and Japanese settings text, active-theme names, customization documentation and reference documentation. Remove obsolete Atom One Light runtime assets and generation rules.
@@ -75,7 +75,11 @@ existing appearance, configuration, typography and editing-state contracts
 remain the baseline. The tracking issue and implementation PR belong to
 cloudy-liu/ctty7 and use the ready-for-agent triage vocabulary.
 
-The user's follow-up screenshot clarifies that light comments must match
-GitHub's gray code-display comments (`#59636E`), including line, block and
-documentation comments. Use the pinned prettylights comment token for these
-roles instead of the CodeMirror dark-foreground comment token.
+The user's follow-up screenshot and alignment request establish GitHub's default
+light file viewer as the syntax reference. Use the pinned prettylights syntax
+tokens, including gray comments (`#59636E`) and deep purple functions (`#6639BA`),
+and the website selection token. Match Rust variable, parameter, type, field,
+reference and variant classification to the actual file-viewer reference sample.
+Verify its complete 70 color ranges with the production highlighter. Retain
+independent source typography and editable control behavior; dark parent-style
+fallbacks must preserve Atom One Dark's authored colors.

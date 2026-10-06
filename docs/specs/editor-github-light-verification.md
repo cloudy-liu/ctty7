@@ -10,14 +10,12 @@ The existing application appearance contract still controls system following,
 custom themes, previews and cancellation. Settings name the actual palette in
 English, Chinese and Japanese; source typography stays independent.
 
-The light palette uses GitHub's default website CodeMirror tokens captured on
-2026-10-06. Its pinned source records the published stylesheet URL, capture
-date and checksum. Comments and documentation comments use GitHub's gray
-code-display token `#59636E`, as clarified by the user's reference screenshot.
-Functions retain the purple CodeMirror entity token; GitHub's read-only code
-viewer uses a different purple entity token.
-Roles without a specific CodeMirror token use the corresponding website
-prettylights or interface token, as documented with the bundled assets.
+The light palette uses GitHub's default file-viewer prettylights syntax tokens
+captured on 2026-10-06, including gray comments (`#59636E`) and deep purple
+functions (`#6639BA`). Its pinned source records the published stylesheet URL,
+capture date and checksum. Selection uses the website token `#0969DA33`.
+Editable control colors retain the CodeMirror source tokens where the file
+viewer has no equivalent; source typography stays independently configured.
 
 ![Source palette comparison](images/editor-github-light-palettes.png)
 
@@ -27,8 +25,8 @@ This is a palette illustration from bundled values, not a native screenshot.
 
 - The existing editing-state regression first failed when the required light background changed from `#FAFAFA` to `#FFFFFF`, then passed after the palette replacement.
 - All 17 tests selected by `editor_` passed, covering authored source/control colors, settings, typography, search contrast, preview cancellation, configuration reload, editing state, language queries and embedded code.
-- The production highlighter checks 220 retained dark TextMate expectations and 93 independent GitHub Light expectations across 21 languages. Reference token ranges are also checked against their source text.
-- Both palettes retain the same 157 syntax capture names, preserving private query qualification and language injections. All 38 private language queries compile without changing shared registrations.
+- The production highlighter checks 220 retained dark TextMate expectations and 93 representative GitHub Light expectations across 21 languages, plus 70 actual file-viewer color ranges in the reference Rust function. Reference ranges are checked against their source text.
+- Both palettes share 157 syntax capture names. Four light subroles use existing parent styles in dark mode, preserving dark colors, private query qualification and language injections. All 38 private language queries compile without changing shared registrations.
 - Offline regeneration reproduces the bundled palettes. The Atom One Dark generated file, pinned source and license remain byte-identical to the fork's main branch.
 - The locked Windows workspace build passed. No dependency, component revision, lockfile or configuration schema change was required.
 - The full locked workspace test run passed 2,977 tests plus all 13 CLI end-to-end cases, with 8 existing ignored tests and no failures after supplying the required Windows shell PATH.
@@ -48,7 +46,7 @@ The Windows CLI integration tests require Git's `usr/bin` directory on the
 test process PATH so their existing `sh` subprocess can start. This is an
 environment prerequisite, not an application or repository change.
 
-## Gray comment correction
+## Earlier gray comment correction
 
 The initial implementation used the CodeMirror comment token `#1F2328`, which
 made comments look like ordinary text. The follow-up screenshot clarified the
@@ -65,6 +63,25 @@ This illustration uses bundled values, not a native application screenshot.
 - Offline generation reproduces both palettes; the dark palette, pinned source, license and TextMate reference corpus remain byte-identical to the initial implementation.
 - The full locked workspace suite passed again with 2,977 tests and all 13 CLI end-to-end cases, with 8 existing ignored tests and no failures; the locked Windows workspace build, formatting, whitespace and host-boundary checks also passed after the correction.
 
+## GitHub file-viewer alignment
+
+A direct comparison with GitHub's rendered `src/main.rs` lines 35–59 found
+37 mismatched color ranges after the gray-comment correction. The reference
+fixture now records all 70 continuous ranges from the page's actual
+`stylingDirectives`, resolved against its published light stylesheet.
+The production highlighter matches every range after the correction.
+
+- Functions use file-viewer purple `#6639BA`, replacing CodeMirror purple `#8250DF`.
+- Rust parameters, variables and type names use body text `#1F2328`; fields and reference `&` use `#0550AE`.
+- Bare Rust variants use `#953800`, while called constructors retain function purple, including generic calls and injected macro bodies.
+- Selection uses the file-viewer token `#0969DA33` rather than CodeMirror's `#54AEFF66`.
+- Dark source assets and the 220 authored dark expectations remain unchanged; fonts and line spacing remain independently configured.
+
+![Rust colors before and after website alignment](images/editor-github-light-website.png)
+
+This illustration uses bundled values and verified reference roles, not a
+native application screenshot.
+
 ## Review
 
 For the initial implementation at `f428d547`, separate Standards and Spec
@@ -72,6 +89,11 @@ reviewers examined the complete staged change
 against fork/main at `814b4036`. Both reported no actionable findings. Their
 read-only checks confirmed reproducible palettes, identical dark assets and
 reference samples, shared capture vocabulary and the documented fidelity limits.
+
+For the file-viewer follow-up against `531a6e9b`, separate Standards and Spec
+reviewers examined the complete staged change, including the final scoped and
+generic constructor rules and macro regression. Both reported no actionable
+findings. Their checks did not replace the final automated validation above.
 
 ## Verification limits
 

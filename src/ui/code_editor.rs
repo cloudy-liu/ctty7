@@ -1628,10 +1628,10 @@ mod tests {
         use crate::ui::editor_theme;
         use gpui_component::highlighter::SyntaxHighlighter;
         let (app, mut vcx) = markdown_window(cx);
-        let source = "use std::borrow::Cow;\nmod core;\nfn make(cx: &mut App) {\n    let fonts = \"a\\n\";\n    let file: std::path::PathBuf;\n    cx.add_fonts(fonts);\n    let outer = LIMIT;\n    wrap! { let inner = load_fonts(); let count = OTHER_LIMIT; let maybe = Some(inner); }\n}\n";
+        let source = "use std::borrow::Cow;\nmod core;\nfn make(cx: &mut App) {\n    let fonts = \"a\\n\";\n    let file: std::path::PathBuf;\n    cx.add_fonts(fonts);\n    let outer = LIMIT;\n    let generic = Some::<u8>(1);\n    let qualified = Option::Some::<u16>(1);\n    wrap! { let inner = load_fonts(); let count = OTHER_LIMIT; let maybe = Some(inner); }\n}\n";
         for (preference, variable, keyword, function, ty, foreground) in [
             ("dark", 0xe06c75, 0xc678dd, 0x61afef, 0x56b6c2, 0xabb2bf),
-            ("light", 0x953800, 0xcf222e, 0x8250df, 0x953800, 0x1f2328),
+            ("light", 0x1f2328, 0xcf222e, 0x6639ba, 0x1f2328, 0x1f2328),
         ] {
             app.update_in(&mut vcx, |app, window, cx| {
                 app.set_theme_follow_system(false, window, cx);
@@ -1667,7 +1667,9 @@ mod tests {
                             0x0550ae
                         },
                     ),
-                    ("Some", function),
+                    ("Some::<u8>", function),
+                    ("Some::<u16>", function),
+                    ("Some(inner)", function),
                     ("\\n", if preference == "dark" { ty } else { 0x0550ae }),
                 ] {
                     let offset = source.find(token).unwrap();
@@ -1761,6 +1763,12 @@ mod tests {
         samples.extend(
             serde_json::from_str::<Vec<Sample>>(include_str!(
                 "../../assets/editor-themes/tests/github-light-colors.json"
+            ))
+            .unwrap(),
+        );
+        samples.extend(
+            serde_json::from_str::<Vec<Sample>>(include_str!(
+                "../../assets/editor-themes/tests/github-website-colors.json"
             ))
             .unwrap(),
         );
@@ -1909,7 +1917,7 @@ mod tests {
                     (
                         style.selection,
                         "editor.selectionBackground",
-                        "codeMirror-selection-bgColor",
+                        "selection-bgColor",
                     ),
                     (
                         style.caret,
@@ -1947,7 +1955,7 @@ mod tests {
                 "dark", 0xabb2bf, 0xd19a66, 0x56b6c2, 0xe06c75, 0x98c379, 0x61afef,
             ),
             (
-                "light", 0x1f2328, 0x0550ae, 0x0550ae, 0x953800, 0x0a3069, 0x8250df,
+                "light", 0x1f2328, 0x0550ae, 0x0550ae, 0x953800, 0x0a3069, 0x6639ba,
             ),
         ] {
             app.update_in(&mut vcx, |app, window, cx| {
@@ -1957,7 +1965,7 @@ mod tests {
                     ("html", "<script>let root = obj.parent + 2;</script>", vec![("root", foreground), ("=", if preference == "dark" { cyan } else { 0xcf222e }), ("parent", red), ("2", orange)]),
                     ("tsx", "const root: string = obj.parent + 2; const view = <div id=\"main\">{root}</div>;", vec![("root", orange), ("string", cyan), ("parent", red), ("div", if preference == "dark" { red } else { 0x0550ae }), ("id", orange), ("main", green)]),
                     ("javascript", "const view = <div id=\"main\">{item}</div>;", vec![("div", if preference == "dark" { red } else { 0x0550ae }), ("id", orange), ("main", green), ("item", foreground)]),
-                    ("markdown", "```rust\nstruct Widget;\n```\n", vec![("Widget", if preference == "dark" { cyan } else { 0x953800 })]),
+                    ("markdown", "```rust\nstruct Widget;\n```\n", vec![("Widget", if preference == "dark" { cyan } else { foreground })]),
                     ("python", "from pathlib import Path\nDEST = Path(__file__).parent\n", vec![("Path", foreground), ("Path(__file__)", blue), ("__file__", if preference == "dark" { red } else { 0x0550ae }), ("parent", foreground)]),
                 ] {
                     let style = crate::ui::editor_theme::current(cx);
@@ -1987,7 +1995,7 @@ mod tests {
         );
         for (preference, keyword, function, string, number) in [
             ("dark", 0xc678dd, 0x61afef, 0x98c379, 0xd19a66),
-            ("light", 0xcf222e, 0x8250df, 0x0a3069, 0x0550ae),
+            ("light", 0xcf222e, 0x6639ba, 0x0a3069, 0x0550ae),
         ] {
             app.update_in(&mut vcx, |app, window, cx| {
                 app.set_theme_follow_system(false, window, cx);

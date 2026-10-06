@@ -20,7 +20,7 @@
         "text": "main",
         "start": 70,
         "end": 74,
-        "color": "#8250DF"
+        "color": "#6639BA"
       },
       {
         "text": "2",
@@ -69,7 +69,7 @@
         "text": "main",
         "start": 38,
         "end": 42,
-        "color": "#8250DF"
+        "color": "#6639BA"
       }
     ]
   },
@@ -100,7 +100,7 @@
         "text": "main",
         "start": 46,
         "end": 50,
-        "color": "#8250DF"
+        "color": "#6639BA"
       }
     ]
   },
@@ -156,19 +156,19 @@
         "text": "Path",
         "start": 15,
         "end": 19,
-        "color": "#953800"
+        "color": "#1F2328"
       },
       {
         "text": "main",
         "start": 24,
         "end": 28,
-        "color": "#8250DF"
+        "color": "#6639BA"
       },
       {
         "text": "item",
         "start": 55,
         "end": 59,
-        "color": "#953800"
+        "color": "#1F2328"
       }
     ]
   },
@@ -224,7 +224,7 @@
         "text": "main",
         "start": 55,
         "end": 59,
-        "color": "#8250DF"
+        "color": "#6639BA"
       },
       {
         "text": "2",
@@ -249,7 +249,7 @@
         "text": "main",
         "start": 4,
         "end": 8,
-        "color": "#8250DF"
+        "color": "#6639BA"
       },
       {
         "text": "return",
@@ -286,7 +286,7 @@
         "text": "main",
         "start": 31,
         "end": 35,
-        "color": "#8250DF"
+        "color": "#6639BA"
       },
       {
         "text": "2",
@@ -317,7 +317,7 @@
         "text": "Println",
         "start": 43,
         "end": 50,
-        "color": "#8250DF"
+        "color": "#6639BA"
       },
       {
         "text": "2",
@@ -354,7 +354,7 @@
         "text": "main",
         "start": 16,
         "end": 20,
-        "color": "#8250DF"
+        "color": "#6639BA"
       },
       {
         "text": "2",
@@ -385,7 +385,7 @@
         "text": "echo",
         "start": 11,
         "end": 15,
-        "color": "#8250DF"
+        "color": "#6639BA"
       }
     ]
   },
@@ -565,7 +565,7 @@
         "text": "main",
         "start": 27,
         "end": 31,
-        "color": "#8250DF"
+        "color": "#6639BA"
       }
     ]
   },
@@ -584,7 +584,7 @@
         "text": "all",
         "start": 13,
         "end": 16,
-        "color": "#8250DF"
+        "color": "#6639BA"
       }
     ]
   },

@@ -17,7 +17,7 @@ SOURCES = {
 }
 FINGERPRINTS = {
     "dark": "53dbe439275f8b382dd9aabc1cc72a5447ed71b8aa47ab370b5dde50e795df7b",
-    "light": "48fb837fba28845d316d0b2686e6263270017474aafcad64ac3beaafe3d86b29",
+    "light": "24242363bfd0f481fb736da907d1215165c9eac3d985bf8f9809843c88e7d349",
 }
 
 # These are Tree-sitter roles, paired with authored TextMate scopes.
@@ -154,25 +154,26 @@ def generate(mode, data):
 def generate_github(data):
     tokens = data["tokens"]
     foreground = tokens["codeMirror-fgColor"]
-    # GitHub's website editor tokens, mapped to the existing capture vocabulary.
+    # GitHub's file-viewer syntax tokens, mapped to Tree-sitter roles.
     groups = {
         "keyword": "keyword conditional exception include repeat storageclass import cImport preproc tag.doctype operator",
         "entity": "function function.builtin function.method.builtin constructor method",
         "variable": "type enum variant variable variable.special variable.builtin variable.member property field",
-        "support": "type.builtin string.escape escape attribute label",
         "constant": "constant number boolean float string.special.symbol",
         "string": "string string.special character text.literal text.code.span",
     }
     syntax = {}
     for token, captures in groups.items():
         for capture in captures.split():
-            syntax[capture] = {"color": tokens[f"codeMirror-syntax-fgColor-{token}"]}
+            syntax[capture] = {"color": tokens[f"prettylights-syntax-{token}"]}
     for capture in ROLES:
         syntax.setdefault(capture, {"color": foreground})
     for capture in ["punctuation.bracket", "punctuation.delimiter", "punctuation.special", "punctuation.list_marker"]:
         syntax[capture] = {"color": foreground}
     for capture, token in {
-        # Match GitHub's gray code-display comments, including documentation.
+        "type.builtin": "prettylights-syntax-constant",
+        "string.escape": "prettylights-syntax-constant", "escape": "prettylights-syntax-constant",
+        "attribute": "prettylights-syntax-constant", "label": "prettylights-syntax-constant",
         "comment": "prettylights-syntax-comment", "comment.doc": "prettylights-syntax-comment",
         "tag": "prettylights-syntax-entityTag", "string.regex": "prettylights-syntax-stringRegexp",
         "string.special.regex": "prettylights-syntax-stringRegexp", "link_text": "fgColor-accent",
@@ -197,38 +198,42 @@ def generate_github(data):
         "tsx": "variable variable.parameter punctuation.key_value variable.builtin",
         "c": "variable property", "cpp": "variable property",
         "java": "namespace variable.argument", "ruby": "variable",
+        "rust": "type type.builtin variable.parameter",
         "sql": "variable field parameter type",
         "make": "string operator", "toml": "operator",
         "diff": "constant attribute keyword string variable.builtin",
     }.items():
         for capture in captures.split():
             syntax[f"{language}.{capture}"] = {"color": foreground}
+    # New exact subroles fall back to their existing parent styles in One Dark.
+    syntax["operator.reference"] = {"color": tokens["prettylights-syntax-constant"]}
+    syntax["constructor.variant"] = {"color": tokens["prettylights-syntax-variable"]}
+    syntax["variable.rust"] = {"color": foreground}
+    syntax["property.rust"] = {"color": tokens["prettylights-syntax-constant"]}
     for language, capture, token in [
-        ("python", "variable.builtin", "codeMirror-syntax-fgColor-support"),
-        ("python", "constant.builtin", "codeMirror-syntax-fgColor-constant"),
-        ("javascript", "variable.constant", "codeMirror-syntax-fgColor-constant"),
-        ("typescript", "variable.constant", "codeMirror-syntax-fgColor-constant"),
-        ("tsx", "variable.constant", "codeMirror-syntax-fgColor-constant"),
+        ("python", "variable.builtin", "prettylights-syntax-constant"),
+        ("python", "constant.builtin", "prettylights-syntax-constant"),
+        ("javascript", "variable.constant", "prettylights-syntax-constant"),
+        ("typescript", "variable.constant", "prettylights-syntax-constant"),
+        ("tsx", "variable.constant", "prettylights-syntax-constant"),
         ("javascript", "string.special", "prettylights-syntax-stringRegexp"),
         ("typescript", "string.special", "prettylights-syntax-stringRegexp"),
         ("tsx", "string.special", "prettylights-syntax-stringRegexp"),
-        ("rust", "type.builtin", "codeMirror-syntax-fgColor-support"),
-        ("rust", "variable.parameter", "codeMirror-syntax-fgColor-variable"),
-        ("rust", "attribute", "codeMirror-syntax-fgColor-variable"),
-        ("css", "type", "codeMirror-syntax-fgColor-constant"),
-        ("css", "property", "codeMirror-syntax-fgColor-support"),
-        ("css", "string.special", "codeMirror-syntax-fgColor-constant"),
-        ("css", "attribute.id", "codeMirror-syntax-fgColor-entity"),
-        ("css", "constant.color", "codeMirror-syntax-fgColor-constant"),
-        ("css", "constant.builtin", "codeMirror-syntax-fgColor-constant"),
-        ("c", "type.builtin", "codeMirror-syntax-fgColor-keyword"),
-        ("cpp", "type.builtin", "codeMirror-syntax-fgColor-keyword"),
-        ("java", "type.builtin", "codeMirror-syntax-fgColor-keyword"),
-        ("go", "namespace", "codeMirror-syntax-fgColor-variable"),
-        ("ruby", "constructor", "codeMirror-syntax-fgColor-variable"),
-        ("make", "constant", "codeMirror-syntax-fgColor-variable"),
-        ("toml", "type", "codeMirror-syntax-fgColor-support"),
-        ("toml", "property", "codeMirror-syntax-fgColor-support"),
+        ("rust", "attribute", "prettylights-syntax-constant"),
+        ("css", "type", "prettylights-syntax-constant"),
+        ("css", "property", "prettylights-syntax-constant"),
+        ("css", "string.special", "prettylights-syntax-constant"),
+        ("css", "attribute.id", "prettylights-syntax-entity"),
+        ("css", "constant.color", "prettylights-syntax-constant"),
+        ("css", "constant.builtin", "prettylights-syntax-constant"),
+        ("c", "type.builtin", "prettylights-syntax-keyword"),
+        ("cpp", "type.builtin", "prettylights-syntax-keyword"),
+        ("java", "type.builtin", "prettylights-syntax-keyword"),
+        ("go", "namespace", "prettylights-syntax-variable"),
+        ("ruby", "constructor", "prettylights-syntax-variable"),
+        ("make", "constant", "prettylights-syntax-variable"),
+        ("toml", "type", "prettylights-syntax-constant"),
+        ("toml", "property", "prettylights-syntax-constant"),
         ("markdown", "punctuation.heading", "prettylights-syntax-markup-heading"),
         ("markdown", "title.setext", "prettylights-syntax-markup-heading"),
         ("markdown_inline", "link_uri", "prettylights-syntax-string"),
@@ -250,7 +255,7 @@ def generate_github(data):
         style.update({status: color, status + ".border": color, status + ".background": color + "26"})
     return {
         "highlight_theme": {"name": data["name"], "appearance": "light", "style": style},
-        "selection": tokens["codeMirror-selection-bgColor"], "caret": tokens["codeMirror-cursor-fgColor"],
+        "selection": tokens["selection-bgColor"], "caret": tokens["codeMirror-cursor-fgColor"],
         "search_match": tokens["bgColor-attention-muted"], "search_match_active": tokens["codeMirror-selection-bgColor"],
         "muted_foreground": tokens["fgColor-muted"], "border": tokens["borderColor-default"],
     }
@@ -276,7 +281,7 @@ def main():
         print(f"{mode}: retained {len(data['tokenColors'])} upstream rules; generated explicit scope mappings")
     light = generate_github(load_source(upstream / "GitHubLight.json", "light"))
     (DEST / "github-light.json").write_bytes((json.dumps(light, indent=2) + "\n").encode("utf-8"))
-    print("light: generated GitHub website editor token mappings")
+    print("light: generated GitHub file-viewer syntax and editor control mappings")
 
 
 if __name__ == "__main__":

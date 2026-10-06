@@ -16,6 +16,14 @@ Comment regressions cover Rust line, block and documentation comments,
 JavaScript line, block and documentation comments, and Python line comments.
 Embedded JavaScript, JSX/TSX and Rust Markdown fences retain separate regressions.
 
+`github-website-colors.json` contains the 70 continuous color ranges of the
+reference Rust function from [the GitHub file viewer](https://github.com/cloudy-liu/ctty7/blob/814b4036a05b877a1c3cf3a04e764bbb4822e807/src/main.rs#L35-L59),
+captured on 2026-10-06. Expected colors were resolved from the page's actual
+`stylingDirectives` CSS classes and the published light stylesheet, independently
+of the editor generator. This checks the same source as the user's screenshot,
+including parameters, type names, fields, references, constructor calls and bare
+variants. The initial mapping failed 37 of these ranges.
+
 The languages are Python, JavaScript, TypeScript, JSON, Rust, CSS, Java, C,
 C++, Go, Ruby, Bash, HTML, YAML, Markdown, Diff, SQL, Lua, Make, TOML and TSX.
 Ranges identify selected tokens, including declarations, references, builtins,

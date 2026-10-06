@@ -45,19 +45,19 @@
           "color": "#CF222E"
         },
         "function": {
-          "color": "#8250DF"
+          "color": "#6639BA"
         },
         "function.builtin": {
-          "color": "#8250DF"
+          "color": "#6639BA"
         },
         "function.method.builtin": {
-          "color": "#8250DF"
+          "color": "#6639BA"
         },
         "constructor": {
-          "color": "#8250DF"
+          "color": "#6639BA"
         },
         "method": {
-          "color": "#8250DF"
+          "color": "#6639BA"
         },
         "type": {
           "color": "#953800"
@@ -85,21 +85,6 @@
         },
         "field": {
           "color": "#953800"
-        },
-        "type.builtin": {
-          "color": "#0550AE"
-        },
-        "string.escape": {
-          "color": "#0550AE"
-        },
-        "escape": {
-          "color": "#0550AE"
-        },
-        "attribute": {
-          "color": "#0550AE"
-        },
-        "label": {
-          "color": "#0550AE"
         },
         "constant": {
           "color": "#0550AE"
@@ -131,8 +116,17 @@
         "text.code.span": {
           "color": "#0A3069"
         },
+        "type.builtin": {
+          "color": "#0550AE"
+        },
         "variable.parameter": {
           "color": "#1F2328"
+        },
+        "string.escape": {
+          "color": "#0550AE"
+        },
+        "escape": {
+          "color": "#0550AE"
         },
         "string.regex": {
           "color": "#116329"
@@ -147,6 +141,12 @@
           "color": "#59636E"
         },
         "tag": {
+          "color": "#0550AE"
+        },
+        "attribute": {
+          "color": "#0550AE"
+        },
+        "label": {
           "color": "#0550AE"
         },
         "link_text": {
@@ -293,19 +293,19 @@
           "color": "#0550AE"
         },
         "rust.type": {
-          "color": "#953800"
+          "color": "#1F2328"
         },
         "rust.type.builtin": {
-          "color": "#0550AE"
+          "color": "#1F2328"
         },
         "rust.variable.parameter": {
-          "color": "#953800"
+          "color": "#1F2328"
         },
         "rust.label": {
           "color": "#0550AE"
         },
         "rust.attribute": {
-          "color": "#953800"
+          "color": "#0550AE"
         },
         "css.property": {
           "color": "#0550AE"
@@ -317,7 +317,7 @@
           "color": "#0550AE"
         },
         "css.attribute.id": {
-          "color": "#8250DF"
+          "color": "#6639BA"
         },
         "css.constant.color": {
           "color": "#0550AE"
@@ -483,6 +483,18 @@
         },
         "tsx.keyword.default": {
           "color": "#CF222E"
+        },
+        "operator.reference": {
+          "color": "#0550AE"
+        },
+        "constructor.variant": {
+          "color": "#953800"
+        },
+        "variable.rust": {
+          "color": "#1F2328"
+        },
+        "property.rust": {
+          "color": "#0550AE"
         }
       },
       "error": "#D1242F",
@@ -502,7 +514,7 @@
       "hint.background": "#59636E26"
     }
   },
-  "selection": "#54AEFF66",
+  "selection": "#0969DA33",
   "caret": "#1F2328",
   "search_match": "#FFF8C5",
   "search_match_active": "#54AEFF66",
