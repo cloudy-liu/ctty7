@@ -2868,6 +2868,7 @@ mod agent_resume_tests {
     #[test]
     fn spawn_reply_accepts_cold_start_beyond_local_attach_deadline() {
         let (mut client, mut daemon) = socket_pair();
+        let (release, hold) = std::sync::mpsc::channel();
         let delayed = std::thread::spawn(move || {
             std::thread::sleep(
                 attach_reply_wait(&PaneRoute::Local) + std::time::Duration::from_millis(200),
@@ -2875,12 +2876,16 @@ mod agent_resume_tests {
             DaemonMsg::Spawned { pane_id: 42 }
                 .encode(&mut daemon)
                 .unwrap();
+            // macOS cannot change socket options after the peer disconnects.
+            // A real spawned pane keeps this daemon connection open.
+            hold.recv().unwrap();
         });
         assert!(matches!(
             spawn_reply(&mut client, SPAWN_REPLY_WAIT, "Spawn").unwrap(),
             DaemonMsg::Spawned { pane_id: 42 }
         ));
         assert_eq!(client.read_timeout().unwrap(), None);
+        release.send(()).unwrap();
         delayed.join().unwrap();
     }
 
