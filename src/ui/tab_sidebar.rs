@@ -323,7 +323,7 @@ impl Tty7App {
                 let status_w = status_tag.map_or(0., |(tag, _)| {
                     measure_text(&window.text_system(), &title_font_active, status_size, tag)
                         + 2. * row_metrics::STATUS_PAD
-                        + row_metrics::META_GAP
+                        + 0.375 * rem // The following gap_1p5 scales with the UI font size.
                 });
                 let status_lead = || {
                     status_tag.map(|(tag, colour)| {
