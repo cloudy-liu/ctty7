@@ -258,6 +258,65 @@ Evidence is saved as `readme-font-fixed.png`,
 These observations verify the reported font fallback repair, not complete
 browser pixel parity.
 
+## Responsive README image and Chinese font follow-up
+
+On 2026-10-06 the Chinese README's `width="100%"` hero left roughly 430
+logical pixels before the next heading in the native window. The same image
+on GitHub measured 847 by 574.72 pixels, with 53.71 pixels to the next heading.
+The image is intrinsically 1459 by 990 pixels. GPUI filled `height:auto` with
+the intrinsic height while painting the percentage-width image at a smaller
+size, leaving the unused image layout height below the visible screenshot.
+
+The component now resolves percentage width and intrinsic aspect ratio on
+the existing image wrapper, and fits the visible playback child into that
+area. Explicit-height, loading/error and other image paths retain their
+behavior. A public TextView regression uses the README HTML structure and
+checks both lower and upper heading bounds for 100% and 50% images at 400
+and 600 pixel content widths. This catches both the original excess height
+and an image collapsed to zero height. The original image path failed the
+upper bound; an intermediate nested wrapper failed the lower bound.
+
+GitHub's Chinese paragraph computes to 16px/400, with h2 at 24px/600 and
+strong text at 600. Those numeric weights already matched ctty7. Native
+DirectWrite shaping instead selected Microsoft YaHei for Chinese because
+the theme placed it before Noto Sans SC. In Windows Chrome, a raster check
+of the same Chinese phrase at 400 and 600 produced different pixels for
+Microsoft YaHei and the actual GitHub CSS stack; the Noto Sans SC CSS family
+matched the latter. Loading a local Noto Sans SC face also confirmed its
+availability and the ordinary-weight raster match.
+
+The GitHub theme now prefers Noto Sans SC in its native CJK additions, with
+PingFang SC and Microsoft YaHei retained as alternatives. The Latin stack
+and 400/600 weights are unchanged. The opt-in native Windows regression
+`native_github_cjk_uses_noto_at_body_and_heading_weights` shapes actual CJK
+runs through the builtin stack at both weights and requires Noto Sans SC
+to be installed. It failed before the reorder and passes after it:
+
+```powershell
+cargo test -p tty7 --bin tty7-app --locked native_github_cjk_uses_noto_at_body_and_heading_weights -j 1 -- --ignored
+```
+
+These measurements explain the reported heavier Chinese appearance; they
+do not establish identical GPUI/Chrome rasterization across font installs,
+platforms or DPI settings. No font is downloaded or bundled by this change.
+
+Final native inspection used `tty7-app-readme-layout-check.exe`, built from
+the updated component pin and theme with an isolated test configuration.
+The Chinese README's loaded hero ended near y650 and the next heading
+started near y694, approximately 44 logical pixels apart instead of the
+former 430. The source/reading round trip preserved this layout and reading
+position. The supplied pink typing title and remote badges loaded normally.
+Evidence: `readme-gap-cjk-fixed.png` and `readme-gap-after-mode-switch.png`
+in `.humanlayer/tasks/theme-spec-native-verification`.
+Restoring the split view also retained an approximately 44px gap and correct
+image proportions; the pink typing title was observed in partial frames.
+
+The updated component passed 301 workspace tests with 2 doc tests ignored.
+Combined main passed 2,960 tests plus 13 CLI end-to-end cases, with 8 ignored;
+the new native font test also passed when run explicitly. An initial run
+missed Git's `usr/bin` in PATH and four child-process tests could not find
+`cat`/`sleep`; the complete rerun with those test dependencies passed.
+
 The component workspace passed 300 tests, with 2 documentation tests ignored.
 Combined local main passed 2,960 tests plus 13 CLI end-to-end cases, with
 7 ignored. The isolated PR branch passed 2,947 tests plus the same 13 CLI

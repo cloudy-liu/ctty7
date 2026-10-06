@@ -10,8 +10,9 @@ license: MIT
 typography:
   resolve_font_stack: true
   # .AppleSystemUIFont is the native equivalent of -apple-system on macOS.
-  # Chinese fallbacks at the end are non-GitHub values.
-  fonts: [.AppleSystemUIFont, Segoe UI, Noto Sans, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji, Microsoft YaHei, PingFang SC, Noto Sans SC]
+  # Native CJK additions prefer the observed Windows browser sans fallback.
+  # Keep platform fonts as alternatives when Noto Sans SC is unavailable.
+  fonts: [.AppleSystemUIFont, Segoe UI, Noto Sans, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji, Noto Sans SC, PingFang SC, Microsoft YaHei]
   heading_fonts: []
   code_fonts: [SFMono-Regular, SF Mono, Menlo, Consolas, Liberation Mono]
   font_size: 16

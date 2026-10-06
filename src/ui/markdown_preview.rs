@@ -1180,6 +1180,50 @@ mod tests {
     use tty7_core::host::{self, Host, HostId, Meta};
 
     #[test]
+    #[ignore = "requires the native Windows font collection with Noto Sans SC"]
+    #[cfg(target_os = "windows")]
+    fn native_github_cjk_uses_noto_at_body_and_heading_weights() {
+        let platform = gpui_platform::current_platform(false);
+        let native = platform.text_system();
+        let system = Arc::new(gpui::TextSystem::new(native.clone()));
+        let shaper = gpui::WindowTextSystem::new(system.clone());
+        let theme = markdown_theme::builtin();
+        let names = system.all_font_names();
+        let body = available_reading_font(&theme.typography.fonts, &names, ".SystemUIFont".into());
+        assert!(names.iter().any(|name| name == "Noto Sans SC"));
+        for weight in [FontWeight::NORMAL, FontWeight::SEMIBOLD] {
+            let mut expected = gpui::font("Noto Sans SC");
+            expected.weight = weight;
+            let expected_id = native.font_id(&expected).unwrap();
+            let mut font = gpui::font(body.clone());
+            font.weight = weight;
+            font.fallbacks = Some(gpui::FontFallbacks::from_fonts(
+                theme.typography.fonts.clone(),
+            ));
+            let text: SharedString = "编程中文现代终端".into();
+            let line = shaper.shape_line(
+                text.clone(),
+                px(16.),
+                &[gpui::TextRun {
+                    len: text.len(),
+                    font,
+                    color: gpui::black(),
+                    background_color: None,
+                    underline: None,
+                    strikethrough: None,
+                }],
+                None,
+            );
+            assert!(!line.runs.is_empty());
+            assert!(
+                line.runs.iter().all(|run| run.font_id == expected_id),
+                "CJK fallback differs from Noto Sans SC at {weight:?}: {:?}",
+                line.runs
+            );
+        }
+    }
+
+    #[test]
     fn markdown_remote_svg_uses_the_same_animation_pipeline_as_host_images() {
         use gpui::http_client::{FakeHttpClient, Response};
         let bytes = crate::core::markdown_svg::tests::TYPING.to_vec();
