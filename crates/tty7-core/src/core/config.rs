@@ -133,6 +133,22 @@ pub struct Config {
     pub theme_preset: String,
     /// Reading theme package; its light/dark variant follows the applied UI mode.
     pub markdown_theme: String,
+    /// "default" keeps the platform monospace face; "terminal" follows font_family.
+    #[serde(
+        default = "default_editor_font_family",
+        deserialize_with = "de_editor_font_family"
+    )]
+    pub editor_font_family: String,
+    #[serde(
+        default = "default_editor_font_size",
+        deserialize_with = "de_editor_font_size"
+    )]
+    pub editor_font_size: f32,
+    #[serde(
+        default = "default_editor_line_height",
+        deserialize_with = "de_editor_line_height"
+    )]
+    pub editor_line_height: f32,
     pub theme_follow_system: bool,
     pub theme_preset_light: String,
     pub theme_preset_dark: String,
@@ -575,6 +591,9 @@ impl Default for Config {
             theme: "light".to_string(),
             theme_preset: "light".to_string(),
             markdown_theme: "paperglow".to_string(),
+            editor_font_family: default_editor_font_family(),
+            editor_font_size: default_editor_font_size(),
+            editor_line_height: default_editor_line_height(),
             theme_follow_system: false,
             theme_preset_light: "light".to_string(),
             theme_preset_dark: "dark".to_string(),
@@ -760,6 +779,18 @@ impl Config {
         // shrink one label — it makes the window unusable. Keep the range to
         // sizes the layout still holds together at.
         self.ui_font_size = self.ui_font_size.clamp(UI_FONT_SIZE_MIN, UI_FONT_SIZE_MAX);
+        if !self.editor_font_size.is_finite() || self.editor_font_size <= 0.0 {
+            self.editor_font_size = EDITOR_FONT_SIZE_DEFAULT;
+        }
+        self.editor_font_size = self
+            .editor_font_size
+            .clamp(EDITOR_FONT_SIZE_MIN, EDITOR_FONT_SIZE_MAX);
+        if !self.editor_line_height.is_finite() || self.editor_line_height <= 0.0 {
+            self.editor_line_height = EDITOR_LINE_HEIGHT_DEFAULT;
+        }
+        self.editor_line_height = self
+            .editor_line_height
+            .clamp(EDITOR_LINE_HEIGHT_MIN, EDITOR_LINE_HEIGHT_MAX);
         self.scrollback_limit = self.scrollback_limit.clamp(100, MAX_SCROLLBACK);
         if !self.mouse_scroll_multiplier.is_finite() || self.mouse_scroll_multiplier <= 0.0 {
             self.mouse_scroll_multiplier = Config::default().mouse_scroll_multiplier;
@@ -1029,6 +1060,48 @@ pub fn agent_commands_cached() -> &'static HashMap<String, String> {
     })
 }
 
+fn default_editor_font_family() -> String {
+    "default".into()
+}
+
+fn default_editor_font_size() -> f32 {
+    EDITOR_FONT_SIZE_DEFAULT
+}
+
+fn default_editor_line_height() -> f32 {
+    EDITOR_LINE_HEIGHT_DEFAULT
+}
+
+fn de_editor_font_family<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_str()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .unwrap_or_else(default_editor_font_family))
+}
+
+fn de_editor_font_size<'de, D: serde::Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_f64()
+        .map(|v| v as f32)
+        .unwrap_or(EDITOR_FONT_SIZE_DEFAULT))
+}
+
+fn de_editor_line_height<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<f32, D::Error> {
+    let value = serde_json::Value::deserialize(deserializer)?;
+    Ok(value
+        .as_f64()
+        .map(|v| v as f32)
+        .unwrap_or(EDITOR_LINE_HEIGHT_DEFAULT))
+}
+
 fn default_preset() -> String {
     "default".to_string()
 }
@@ -1146,6 +1219,13 @@ pub const DOCUMENT_RATIO_STOPS: [f32; 3] = [
 pub const UI_FONT_SIZE_DEFAULT: f32 = 16.0;
 pub const UI_FONT_SIZE_MIN: f32 = 12.0;
 pub const UI_FONT_SIZE_MAX: f32 = 24.0;
+
+pub const EDITOR_FONT_SIZE_DEFAULT: f32 = 13.0;
+pub const EDITOR_FONT_SIZE_MIN: f32 = 8.0;
+pub const EDITOR_FONT_SIZE_MAX: f32 = 72.0;
+pub const EDITOR_LINE_HEIGHT_DEFAULT: f32 = 1.5;
+pub const EDITOR_LINE_HEIGHT_MIN: f32 = 1.0;
+pub const EDITOR_LINE_HEIGHT_MAX: f32 = 3.0;
 
 /// The terminal's font-size and line-height bounds, shared by `sanitize` and
 /// the GUI's steppers. The GUI used to keep its own, narrower pair (6–48,
@@ -1416,6 +1496,48 @@ mod tests {
     }
 
     #[test]
+    fn retired_editor_theme_does_not_override_or_discard_preferences() {
+        for legacy in [
+            serde_json::Value::Null,
+            serde_json::json!("auto"),
+            serde_json::json!("atom_one_dark"),
+            serde_json::json!("atom_one_light"),
+            serde_json::json!("one_dark_pro"),
+            serde_json::json!("future-theme"),
+            serde_json::json!({"wrong": "type"}),
+            serde_json::json!(42),
+        ] {
+            let config: Config = serde_json::from_value(serde_json::json!({
+                "editor_theme": legacy,
+                "theme_preset": "dracula",
+                "font_size": 19,
+                "editor_font_family": "Hack",
+                "editor_font_size": 16,
+                "editor_line_height": 1.8
+            }))
+            .unwrap();
+            let saved = serde_json::to_value(&config).unwrap();
+            assert!(
+                saved.get("editor_theme").is_none(),
+                "retired editor preference must not be saved"
+            );
+            assert_eq!(saved["theme_preset"], "dracula");
+            assert_eq!(saved["font_size"], 19.0);
+            assert_eq!(saved["editor_font_family"], "Hack");
+            assert_eq!(saved["editor_font_size"], 16.0);
+            assert_eq!(saved["editor_line_height"], serde_json::json!(1.8_f32));
+        }
+        let old: Config = serde_json::from_str(r#"{"font_size":19}"#).unwrap();
+        assert_eq!(old.font_size, 19.0);
+        assert!(
+            serde_json::to_value(old)
+                .unwrap()
+                .get("editor_theme")
+                .is_none()
+        );
+    }
+
+    #[test]
     fn theme_follow_system_defaults_and_round_trips() {
         let cfg: Config = serde_json::from_str(r#"{"theme_preset":"dracula"}"#).unwrap();
         assert!(!cfg.theme_follow_system);
@@ -1440,6 +1562,59 @@ mod tests {
         let json = serde_json::to_string(&off).unwrap();
         let back: Config = serde_json::from_str(&json).unwrap();
         assert!(!back.theme_legible_palette);
+    }
+
+    #[test]
+    fn editor_typography_survives_old_and_malformed_configs() {
+        let old: Config = serde_json::from_str(r#"{"font_size":19,"font_family":"Hack"}"#).unwrap();
+        assert_eq!(old.editor_font_size, 13.0);
+        assert_eq!(old.editor_font_family, "default");
+        let mut malformed: Config = serde_json::from_str(
+            r#"{
+            "font_size":19,"editor_font_size":"large","editor_line_height":null,
+            "editor_font_family":[],"editor_theme":"one_dark_pro"
+        }"#,
+        )
+        .unwrap();
+        malformed.sanitize();
+        assert_eq!(malformed.editor_font_size, EDITOR_FONT_SIZE_DEFAULT);
+        assert_eq!(malformed.editor_line_height, EDITOR_LINE_HEIGHT_DEFAULT);
+        assert_eq!(malformed.font_size, 19.0);
+        for (size, height, expected_size, expected_height) in [
+            (
+                0.0,
+                -1.0,
+                EDITOR_FONT_SIZE_DEFAULT,
+                EDITOR_LINE_HEIGHT_DEFAULT,
+            ),
+            (
+                f32::NAN,
+                f32::INFINITY,
+                EDITOR_FONT_SIZE_DEFAULT,
+                EDITOR_LINE_HEIGHT_DEFAULT,
+            ),
+            (500.0, 10.0, EDITOR_FONT_SIZE_MAX, EDITOR_LINE_HEIGHT_MAX),
+            (1.0, 0.1, EDITOR_FONT_SIZE_MIN, EDITOR_LINE_HEIGHT_MIN),
+        ] {
+            let mut cfg = Config {
+                editor_font_size: size,
+                editor_line_height: height,
+                ..old.clone()
+            };
+            cfg.sanitize();
+            assert_eq!(
+                (cfg.editor_font_size, cfg.editor_line_height),
+                (expected_size, expected_height)
+            );
+        }
+        let custom: Config = serde_json::from_str(r#"{"editor_font_family":"JetBrains Mono","editor_font_size":16.5,"editor_line_height":1.8}"#).unwrap();
+        let restored: Config =
+            serde_json::from_str(&serde_json::to_string(&custom).unwrap()).unwrap();
+        assert_eq!(
+            (restored.editor_font_size, restored.editor_line_height),
+            (16.5, 1.8)
+        );
+        assert_eq!(restored.editor_font_family, "JetBrains Mono");
     }
 
     #[test]

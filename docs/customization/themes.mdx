@@ -21,6 +21,67 @@ YAML packages and editing them with live reload.
   <img src="/images/placeholder.svg" alt="The tty7 theme picker" />
 </Frame>
 
+## Code editor colors
+
+Source files opened from the sidebar, including Markdown source mode, use
+paired Atom One palettes automatically:
+
+| Resolved application appearance | Source editor palette | Editor background |
+|---|---|---|
+| Dark, including One Dark Pro, Dracula and Nord | Atom One Dark | `#282C34` |
+| Light | Atom One Light | `#FAFAFA` |
+
+The editor follows the application's effective light or dark appearance,
+including custom themes, system appearance when enabled, and temporary theme
+previews. Canceling a preview restores the editor colors. Switching between
+application themes of the same appearance keeps the same source palette.
+
+The Atom palette owns the complete source background, gutter, syntax,
+selection and caret colors. Its background is opaque across source text,
+line numbers and empty space, so wallpaper, gradients and transparency do not
+change code contrast. The application theme chooses the variant rather than
+supplying the editor background. Search retains the existing contrast rules;
+the current match uses the application's accent with a contrast fallback.
+
+**Settings → Appearance → Code editor colors** shows the active palette.
+There is no separate source theme picker or fixed light/dark mode. Old
+`editor_theme` configuration values are ignored and omitted when settings are
+saved; other preferences remain intact. No configuration edit is required.
+
+Appearance changes preserve unsaved edits, undo history, selections and scroll
+positions. Source font, font size and line height stay independent. Terminal
+colors, file-tree colors, diffs and Markdown reading themes retain their own
+appearance behavior.
+
+The palettes are adapted from [Atom One Dark](https://github.com/akamud/vscode-theme-onedark)
+and [Atom One Light](https://github.com/akamud/vscode-theme-onelight). Highlighting
+uses Tree-sitter; language-server hints and bracket-pair coloring are separate
+editor features.
+
+## Source editor typography
+
+In **Settings → Appearance**, **Editor font**, **Editor font size**, and
+**Editor line height** apply to source code, including Markdown source mode.
+Choose a font independently, keep the platform default, or follow the terminal
+font. Numeric controls accept direct input with Enter or on leaving the field,
+as well as increase/decrease and reset buttons. Changes update open editors
+and are saved for restart. Invalid numeric input restores the current value;
+out-of-range numbers are limited to the supported range.
+
+```json
+{
+  "editor_font_family": "JetBrains Mono",
+  "editor_font_size": 16,
+  "editor_line_height": 1.8
+}
+```
+
+Existing configurations keep the platform's monospace font and 13 px text.
+Line height defaults to 1.5 times the text size and is independent of interface
+scaling. Terminal typography and Markdown reading typography remain separate.
+The font size shortcuts resize source text when the source editor has focus,
+and terminal text otherwise. Markdown reading mode retains its separate typography.
+
 ## Following the system
 
 Turn on **Sync with system** and pick a theme for each appearance. tty7 follows

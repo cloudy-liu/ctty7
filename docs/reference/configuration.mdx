@@ -38,8 +38,16 @@ failing the file.
 | `font_size` | number | `15` | Terminal text size in px (4–256). |
 | `line_height` | number | `1.4` | Multiple of the font size (0.5–4). |
 | `ui_font_size` | number | `16` | The interface's root size in px (12–24). |
+| `editor_font_family` | string | `"default"` | Source editor font: platform default, `"terminal"` to follow `font_family`, or an installed family name. Independent of color themes. |
+| `editor_font_size` | number | `13` | Source editor text size in px (8–72), independent of terminal and interface sizes. |
+| `editor_line_height` | number | `1.5` | Source editor line height as a multiple of its font size (1–3). |
 
 [More about fonts →](/customization/fonts)
+
+Source editor colors automatically use Atom One Dark or Atom One Light based
+on the application's resolved appearance. The retired `editor_theme` key is
+ignored on load and omitted on save, including old fixed-mode and One Dark Pro
+values. Source typography remains independently configurable.
 
 ## Theme and window
 

@@ -92,15 +92,15 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
             "配色テーマを選びます。明るいテーマと暗いテーマがあります"
         }
         L10nKey::SettingsTypography => "タイポグラフィ",
-        L10nKey::SettingsFontSize => "フォントサイズ",
+        L10nKey::SettingsFontSize => "ターミナルのフォントサイズ",
         L10nKey::SettingsFontSizeDesc => "ターミナルテキストのサイズ（ピクセル）",
         L10nKey::SettingsUiFontSize => "インターフェースのフォントサイズ",
         L10nKey::SettingsUiFontSizeDesc => {
-            "ターミナル以外すべての文字サイズ（タブ・パネル・設定）。Retina でないディスプレイでは大きめに"
+            "タブ・パネル・設定の文字サイズ。ターミナルとコードエディタは個別に設定します。"
         }
         L10nKey::SettingsLineHeight => "行の高さ",
         L10nKey::SettingsLineHeightDesc => "フォントサイズに対する行間の倍率",
-        L10nKey::SettingsFontFamily => "フォントファミリー",
+        L10nKey::SettingsFontFamily => "ターミナルのフォント",
         L10nKey::SettingsFontFamilyDesc => "システムにインストールされているフォントから選択",
         L10nKey::SettingsBoldFont => "太字フォント",
         L10nKey::SettingsBoldFontDesc => {
@@ -179,6 +179,29 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsCustomThemes => "カスタムテーマ",
         L10nKey::SettingsThemesRejected => "テーマフォルダから読み込めなかったもの",
         L10nKey::SettingsMarkdownTheme => "Markdown の閲覧テーマ",
+        L10nKey::SettingsEditorTheme => "コードエディタの配色",
+        L10nKey::SettingsEditorThemeDesc => {
+            "アプリの明暗に応じて Atom One Dark または Light を自動で使用し、背景も同じ配色にします。フォント設定は個別に保存します。"
+        }
+        L10nKey::SettingsEditorThemeResolved => "現在の配色：{active}。",
+        L10nKey::SettingsEditorFont => "エディタのフォント",
+        L10nKey::SettingsEditorFontDesc => "ターミナルのフォントや配色テーマとは個別に設定します。",
+        L10nKey::SettingsEditorFontDefault => "プラットフォームの既定",
+        L10nKey::SettingsEditorFontTerminal => "ターミナルのフォントに追従",
+        L10nKey::SettingsEditorFontSize => "エディタのフォントサイズ",
+        L10nKey::SettingsEditorFontSizeDesc => {
+            "コードの文字サイズ（8–72 ピクセル）。テーマ切替時も維持します。"
+        }
+        L10nKey::SettingsEditorLineHeight => "エディタの行の高さ",
+        L10nKey::SettingsEditorLineHeightDesc => {
+            "文字サイズに対する倍率（1–3）。ターミナルの行間とは個別に設定します。"
+        }
+        L10nKey::SettingsSearchEditorFontKeywords => {
+            "コード エディタ フォント サイズ 行間 高さ 等幅 font size"
+        }
+        L10nKey::SettingsSearchEditorThemeKeywords => {
+            "コード エディタ ソース 構文 ハイライト テーマ atom one dark light"
+        }
         L10nKey::SettingsMarkdownThemeDesc => {
             "閲覧スタイルを選択します。明暗はアプリに追従し、テーマファイルの変更は自動的に反映されます。"
         }

@@ -1,3 +1,4 @@
+use gpui::Focusable as _;
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, Background, Context, Div, Entity, FontWeight,
     Image, ImageFormat, KeyDownEvent, MouseButton, SharedString, Stateful, Subscription, Window,
@@ -361,6 +362,26 @@ fn settings_search_entries() -> &'static [SearchEntry] {
             section: Appearance,
             title: SettingsThemeIntroTitle,
             keywords: SettingsSearchThemeKeywords,
+        },
+        SearchEntry {
+            section: Appearance,
+            title: SettingsEditorTheme,
+            keywords: SettingsSearchEditorThemeKeywords,
+        },
+        SearchEntry {
+            section: Appearance,
+            title: SettingsEditorFont,
+            keywords: SettingsSearchEditorFontKeywords,
+        },
+        SearchEntry {
+            section: Appearance,
+            title: SettingsEditorFontSize,
+            keywords: SettingsSearchEditorFontKeywords,
+        },
+        SearchEntry {
+            section: Appearance,
+            title: SettingsEditorLineHeight,
+            keywords: SettingsSearchEditorFontKeywords,
         },
         SearchEntry {
             section: Appearance,
@@ -825,6 +846,10 @@ pub(crate) struct SettingsState {
     pub(crate) font_select: Entity<SelectState<SearchableVec<String>>>,
     pub(crate) font_bold_select: Entity<SelectState<SearchableVec<String>>>,
     pub(crate) font_italic_select: Entity<SelectState<SearchableVec<String>>>,
+    pub(crate) editor_font_select: Entity<SelectState<SearchableVec<String>>>,
+    pub(crate) editor_font_size_input: Entity<InputState>,
+    pub(crate) editor_line_height_input: Entity<InputState>,
+    pub(crate) editor_typography_values: Cell<(f32, f32)>,
     pub(crate) language_select: Entity<SelectState<SearchableVec<String>>>,
     #[cfg(target_os = "windows")]
     pub(crate) window_backdrop_select: Entity<SelectState<SearchableVec<String>>>,
@@ -1667,7 +1692,7 @@ impl Tty7App {
             .child(nav_body);
 
         let content = match section {
-            SettingsSection::Appearance => self.render_settings_appearance(cx),
+            SettingsSection::Appearance => self.render_settings_appearance(window, cx),
             SettingsSection::Terminal => self.render_settings_terminal(cx),
             SettingsSection::Input => self.render_settings_input(cx),
             SettingsSection::Ssh => self.render_settings_ssh(cx),
@@ -2188,7 +2213,12 @@ impl Tty7App {
             .into_any_element()
     }
 
-    fn render_settings_appearance(&self, cx: &mut Context<Self>) -> AnyElement {
+    fn render_settings_appearance(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        self.sync_editor_typography_controls(window, cx);
         let theme = cx.theme();
         let foreground = theme.foreground;
         let border = theme.border;
@@ -2372,6 +2402,8 @@ impl Tty7App {
             .child(self.render_custom_themes(cx))
             .child(self.section_rule(cx))
             .child(self.render_markdown_theme_settings(cx))
+            .child(self.render_editor_theme_settings(cx))
+            .child(self.render_editor_typography_settings(cx))
             .child(self.section_rule(cx))
             .child(self.render_window_section(cx))
             .child(self.section_rule(cx))
@@ -6115,6 +6147,291 @@ impl Tty7App {
             )
     }
 
+    fn render_editor_theme_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+        let active = div()
+            .id("editor-theme-active")
+            .debug_selector(|| "editor-theme-active".into())
+            .text_sm()
+            .child(t_fmt(
+                L10nKey::SettingsEditorThemeResolved,
+                &[("active", crate::ui::editor_theme::resolved_name(cx))],
+            ));
+        self.settings_row(
+            t(L10nKey::SettingsEditorTheme),
+            t(L10nKey::SettingsEditorThemeDesc),
+            active.into_any_element(),
+            cx,
+        )
+        .into_any_element()
+    }
+
+    pub(crate) fn build_editor_typography_controls(
+        &mut self,
+        subs: &mut Vec<Subscription>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> (
+        Entity<SelectState<SearchableVec<String>>>,
+        Entity<InputState>,
+        Entity<InputState>,
+    ) {
+        let cfg = cx.global::<Config>();
+        let family = cfg.editor_font_family.clone();
+        let size = cfg.editor_font_size;
+        let height = cfg.editor_line_height;
+        let mut names = cx.text_system().all_font_names();
+        if family != "default" && family != "terminal" && !names.contains(&family) {
+            names.push(family.clone());
+        }
+        names.sort_unstable();
+        names.dedup();
+        let default_label = t(L10nKey::SettingsEditorFontDefault).to_owned();
+        let terminal_label = t(L10nKey::SettingsEditorFontTerminal).to_owned();
+        let mut rows = vec![default_label.clone(), terminal_label.clone()];
+        rows.extend(names);
+        let selected = match family.as_str() {
+            "default" => 0,
+            "terminal" => 1,
+            _ => rows.iter().position(|name| name == &family).unwrap_or(0),
+        };
+        let font = cx.new(|cx| {
+            SelectState::new(
+                SearchableVec::new(rows),
+                Some(IndexPath::default().row(selected)),
+                window,
+                cx,
+            )
+            .searchable(true)
+        });
+        subs.push(cx.subscribe_in(
+            &font,
+            window,
+            move |this, _, event: &SelectEvent<SearchableVec<String>>, _, cx| {
+                if let SelectEvent::Confirm(Some(value)) = event {
+                    let family = if value == t(L10nKey::SettingsEditorFontDefault) {
+                        "default".into()
+                    } else if value == t(L10nKey::SettingsEditorFontTerminal) {
+                        "terminal".into()
+                    } else {
+                        value.clone()
+                    };
+                    this.set_editor_font_family(family, cx);
+                }
+            },
+        ));
+        let size_input = cx.new(|cx| InputState::new(window, cx).default_value(format!("{size}")));
+        let height_input =
+            cx.new(|cx| InputState::new(window, cx).default_value(format!("{height:.2}")));
+        for (input, line_height) in [(&size_input, false), (&height_input, true)] {
+            subs.push(cx.subscribe_in(
+                input,
+                window,
+                move |this, input, event: &InputEvent, window, cx| {
+                    if matches!(event, InputEvent::PressEnter { .. } | InputEvent::Blur) {
+                        let value = input
+                            .read(cx)
+                            .value()
+                            .trim()
+                            .parse::<f32>()
+                            .ok()
+                            .filter(|value| value.is_finite());
+                        let cfg = cx.global::<Config>();
+                        let current = if line_height {
+                            cfg.editor_line_height
+                        } else {
+                            cfg.editor_font_size
+                        };
+                        this.commit_editor_metric(
+                            line_height,
+                            value.unwrap_or(current),
+                            window,
+                            cx,
+                        );
+                    }
+                },
+            ));
+        }
+        (font, size_input, height_input)
+    }
+
+    fn commit_editor_metric(
+        &mut self,
+        line_height: bool,
+        value: f32,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if line_height {
+            self.set_editor_line_height(value, cx);
+        } else {
+            self.set_editor_font_size(value, cx);
+        }
+        if let Some(settings) = self.active_settings() {
+            let cfg = cx.global::<Config>();
+            let (input, text) = if line_height {
+                (
+                    settings.editor_line_height_input.clone(),
+                    format!("{:.2}", cfg.editor_line_height),
+                )
+            } else {
+                (
+                    settings.editor_font_size_input.clone(),
+                    format!("{}", cfg.editor_font_size),
+                )
+            };
+            input.update(cx, |input, cx| input.set_value(text, window, cx));
+        }
+    }
+
+    fn sync_editor_typography_controls(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(settings) = self.active_settings() else {
+            return;
+        };
+        let cfg = cx.global::<Config>();
+        let family = cfg.editor_font_family.clone();
+        let selected = match family.as_str() {
+            "default" => t(L10nKey::SettingsEditorFontDefault).to_owned(),
+            "terminal" => t(L10nKey::SettingsEditorFontTerminal).to_owned(),
+            _ => family.clone(),
+        };
+        // Focus events arrive after rendering. Only sync changed configuration,
+        // or a blur-frame render would replace the user's uncommitted input.
+        // A focused field keeps its draft even if another window changes config.
+        let previous = settings
+            .editor_typography_values
+            .replace((cfg.editor_font_size, cfg.editor_line_height));
+        let metrics = [
+            (
+                settings.editor_font_size_input.clone(),
+                format!("{}", cfg.editor_font_size),
+                previous.0 != cfg.editor_font_size,
+            ),
+            (
+                settings.editor_line_height_input.clone(),
+                format!("{:.2}", cfg.editor_line_height),
+                previous.1 != cfg.editor_line_height,
+            ),
+        ];
+        let font = settings.editor_font_select.clone();
+        if font.read(cx).selected_value() != Some(&selected) {
+            let mut names = cx.text_system().all_font_names();
+            if family != "default" && family != "terminal" {
+                names.push(family);
+            }
+            names.sort_unstable();
+            names.dedup();
+            let mut rows = vec![
+                t(L10nKey::SettingsEditorFontDefault).to_owned(),
+                t(L10nKey::SettingsEditorFontTerminal).to_owned(),
+            ];
+            rows.extend(names);
+            font.update(cx, |state, cx| {
+                state.set_items(SearchableVec::new(rows), window, cx);
+                state.set_selected_value(&selected, window, cx);
+            });
+        }
+        for (input, text, changed) in metrics {
+            if changed
+                && !input.read(cx).focus_handle(cx).is_focused(window)
+                && input.read(cx).value().as_ref() != text
+            {
+                input.update(cx, |input, cx| input.set_value(text, window, cx));
+            }
+        }
+    }
+
+    fn render_editor_typography_settings(&self, cx: &mut Context<Self>) -> AnyElement {
+        let Some(settings) = self.active_settings() else {
+            return div().into_any_element();
+        };
+        let font = Select::new(&settings.editor_font_select)
+            .small()
+            .w(px(240.))
+            .search_placeholder(t(L10nKey::SearchFonts))
+            .menu_max_h(px(224.));
+        let number = |input: &Entity<InputState>, line_height: bool| {
+            let id = if line_height {
+                "editor-line-height"
+            } else {
+                "editor-font-size"
+            };
+            let step = if line_height { 0.1 } else { 1.0 };
+            let change =
+                move |delta, this: &mut Tty7App, window: &mut Window, cx: &mut Context<Tty7App>| {
+                    let cfg = cx.global::<Config>();
+                    let current = if line_height {
+                        cfg.editor_line_height
+                    } else {
+                        cfg.editor_font_size
+                    };
+                    this.commit_editor_metric(line_height, current + delta, window, cx);
+                };
+            h_flex()
+                .items_center()
+                .gap_1()
+                .child(
+                    Button::new(format!("{id}-reset"))
+                        .label(t(L10nKey::Reset))
+                        .ghost()
+                        .small()
+                        .on_click(cx.listener(move |this, _, window, cx| {
+                            let value = if line_height {
+                                crate::core::config::EDITOR_LINE_HEIGHT_DEFAULT
+                            } else {
+                                crate::core::config::EDITOR_FONT_SIZE_DEFAULT
+                            };
+                            this.commit_editor_metric(line_height, value, window, cx);
+                        })),
+                )
+                .child(
+                    Button::new(format!("{id}-dec"))
+                        .label("−")
+                        .ghost()
+                        .small()
+                        .on_click(
+                            cx.listener(move |this, _, window, cx| change(-step, this, window, cx)),
+                        ),
+                )
+                .child(
+                    div()
+                        .id(id)
+                        .debug_selector(move || id.into())
+                        .child(Input::new(input).small().w(px(64.)).text_center()),
+                )
+                .child(
+                    Button::new(format!("{id}-inc"))
+                        .label("+")
+                        .ghost()
+                        .small()
+                        .debug_selector(move || format!("{id}-inc").into())
+                        .on_click(
+                            cx.listener(move |this, _, window, cx| change(step, this, window, cx)),
+                        ),
+                )
+                .into_any_element()
+        };
+        v_flex()
+            .child(self.settings_row(
+                t(L10nKey::SettingsEditorFont),
+                t(L10nKey::SettingsEditorFontDesc),
+                font.into_any_element(),
+                cx,
+            ))
+            .child(self.settings_row(
+                t(L10nKey::SettingsEditorFontSize),
+                t(L10nKey::SettingsEditorFontSizeDesc),
+                number(&settings.editor_font_size_input, false),
+                cx,
+            ))
+            .child(self.settings_row(
+                t(L10nKey::SettingsEditorLineHeight),
+                t(L10nKey::SettingsEditorLineHeightDesc),
+                number(&settings.editor_line_height_input, true),
+                cx,
+            ))
+            .into_any_element()
+    }
+
     fn render_markdown_theme_settings(&self, cx: &mut Context<Self>) -> AnyElement {
         use crate::core::markdown_theme::Registry;
         let selected = cx.global::<Config>().markdown_theme.clone();
@@ -8188,6 +8505,42 @@ mod gpui_tests {
     }
 
     #[gpui::test]
+    fn editor_colors_show_automatic_palette_without_a_picker(cx: &mut TestAppContext) {
+        crate::core::config::pin_test_config_dir();
+        crate::ui::i18n::set_locale("en");
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.set_theme_follow_system(false, window, cx);
+            app.set_preset("one_dark_pro", window, cx);
+            app.open_settings_section(SettingsSection::Appearance, window, cx);
+            let settings = app.active_settings().unwrap();
+            settings
+                .search
+                .update(cx, |input, cx| input.set_value("code editor", window, cx));
+        });
+        vcx.simulate_resize(size(px(1100.), px(800.)));
+        vcx.run_until_parked();
+        for (preset, expected) in [
+            ("one_dark_pro", "Atom One Dark"),
+            ("light", "Atom One Light"),
+        ] {
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.set_preset(preset, window, cx)
+            });
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            assert!(vcx.debug_bounds("editor-theme-picker").is_none());
+            assert!(
+                vcx.debug_bounds("editor-theme-active").is_some(),
+                "search reveals automatic editor colors"
+            );
+            vcx.update(|_, cx| assert_eq!(crate::ui::editor_theme::resolved_name(cx), expected));
+        }
+    }
+
+    #[gpui::test]
     fn appearance_section_lays_out_with_its_rounded_controls(cx: &mut TestAppContext) {
         let (app, mut vcx) = harness(cx);
         app.update_in(&mut vcx, |app, window, cx| {
@@ -8211,6 +8564,164 @@ mod gpui_tests {
             matches!(section, Some(SettingsSection::Appearance)),
             "the panel should still be on Appearance after two paint passes",
         );
+    }
+
+    #[gpui::test]
+    fn editor_typography_controls_commit_and_clamp_without_changing_terminal(
+        cx: &mut TestAppContext,
+    ) {
+        crate::core::config::pin_test_config_dir();
+        crate::ui::i18n::set_locale("en");
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.open_settings_section(SettingsSection::Appearance, window, cx);
+            app.active_settings()
+                .unwrap()
+                .search
+                .update(cx, |input, cx| {
+                    input.set_value("editor font", window, cx);
+                });
+            window.activate_window();
+        });
+        vcx.simulate_resize(size(px(1100.), px(800.)));
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(vcx.debug_bounds("editor-line-height").is_some());
+        app.update_in(&mut vcx, |app, window, cx| {
+            let input = app
+                .active_settings()
+                .unwrap()
+                .editor_font_size_input
+                .clone();
+            input.update(cx, |input, cx| {
+                input.set_value("16", window, cx);
+                input.focus(window, cx);
+            });
+        });
+        vcx.simulate_keystrokes("enter");
+        vcx.run_until_parked();
+        app.update_in(&mut vcx, |app, window, cx| {
+            assert_eq!(cx.global::<Config>().editor_font_size, 16.);
+            assert_eq!(cx.global::<Config>().font_size, Config::default().font_size);
+            app.commit_editor_metric(false, 1000., window, cx);
+            assert_eq!(
+                cx.global::<Config>().editor_font_size,
+                crate::core::config::EDITOR_FONT_SIZE_MAX
+            );
+            let input = app
+                .active_settings()
+                .unwrap()
+                .editor_font_size_input
+                .read(cx);
+            assert_eq!(input.value().as_ref(), "72");
+        });
+        for (typed, expected) in [("NaN", 72.), ("", 72.), ("-5", 8.), ("16.5", 16.5)] {
+            app.update_in(&mut vcx, |app, window, cx| {
+                let input = app
+                    .active_settings()
+                    .unwrap()
+                    .editor_font_size_input
+                    .clone();
+                input.update(cx, |input, cx| {
+                    input.set_value(typed, window, cx);
+                    input.focus(window, cx);
+                });
+            });
+            vcx.simulate_keystrokes("enter");
+            vcx.run_until_parked();
+            app.read_with(&vcx, |app, cx| {
+                assert_eq!(cx.global::<Config>().editor_font_size, expected, "{typed}");
+                assert_eq!(
+                    app.active_settings()
+                        .unwrap()
+                        .editor_font_size_input
+                        .read(cx)
+                        .value()
+                        .as_ref(),
+                    format!("{expected}")
+                );
+            });
+        }
+        app.update_in(&mut vcx, |app, window, cx| {
+            let settings = app.active_settings().unwrap();
+            let height = settings.editor_line_height_input.clone();
+            height.update(cx, |input, cx| {
+                input.set_value("1.8", window, cx);
+                input.focus(window, cx);
+            });
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        app.update_in(&mut vcx, |app, window, cx| {
+            let size = app
+                .active_settings()
+                .unwrap()
+                .editor_font_size_input
+                .clone();
+            size.update(cx, |input, cx| input.focus(window, cx));
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        app.read_with(&vcx, |_, cx| {
+            assert_eq!(cx.global::<Config>().editor_line_height, 1.8);
+            assert_eq!(cx.global::<Config>().font_size, Config::default().font_size);
+        });
+        app.update_in(&mut vcx, |app, window, cx| {
+            let search = app.active_settings().unwrap().search.clone();
+            search.update(cx, |input, cx| input.focus(window, cx));
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        app.update_in(&mut vcx, |app, _, cx| {
+            app.set_editor_font_size(22., cx);
+            app.set_editor_line_height(2., cx);
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        app.update_in(&mut vcx, |app, window, cx| {
+            let settings = app.active_settings().unwrap();
+            assert_eq!(
+                settings.editor_font_size_input.read(cx).value().as_ref(),
+                "22"
+            );
+            assert_eq!(
+                settings.editor_line_height_input.read(cx).value().as_ref(),
+                "2.00"
+            );
+            let input = settings.editor_font_size_input.clone();
+            input.update(cx, |input, cx| {
+                input.focus(window, cx);
+                input.set_value("21", window, cx);
+            });
+            app.set_editor_font_size(24., cx);
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        app.update_in(&mut vcx, |app, window, cx| {
+            let settings = app.active_settings().unwrap();
+            assert_eq!(
+                settings.editor_font_size_input.read(cx).value().as_ref(),
+                "21"
+            );
+            settings
+                .search
+                .update(cx, |input, cx| input.focus(window, cx));
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        app.read_with(&vcx, |_, cx| {
+            assert_eq!(cx.global::<Config>().editor_font_size, 21.)
+        });
     }
 
     /// #668: the Terminal page carries the control that moves the zoom off the
