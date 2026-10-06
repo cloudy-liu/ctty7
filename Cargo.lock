@@ -3570,7 +3570,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.5.2"
-source = "git+https://github.com/cloudy-liu/gpui-component?rev=02d0885016cda0703a88c9ce8ad0b3a5aca81af6#02d0885016cda0703a88c9ce8ad0b3a5aca81af6"
+source = "git+https://github.com/cloudy-liu/gpui-component?rev=f208c7b517386532b098266be7b3cbb0cfa39599#f208c7b517386532b098266be7b3cbb0cfa39599"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3653,7 +3653,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-assets"
 version = "0.5.1"
-source = "git+https://github.com/cloudy-liu/gpui-component?rev=02d0885016cda0703a88c9ce8ad0b3a5aca81af6#02d0885016cda0703a88c9ce8ad0b3a5aca81af6"
+source = "git+https://github.com/cloudy-liu/gpui-component?rev=f208c7b517386532b098266be7b3cbb0cfa39599#f208c7b517386532b098266be7b3cbb0cfa39599"
 dependencies = [
  "anyhow",
  "gpui",
@@ -3667,7 +3667,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.5.1"
-source = "git+https://github.com/cloudy-liu/gpui-component?rev=02d0885016cda0703a88c9ce8ad0b3a5aca81af6#02d0885016cda0703a88c9ce8ad0b3a5aca81af6"
+source = "git+https://github.com/cloudy-liu/gpui-component?rev=f208c7b517386532b098266be7b3cbb0cfa39599#f208c7b517386532b098266be7b3cbb0cfa39599"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -10509,7 +10509,9 @@ dependencies = [
  "alacritty_terminal",
  "anyhow",
  "async_zip",
+ "base64 0.22.1",
  "core-foundation 0.10.0",
+ "cssparser",
  "gpui",
  "gpui-component",
  "gpui-component-assets",
@@ -10538,6 +10540,7 @@ dependencies = [
  "serde_yaml",
  "smallvec",
  "smol",
+ "svgtypes 0.16.1",
  "tempfile",
  "toml 0.8.23",
  "tray-icon",

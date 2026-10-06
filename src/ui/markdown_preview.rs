@@ -607,17 +607,21 @@ impl MarkdownPreview {
         if let Some(diagram) = self.diagrams.get(url.as_ref()) {
             return diagram.clone();
         }
-        let path =
+        let resource =
             match markdown_document::resolve(&self.path, url.as_ref(), self.host.id().is_local()) {
-                Ok(Target::Web(url)) => {
-                    return TextViewImageSource::Ready(gpui::SharedUri::from(url).into());
-                }
-                Ok(Target::File { path, .. }) => path,
+                Ok(Target::Web(url)) => Target::Web(url),
+                Ok(target @ Target::File { .. }) => target,
                 Ok(Target::Anchor(_)) => {
                     return TextViewImageSource::Failed("image has no resource path".into());
                 }
                 Err(error) => return TextViewImageSource::Failed(error.into()),
             };
+        // Web cache keys never reach the owning Host's filesystem methods.
+        let path = match &resource {
+            Target::Web(url) => PathBuf::from(url),
+            Target::File { path, .. } => path.clone(),
+            Target::Anchor(_) => unreachable!(),
+        };
         if let Some(image) = self.images.get(&path) {
             return image.clone();
         }
@@ -626,32 +630,34 @@ impl MarkdownPreview {
         }
         self.images
             .insert(path.clone(), TextViewImageSource::Loading);
-        let requested = path.clone();
         let revision = self.revision;
+        let client = cx.http_client();
         HostOps::run(
             self.host.clone(),
             cx,
             move |host| {
-                let metadata = host.stat(&requested).map_err(|e| e.to_string())?;
-                if metadata.len > markdown_document::MAX_IMAGE_BYTES {
-                    return Err("image exceeds 8 MiB".to_string());
-                }
-                let bytes = host
-                    .read_file(&requested, markdown_document::MAX_IMAGE_BYTES)
-                    .map_err(|e| e.to_string())?;
-                let format = markdown_document::image_format(&bytes)?;
-                Ok((format, bytes))
+                let bytes = match resource {
+                    Target::Web(url) => smol::block_on(fetch_image(client, &url))?,
+                    Target::File { path, .. } => {
+                        let metadata = host.stat(&path).map_err(|e| e.to_string())?;
+                        if metadata.len > markdown_document::MAX_IMAGE_BYTES {
+                            return Err("image exceeds 8 MiB".to_string());
+                        }
+                        host.read_file(&path, markdown_document::MAX_IMAGE_BYTES)
+                            .map_err(|e| e.to_string())?
+                    }
+                    Target::Anchor(_) => unreachable!(),
+                };
+                prepare_image(bytes)
             },
             move |this, result, cx| {
                 if this.revision != revision {
                     return;
                 }
                 let image = match result {
-                    Ok((format, bytes)) if this.image_bytes + bytes.len() <= 32 * 1024 * 1024 => {
-                        this.image_bytes += bytes.len();
-                        TextViewImageSource::Ready(gpui::ImageSource::Image(Arc::new(
-                            gpui::Image::from_bytes(format, bytes),
-                        )))
+                    Ok((source, cost)) if this.image_bytes + cost <= 32 * 1024 * 1024 => {
+                        this.image_bytes += cost;
+                        TextViewImageSource::Ready(source.into_source())
                     }
                     Ok(_) => {
                         TextViewImageSource::Failed("document image cache exceeds 32 MiB".into())
@@ -815,6 +821,69 @@ impl MarkdownPreview {
             .into_owned();
         (processed, diagrams)
     }
+}
+
+async fn fetch_image(
+    client: Arc<dyn gpui::http_client::HttpClient>,
+    url: &str,
+) -> Result<Vec<u8>, String> {
+    use smol::{future::FutureExt as _, io::AsyncReadExt as _};
+    async {
+        let mut response = client
+            .get(url, ().into(), true)
+            .await
+            .map_err(|e| e.to_string())?;
+        if !response.status().is_success() {
+            return Err(format!("image HTTP status: {}", response.status()));
+        }
+        let mut bytes = Vec::new();
+        response
+            .body_mut()
+            .take(markdown_document::MAX_IMAGE_BYTES + 1)
+            .read_to_end(&mut bytes)
+            .await
+            .map_err(|e| e.to_string())?;
+        if bytes.len() as u64 > markdown_document::MAX_IMAGE_BYTES {
+            return Err("image exceeds 8 MiB".into());
+        }
+        Ok(bytes)
+    }
+    .or(async {
+        smol::Timer::after(std::time::Duration::from_secs(15)).await;
+        Err("image request timed out".into())
+    })
+    .await
+}
+
+enum PreparedImage {
+    Encoded(Arc<gpui::Image>),
+    Animated(Arc<gpui::RenderImage>),
+}
+
+impl PreparedImage {
+    fn into_source(self) -> gpui::ImageSource {
+        match self {
+            Self::Encoded(image) => gpui::ImageSource::Image(image),
+            Self::Animated(image) => image.into(),
+        }
+    }
+}
+
+fn prepare_image(bytes: Vec<u8>) -> Result<(PreparedImage, usize), String> {
+    let format = markdown_document::image_format(&bytes)?;
+    let mut cost = bytes.len();
+    if matches!(format, gpui::ImageFormat::Svg)
+        && let Some(image) = crate::core::markdown_svg::render(&bytes)?
+    {
+        cost += (0..image.frame_count())
+            .map(|i| image.as_bytes(i).map_or(0, <[u8]>::len))
+            .sum::<usize>();
+        return Ok((PreparedImage::Animated(image), cost));
+    }
+    Ok((
+        PreparedImage::Encoded(Arc::new(gpui::Image::from_bytes(format, bytes))),
+        cost,
+    ))
 }
 
 impl Focusable for MarkdownPreview {
@@ -1109,6 +1178,56 @@ mod tests {
         time::{Duration, Instant},
     };
     use tty7_core::host::{self, Host, HostId, Meta};
+
+    #[test]
+    fn markdown_remote_svg_uses_the_same_animation_pipeline_as_host_images() {
+        use gpui::http_client::{FakeHttpClient, Response};
+        let bytes = crate::core::markdown_svg::tests::TYPING.to_vec();
+        let body = bytes.clone();
+        let client = FakeHttpClient::create(move |request| {
+            assert_eq!(
+                request.uri().to_string(),
+                "https://example.com/animated.svg"
+            );
+            let body = body.clone();
+            async move { Ok(Response::builder().status(200).body(body.into()).unwrap()) }
+        });
+        let remote =
+            smol::block_on(fetch_image(client, "https://example.com/animated.svg")).unwrap();
+        assert_eq!(remote, bytes);
+        for bytes in [bytes, remote] {
+            let (PreparedImage::Animated(image), cost) = prepare_image(bytes).unwrap() else {
+                panic!("local and remote SVGs must both animate");
+            };
+            assert!(cost > 20 * 160 * 30 * 4);
+            assert_ne!(image.as_bytes(0), image.as_bytes(10));
+        }
+    }
+
+    #[test]
+    fn markdown_remote_image_rejects_http_errors_and_large_bodies() {
+        use gpui::http_client::{FakeHttpClient, Response};
+        for (status, size, error) in [
+            (404, 0, "HTTP status"),
+            (
+                200,
+                markdown_document::MAX_IMAGE_BYTES as usize + 1,
+                "8 MiB",
+            ),
+        ] {
+            let client = FakeHttpClient::create(move |_| async move {
+                Ok(Response::builder()
+                    .status(status)
+                    .body(vec![0; size].into())
+                    .unwrap())
+            });
+            assert!(
+                smol::block_on(fetch_image(client, "https://example.com/image"))
+                    .unwrap_err()
+                    .contains(error)
+            );
+        }
+    }
 
     #[test]
     fn minimal_v2_has_github_reading_style_at_all_scales_and_modes() {

@@ -198,26 +198,61 @@ SVG dimensions and preserves both GIF frames. A second check verifies the
 configured bare proxy is normalized for GPUI. Omitting client installation
 makes the HTTP image test fail before the fixture can serve an image.
 
-README's `readme-typing-svg.demolab.com` title is an animated SVG with SMIL
-`<animate>` and a `textPath`; it is not a GIF. The native resvg path renders
-static SVG only and does not run SMIL or CSS animation. Repairing HTTP image
-loading does not add SVG animation support. A browser can play the original
-image; native animated GIF/WebP use a separate multi-frame decoder. Remote
-service errors and unsupported SVG content can still produce alt text.
+README's `readme-typing-svg.demolab.com` title uses a looping SMIL `<animate>`
+to create its `textPath` geometry. The animation adapter now samples that
+geometry and renders actual playback frames with resvg. Remote HTTP images
+and files from the owning Host use the same validation and preparation path.
+XML root parsing accepts comments, declarations and a BOM before local SVGs.
+The component's visible image has its own stable ID within the indexed image
+wrapper, retaining GPUI's GIF/WebP/SVG frame state and repaint scheduling.
 
-Native Windows verification on 2026-10-05 used the independently built GUI
-and its file-panel reading view. README's remote release, build and license
-badges loaded, but the animated title remained blank across observations.
-The SVG service returned HTTP 200; browser samples of its animated path
-changed length over time. Its `path0` has no static `d` attribute: SMIL
-supplies that geometry, so ignoring animation also removes the title text.
+Supported SVG animation is deliberately bounded: parent-targeted `<animate>`
+with a zero-start indefinite or self-restarting loop, linear/discrete values,
+numeric or color attributes, and matching non-arc path commands. Tracks must
+share a duration of 0.1 to 12 seconds. Playback samples at 20 frames/second,
+with at most 240 frames and 8 million total frame pixels. Encoded images are
+limited to 8 MiB; remote requests time out after 15 seconds. The document's
+64-image and 32 MiB cache limits include generated SVG frame bytes.
 
-The local two-frame GIF control stayed on its red first frame in the reading
-view, even with the window active. The component's visible image element
-does not have the stable ID that GPUI needs for animation state and repaint
-scheduling. Frame decoding alone therefore does not establish playback.
-Local copies of the service SVG also hit a separate format-detection gap:
-the validator does not recognize SVG preceded by an XML comment.
+CSS/JavaScript animation, animateTransform/animateMotion, finite or event
+timelines, additive animation, arc morphing and different track durations are
+not implemented. Unsupported SMIL returns an image error with alt text and
+a tooltip. Animated SVGs load base64 TTF/OTF `@font-face` data, including CSS
+family aliases, into a document-private font database before rasterization.
+Embedded families override installed faces without changing other documents.
+Font data is limited to 2 MiB total and 16 faces per SVG. WOFF/WOFF2 fonts,
+external font URLs, nested images and other external resources are disabled.
+Other text falls back to system fonts. These limits do not establish browser
+pixel parity or the remaining platform/DPI
+matrix. Static SVG and the existing GIF/WebP decoders retain their paths.
 
-These checks verify the HTTP repair, but SVG animation, GIF playback in the
-reading view, and comment-prefixed local SVG loading remain unresolved.
+Regression checks cover changing rendered SVG pixels, interpolation and
+allocation limits, local XML prologs, the shared HTTP/Host preparation path,
+HTTP failure/size handling, and actual visible image frame progression in an
+active GPUI test window. Removing the image ID makes the playback regression
+fail; the XML-prolog test and typing-image pixel test failed before repair.
+An embedded-font pixel regression also failed with system fallback and now
+matches a reference rendered with the explicit JetBrains Mono Bold subset.
+Font tests cover quoted/unquoted CSS URLs, family aliases, document scope,
+external-source rejection and malformed/oversized data.
+
+Native Windows computer-use verification on 2026-10-05 used the rebuilt
+`tty7-app-animation-check.exe` and the file-panel reading view. The remote
+title and its comment-prefixed local copy changed between full `ctty7`,
+partial `ctt`, and empty typing frames; the two-frame GIF changed from red
+to green. Switching to source mode and back retained working playback.
+The actual README showed the animated title and loaded release/build/license
+badges. Screenshots and a reusable probe are retained in the local
+`.humanlayer/tasks/theme-spec-native-verification` directory.
+The user then reported that the title's font still differed from GitHub.
+The captured SVG embeds JetBrains Mono Bold, which the original animation
+adapter ignored. The font follow-up corrects this fallback; native UI
+re-verification of that follow-up was stopped with physical Escape and is
+still outstanding. Earlier native screenshots establish playback, not font
+parity after this change.
+
+The component workspace passed 300 tests, with 2 documentation tests ignored.
+Combined local main passed 2,960 tests plus 13 CLI end-to-end cases, with
+7 ignored. Formatting of touched component files, application formatting
+and the host-boundary check passed. The isolated PR branch is checked
+separately before its update is published.

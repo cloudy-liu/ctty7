@@ -106,6 +106,9 @@ toml = "0.8"
 # vision won't accept, so we transcode to PNG. `image` is already in the tree via
 # gpui's own clipboard code, so pinning it here adds no new native code.
 image = "0.25"
+svgtypes = "0.16"
+base64 = "0.22"
+cssparser = "0.36"
 
 # HTTP client for update checks and GPUI's remote Markdown images.
 # `reqwest_client` wraps Zed's `zed-reqwest` fork behind the HTTP trait
@@ -288,10 +291,10 @@ version = "0.1.0"
 # that, since a path dependency can't resolve on CI.
 #
 # `tree-sitter-languages` compiles the grammars the code editor highlights with.
-gpui-component = { git = "https://github.com/cloudy-liu/gpui-component", rev = "02d0885016cda0703a88c9ce8ad0b3a5aca81af6", version = "0.5.2", features = [
+gpui-component = { git = "https://github.com/cloudy-liu/gpui-component", rev = "f208c7b517386532b098266be7b3cbb0cfa39599", version = "0.5.2", features = [
     "tree-sitter-languages",
 ] }
-gpui-component-assets = { git = "https://github.com/cloudy-liu/gpui-component", rev = "02d0885016cda0703a88c9ce8ad0b3a5aca81af6", version = "0.5.1" }
+gpui-component-assets = { git = "https://github.com/cloudy-liu/gpui-component", rev = "f208c7b517386532b098266be7b3cbb0cfa39599", version = "0.5.1" }
 
 gpui = { git = "https://github.com/zed-industries/zed", rev = "1d217ee39d381ac101b7cf49d3d22451ac1093fe" }
 # Base features are cross-platform (`font-kit`, `runtime_shaders` only map to the
