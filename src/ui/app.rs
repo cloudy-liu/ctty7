@@ -3295,6 +3295,9 @@ impl Tty7App {
         let was_focused = pending.read(cx).focus_handle.contains_focused(window, cx);
         let restored = parts.restored;
         let view = build_terminal_view(parts, font_size, window, cx);
+        if let Some(command) = pending.update(cx, |pending, _| pending.on_ready_command.take()) {
+            view.read(cx).run_command_line(&command);
+        }
         if !restored || pending.read(cx).spawn.agent_restore_pending {
             let spawn = pending.read(cx).spawn.clone();
             resume_agent_in_terminal(
@@ -4550,12 +4553,12 @@ impl Tty7App {
                 return;
             }
         };
-        let Some(terminal) = new.terminal() else {
-            log::error!("fork spawn produced a pane that is still connecting");
-            window.push_notification(t(L10nKey::AppForkStillConnecting), cx);
-            return;
-        };
-        terminal.read(cx).run_command_line(&cmd);
+        match &new {
+            PaneSlot::Ready(terminal) => terminal.read(cx).run_command_line(&cmd),
+            PaneSlot::Connecting(pending) => {
+                pending.update(cx, |pending, _| pending.on_ready_command = Some(cmd));
+            }
+        }
 
         match placement {
             ForkPlacement::NewTab => {
@@ -8188,22 +8191,9 @@ pub(crate) fn new_terminal(
     window: &mut Window,
     cx: &mut Context<Tty7App>,
 ) -> anyhow::Result<PaneSlot> {
-    if matches!(
-        crate::terminal::PaneRoute::for_workspace(workspace.as_ref()),
-        crate::terminal::PaneRoute::Local
-    ) {
-        let parts = TerminalView::spawn_shell_terminal_in(
-            workspace,
-            working_directory,
-            restore_pane,
-            shell,
-            owner,
-        )?;
-        return Ok(PaneSlot::Ready(build_terminal_view(
-            parts, font_size, window, cx,
-        )));
-    }
-
+    // A local ConPTY can take longer than an Attach acknowledgement, especially
+    // on a cold start. Use the same pending pane as remote spawns so waiting
+    // for the shell never blocks the window or loses the eventual reply.
     let spawn = crate::ui::pending_pane::PendingSpawn {
         workspace,
         working_directory,
@@ -9990,6 +9980,142 @@ pub(crate) mod test_window {
                 "the window never stopped drawing"
             );
             std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+    }
+}
+
+#[cfg(test)]
+mod pending_spawn_gpui_tests {
+    use super::*;
+    use crate::ui::pending_pane::{PendingPane, PendingSpawn, PendingState};
+    use gpui::TestAppContext;
+
+    fn pending(cx: &mut Context<Tty7App>) -> Entity<PendingPane> {
+        cx.new(|cx| {
+            PendingPane::new(
+                "local",
+                PendingSpawn {
+                    workspace: None,
+                    working_directory: None,
+                    restore_pane: None,
+                    shell: None,
+                    agent: None,
+                    agent_session_id: None,
+                    agent_launch_argv: None,
+                    agent_restore_pending: false,
+                    agent_unstarted: false,
+                    owner: None,
+                    font_size: 15.0,
+                },
+                cx,
+            )
+        })
+    }
+
+    #[gpui::test]
+    fn pending_spawn_holds_split_tree_until_every_leaf_has_a_daemon_id(cx: &mut TestAppContext) {
+        let (app, mut vcx) = test_window::harness(cx);
+        let _daemon = app.update_in(&mut vcx, |app, window, cx| {
+            let (view, daemon) = crate::terminal::view::quiet_test_pane(7, window, cx);
+            let mut pane = Pane::leaf(PaneSlot::Ready(view.clone()));
+            let pending = pending(cx);
+            assert!(pane.split_leaf(
+                view.entity_id(),
+                Axis::Horizontal,
+                false,
+                PaneSlot::Connecting(pending.clone())
+            ));
+            app.tabs.push(Tab::new(pane));
+            let id = app.tabs[0].tree_id.get();
+            let (desired, _, held) = crate::ui::tree_sync::desired_tabs(app, cx);
+            assert!(desired.is_empty());
+            assert_eq!(held, vec![id]);
+            pending.update(cx, |p, _| p.spawn.restore_pane = Some(8));
+            let (desired, _, held) = crate::ui::tree_sync::desired_tabs(app, cx);
+            assert!(held.is_empty());
+            assert!(matches!(
+                desired[0].root,
+                crate::ui::tree_sync::DesiredNode::Split { .. }
+            ));
+            daemon
+        });
+    }
+
+    #[gpui::test]
+    fn pending_spawn_failure_preserves_slot_and_queued_command_for_retry(cx: &mut TestAppContext) {
+        let (app, mut vcx) = test_window::harness(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            let pending = pending(cx);
+            pending.update(cx, |p, _| p.on_ready_command = Some("agent fork".into()));
+            let id = pending.entity_id();
+            app.tabs
+                .push(Tab::new(Pane::leaf(PaneSlot::Connecting(pending.clone()))));
+            app.land_pane(
+                id,
+                &pending,
+                Err("cold spawn failed".into()),
+                15.0,
+                window,
+                cx,
+            );
+            assert_eq!(app.tabs[0].pane.first_leaf().unwrap().entity_id(), id);
+            assert!(
+                matches!(&pending.read(cx).state, PendingState::Failed(reason)
+                if reason.as_ref() == "cold spawn failed")
+            );
+            pending.update(cx, |p, cx| p.retrying(cx));
+            assert!(matches!(pending.read(cx).state, PendingState::Connecting));
+            assert_eq!(
+                pending.read(cx).on_ready_command.as_deref(),
+                Some("agent fork")
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn pending_spawn_lands_with_focus_owner_and_one_queued_command(cx: &mut TestAppContext) {
+        let (app, mut vcx) = test_window::harness(cx);
+        let mut daemon = app.update_in(&mut vcx, |app, window, cx| {
+            let pending = pending(cx);
+            pending.update(cx, |p, _| p.on_ready_command = Some("agent fork".into()));
+            let id = pending.entity_id();
+            let mut tab = Tab::new(Pane::leaf(PaneSlot::Connecting(pending.clone())));
+            tab.last_focused = Some(id);
+            app.tabs.push(tab);
+            let focus = pending.read(cx).focus_handle.clone();
+            window.focus(&focus, cx);
+            let (mut parts, daemon) = crate::terminal::view::quiet_test_shell_parts(42);
+            let owner = crate::core::session::WorkspaceId::new();
+            parts.owner = Some(owner);
+            app.land_pane(id, &pending, Ok(parts), 15.0, window, cx);
+            let slot = app.tabs[0].pane.first_leaf().unwrap();
+            let view = slot.terminal().unwrap();
+            assert_eq!(view.read(cx).pane_id, 42);
+            assert_eq!(view.read(cx).owner_workspace(), Some(owner));
+            assert_eq!(app.tabs[0].last_focused, Some(view.entity_id()));
+            assert!(slot.focus_handle(cx).contains_focused(window, cx));
+            assert!(pending.read(cx).on_ready_command.is_none());
+            daemon
+        });
+        daemon
+            .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+            .unwrap();
+        loop {
+            if let crate::daemon::protocol::ClientMsg::Input(bytes) =
+                crate::daemon::protocol::ClientMsg::read(&mut daemon).unwrap()
+            {
+                assert_eq!(bytes, b"agent fork\r");
+                break;
+            }
+        }
+        daemon
+            .set_read_timeout(Some(std::time::Duration::from_millis(25)))
+            .unwrap();
+        while let Ok(message) = crate::daemon::protocol::ClientMsg::read(&mut daemon) {
+            assert!(!matches!(
+                message,
+                crate::daemon::protocol::ClientMsg::Input(_)
+            ));
         }
     }
 }
