@@ -1,10 +1,12 @@
 # ctty7 release runbook
 
-The implementation is tracked in cloudy-liu/ctty7#48 and its tickets #49–#52.
-This runbook prepares publication after the migration PR is merged. It does
-not claim that platform installation or published-asset checks have already run.
+The first ctty7 release, v0.1.0, was published on 2026-09-29. Its migration
+spec cloudy-liu/ctty7#48 and tickets #49–#52 are closed. The checklist below
+retains the one-time migration steps; use the version and build sections for
+subsequent releases. See [project status](status.md) for the published baseline
+and unreleased work. Historical platform installation limits still apply.
 
-## Before the first ctty7 release
+## First-release migration checklist (historical)
 
 1. Merge the reviewed migration PR into this fork. Use the current fork main;
    upstream synchronization and Markdown preview are outside this release.
@@ -70,7 +72,9 @@ Future releases follow 0.1.1, 0.1.2, etc.
    updater helpers. Use the existing platform verification steps and logs.
 4. Download all draft assets to a fresh directory. Run the complete asset-set
    verifier: `python .github/scripts/verify-release-assets.py <download-dir>
-   0.1.0 --checksums`. It checks every entry against the downloaded bytes. The draft must contain exactly those 12 assets plus checksums.txt.
+   <version> --checksums`, using the candidate version without its `v` prefix.
+   It checks every entry against the downloaded bytes. The draft must contain
+   exactly those 12 assets plus checksums.txt.
 5. Add the finalized release notes. Keep the release a draft until every asset
    and checksum has passed. Then explicitly publish it and set it as Latest;
    numerical sorting must not leave a historical 26.x release selected.

@@ -107,7 +107,7 @@ is no longer a difference.
   Claude launches whose initial id has no saved history yet. When the original
   conversation cannot be identified, restore leaves a usable shell without
   opening a session picker. Cursor and Antigravity still need an exact id
-  already known to tty7. See [agent sessions](docs/agents/sessions.mdx) and
+  already known to tty7. See [agent sessions](../agents/sessions.mdx) and
   [cloudy-liu/tty7#29](https://github.com/cloudy-liu/tty7/pull/29).
 - When the background daemon has been replaced, reopens every workspace that
   had a window before shutdown instead of recovering only the last-focused
@@ -137,5 +137,6 @@ is no longer a difference.
   Nightly version from `nightly.json`, rather than the rate-limited REST
   catalog, avoiding the unauthenticated REST catalog's rate limit.
 
-See [Versioning](#versioning) for the custom release scheme and how the updater
-is pointed at this fork.
+The custom release line described here is historical. See the
+[release runbook](release.md) and [migration guide](migration.md) for ctty7's
+official release channel.

@@ -163,7 +163,10 @@ ctty7 将 Windows shell 视为一等公民：
 
 - **内置预览** 可切换源码编辑
 - **阅读主题** — 默认使用 GitHub，也可安装自己的 v2 主题（自动适配深浅模式）
-- _（此功能在当前版本尚未发布）_
+- **Mermaid 图表**：在阅读区渲染流程图、时序图等，支持展开、缩放和复制源码
+
+以上功能可从 `main` 构建使用，已发布的 v0.1.0 尚不包含 Markdown 预览。
+待合并和待发布事项见[项目状态](docs/maintenance/status.md)。
 
 </details>
 
@@ -229,6 +232,7 @@ cargo test --locked --workspace
 Rust crate、二进制文件、协议标识和数据路径保留 `tty7` 命名以保持兼容性，并简化未来选择性 patch 导入。Pull request 提交到本仓库。
 
 **维护文档：**
+- [项目状态与剩余工作](docs/maintenance/status.md)
 - [维护历史](docs/maintenance/fork-history.md)
 - [发布操作清单](docs/maintenance/release.md)
 

@@ -5,6 +5,21 @@ GitHub theme values are compared against the committed github-markdown-css 5.9.0
 light and dark snapshots. Primer selection/control tokens and Octicons sources
 are pinned in `assets/markdown-themes/GITHUB-NOTICE` with their MIT licenses.
 
+## Current acceptance status
+
+Issue #85 closed as completed after [PR #91](https://github.com/cloudy-liu/ctty7/pull/91)
+merged on 2026-10-06. Its final [CI run](https://github.com/cloudy-liu/ctty7/actions/runs/37419240897)
+passed all nine jobs. The recorded native inspection covered 24 screenshots,
+12 each on macOS and Linux: light/dark, 1076px/500px, and top/lists/code.
+Both platform artifacts remain available on that run. Windows wide-code and
+narrow-dark-list probes passed at the existing 175% display scale.
+
+The additional DPI matrix and application 200% checks were cancelled by the
+user. Exact native/browser glyph rasterization, all syntax classification and
+all Mermaid horizontal geometry are not established by this acceptance.
+Earlier dated gaps below describe the state at those runs; they do not reopen
+the completed issue. See [project status](../maintenance/status.md) for open work.
+
 ## Automated checks
 
 - Theme tests cover CSS palette and typography values, v2 validation, reserved
@@ -86,7 +101,7 @@ At the time of that audit, the remaining gaps were native pixel rasterization an
 heading hover permalink controls, native task checkbox appearance, exact
 syntax token boundaries and Mermaid renderer output. Chrome CDP inspects
 webpages; it does not capture ctty7's native GPUI window. No native automation
-tool is currently exposed in this session. Full website parity remains open.
+tool was exposed in that session. Full website parity was not established by that audit.
 
 Use [the acceptance sample](../examples/markdown-github-theme.md) unchanged in
 ctty7 and on its GitHub file page. Compare the rendered Markdown area, excluding
@@ -104,8 +119,9 @@ Color values and layout dimensions must match the recorded website observations.
 Native font rasterization, tree-sitter versus TextMate token classification and
 Mermaid output remain parity gaps until verified or explicitly accepted by the user.
 
-The complete native/browser screenshot matrix and macOS/Linux visual checks
-remain unverified. The later Windows run below does not claim pixel-level parity.
+At that stage the complete native/browser screenshot matrix and macOS/Linux
+visual checks were unverified. The 2026-10-06 follow-up below records the later
+platform captures; neither run claims pixel-level parity.
 
 The original audit used GitHub's white / `#0d1117` reading backgrounds.
 On 2026-10-05 the user approved a revised acceptance target: the builtin's

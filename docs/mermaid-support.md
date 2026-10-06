@@ -1,10 +1,11 @@
-# Mermaid Diagram Support
+# Mermaid diagram support
 
-tty7 now supports rendering Mermaid diagrams directly in Markdown preview with full theme integration.
+ctty7 renders Mermaid diagrams in Markdown preview. This is available in
+source builds from `main`, after the published v0.1.0 release.
 
 ## Usage
 
-Simply use a code block with `mermaid` language identifier:
+Use a fenced code block with the `mermaid` language identifier:
 
 ~~~markdown
 ```mermaid
@@ -13,11 +14,14 @@ graph TD
 ```
 ~~~
 
-The diagram will be automatically rendered as an SVG embedded in the preview.
+The diagram renders as an SVG in the native reading view. Its toolbar copies
+the original source or opens a larger viewer with zoom, pan and reset controls.
 
-## Supported Diagram Types
+## Diagram types
 
-All Mermaid diagram types are supported:
+Rendering uses `merman` 0.7. Supported syntax depends on that renderer; it does
+not guarantee every feature of the browser Mermaid implementation. Diagram
+families include:
 
 - **Flowcharts** (`graph`, `flowchart`)
 - **Sequence Diagrams** (`sequenceDiagram`)
@@ -32,9 +36,13 @@ All Mermaid diagram types are supported:
 - **Mindmaps** (`mindmap`)
 - **Quadrant Charts** (`quadrantChart`)
 
-## Theme Integration
+## Theme integration
 
-Mermaid diagrams automatically inherit colors from the current Markdown theme:
+The built-in GitHub reading theme uses Mermaid's `default` or `dark` element
+colors and a transparent canvas over the application background. Switching
+application appearance updates the diagrams.
+
+Custom v2 themes supply their reading palette to the renderer:
 
 | Theme Element | Used For |
 |--------------|----------|
@@ -48,13 +56,13 @@ Mermaid diagrams automatically inherit colors from the current Markdown theme:
 
 The colors adapt automatically when switching between light and dark modes.
 
-## Custom Themes
+## Custom themes
 
 To customize how Mermaid diagrams look, edit your Markdown theme file:
 
 ```yaml
 # ~/.config/tty7/markdown-themes/my-theme.yaml
-schema_version: 1
+schema_version: 2
 id: my-theme
 name: My Custom Theme
 
@@ -69,21 +77,19 @@ dark:
   # ... other colors
 ```
 
-## Architecture
+## Implementation
 
-The integration works as follows:
+The reading view replaces Mermaid fences with loading placeholders and renders
+SVGs on the background executor. Completed images replace the placeholders;
+results from an older document/theme generation are discarded. The current
+view retains its rendered images until content or theme changes replace them.
 
-1. **Preprocessing**: During Markdown parsing, code blocks with `mermaid` language are identified
-2. **Theme Extraction**: Colors are extracted from the current Markdown theme
-3. **Rendering**: The `merman` renderer converts the diagram source to SVG using the theme colors
-4. **Embedding**: The SVG is embedded directly into the HTML preview
+### Source files
 
-### Code Structure
+- [markdown_mermaid.rs](../src/ui/markdown_mermaid.rs) handles theme integration, rendering and the expanded viewer.
+- [markdown_preview.rs](../src/ui/markdown_preview.rs) handles fence preprocessing, background work, image state and toolbar controls.
 
-- `src/ui/markdown_mermaid.rs` - Theme integration and rendering
-- `src/ui/markdown_preview.rs` - Mermaid block preprocessing
-
-### Theme Mapping
+### Custom theme mapping
 
 ```rust
 HostThemeRoles {
@@ -98,32 +104,32 @@ HostThemeRoles {
 }
 ```
 
-## Error Handling
+## Error handling
 
-If a Mermaid diagram fails to render (syntax error, unsupported feature), the original code block is displayed with an error message prefix.
-
-## Performance
-
-- Diagrams are rendered synchronously during preview generation
-- Complex diagrams may add slight delay to preview updates
-- Future optimization: cache rendered SVGs keyed by (source, theme, dark_mode)
+If a diagram fails to render, the reading view falls back to the original code
+block. Preprocessing records the renderer error in an HTML comment; it does not
+provide a dedicated line-number error panel.
 
 ## Examples
 
-See `test-mermaid.md` for comprehensive examples of all diagram types.
+Use the [GitHub acceptance sample](examples/markdown-github-theme.md) for a
+flowchart and the [reading theme guide](customization/markdown-themes.mdx) for
+v2 installation and palette fields. See the
+[verification record](testing/markdown-github-theme.md) for native checks.
 
 ## Limitations
 
-- No interactive features (Mermaid's interactive elements are not supported)
-- No click handlers or links within diagrams
-- Diagram complexity is limited by the renderer's capabilities
+- In-diagram click handlers and links are not supported. The application's copy and expanded-view controls are separate.
+- Native/browser glyph rasterization and all Mermaid horizontal geometry are not guaranteed to match.
+- Complex diagrams still require rendering time, even though rendering runs in the background.
 
-## Future Enhancements
+## Possible follow-ups
 
-Potential improvements:
+These are proposals, not open implementation tickets. Current tracked work is
+listed in [project status](maintenance/status.md).
 
-- [ ] Cache rendered diagrams to improve performance
-- [ ] Export individual diagrams to PNG/SVG files
-- [ ] Live preview while editing Mermaid source
-- [ ] Diagram-specific theme overrides
-- [ ] Error highlighting with line numbers
+- Reuse SVGs across document or theme generations with a source/theme cache.
+- Export individual diagrams to PNG/SVG files.
+- Show a live preview while editing Mermaid source.
+- Add diagram-specific theme overrides.
+- Highlight errors with line numbers.

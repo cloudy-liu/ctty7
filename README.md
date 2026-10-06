@@ -166,6 +166,9 @@ Read and edit Markdown without leaving the terminal:
 - **Mermaid diagrams** — render flowcharts, sequence diagrams, class diagrams, and more inline
 - **Theme integration** — diagrams automatically match your Markdown theme colors
 
+Available in source builds from `main`; the published v0.1.0 does not include
+Markdown preview. See [project status](docs/maintenance/status.md).
+
 </details>
 
 ## ⚙️ Configuration
@@ -230,6 +233,7 @@ cargo test --locked --workspace
 Rust crates, binaries, protocol identities, and data paths retain `tty7` naming for compatibility and to simplify future selective patch imports. Pull requests target this repository.
 
 **Maintenance docs:**
+- [Project status and remaining work](docs/maintenance/status.md)
 - [Maintenance history](docs/maintenance/fork-history.md)
 - [Release runbook](docs/maintenance/release.md)
 
