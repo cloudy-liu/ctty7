@@ -246,13 +246,22 @@ badges. Screenshots and a reusable probe are retained in the local
 `.humanlayer/tasks/theme-spec-native-verification` directory.
 The user then reported that the title's font still differed from GitHub.
 The captured SVG embeds JetBrains Mono Bold, which the original animation
-adapter ignored. The font follow-up corrects this fallback; native UI
-re-verification of that follow-up was stopped with physical Escape and is
-still outstanding. Earlier native screenshots establish playback, not font
-parity after this change.
+adapter ignored. Native re-verification initially stopped with physical
+Escape. After the user resumed the task on 2026-10-06, Computer Use opened
+the actual README from the file tree in the rebuilt isolated PR executable
+`tty7-app-font-check.exe`. The title displayed the supplied bold pink font,
+and changed from full text to an empty animation phase after switching to
+source mode and back. Badges and the README screenshot loaded normally.
+Evidence is saved as `readme-font-fixed.png`,
+`readme-font-fixed-after-mode-switch.png` and
+`readme-font-fixed-empty-frame.png` in the same local task directory.
+These observations verify the reported font fallback repair, not complete
+browser pixel parity.
 
 The component workspace passed 300 tests, with 2 documentation tests ignored.
 Combined local main passed 2,960 tests plus 13 CLI end-to-end cases, with
-7 ignored. Formatting of touched component files, application formatting
-and the host-boundary check passed. The isolated PR branch is checked
-separately before its update is published.
+7 ignored. The isolated PR branch passed 2,947 tests plus the same 13 CLI
+end-to-end cases, with 7 ignored, and built the native GUI successfully.
+Formatting of touched component files, application formatting and the
+host-boundary checks passed. The PR remains a draft for the outstanding
+platform/DPI matrix and complete browser parity.
