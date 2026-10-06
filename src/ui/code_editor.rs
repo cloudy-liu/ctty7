@@ -1435,10 +1435,7 @@ impl Tty7App {
             .border_color(cx.theme().border)
             .text_xs()
             .text_color(muted)
-            .when_some(path_text, |this, t| {
-                this.child(div().min_w_0().text_ellipsis().child(t))
-            })
-            .child(div().flex_1())
+            .child(div().flex_1().min_w_0().truncate().children(path_text))
             .when(is_markdown, |this| {
                 this.child(
                     Button::new("status-md-preview")
@@ -1479,7 +1476,9 @@ impl Tty7App {
                         })),
                 )
             })
-            .when_some(cursor, |this, t| this.child(div().child(t)))
+            .when_some(cursor, |this, t| {
+                this.child(div().flex_none().whitespace_nowrap().child(t))
+            })
     }
 
     fn render_editor_empty(&self, cx: &Context<Self>) -> gpui::Div {
@@ -1600,6 +1599,34 @@ mod tests {
             cx.notify();
         });
         (app, vcx)
+    }
+
+    #[gpui::test]
+    fn editor_palette_dismiss_restores_source_and_reading_focus(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/focus.md".into(),
+                "# Focus\n".into(),
+                None,
+                window,
+                cx,
+            );
+        });
+        for _ in 0..2 {
+            app.update_in(&mut vcx, |app, window, cx| {
+                assert!(app.editor_has_focus(window, cx));
+                app.open_palette("theme", window, cx);
+                assert!(!app.editor_has_focus(window, cx));
+                app.close_palette(window, cx);
+                assert!(
+                    app.editor_has_focus(window, cx),
+                    "closing the palette must return the keyboard to the document"
+                );
+                app.editor_toggle_preview(window, cx);
+            });
+        }
     }
 
     fn wait_for_markdown(

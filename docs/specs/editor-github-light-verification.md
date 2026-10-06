@@ -95,11 +95,33 @@ reviewers examined the complete staged change, including the final scoped and
 generic constructor rules and macro regression. Both reported no actionable
 findings. Their checks did not replace the final automated validation above.
 
+## Windows native acceptance on 2026-10-06
+
+The native Windows application was exercised at the existing 175% display
+scale after merging fork/main into this branch. The source and gutter stayed
+white under a custom light gradient, wallpaper and transparency. Dark mode
+used Atom One Dark. An unsaved edit, cursor, scroll position and undo survived
+theme and fill/dock changes. Searching for `event` found 30 matches; advancing
+the counter moved the distinct current-match highlight.
+
+![Native GitHub Light source editor](images/editor-github-light-native.png)
+
+![Native dark source search](images/editor-dark-search-native.png)
+
+Acceptance found that long paths could wrap outside the fixed-height footer
+and dismissing the theme palette returned focus to the terminal. The footer
+now truncates its path and reserves the cursor label. The palette restores
+its prior focus; the source/reading regression failed before this correction
+and passed afterward. All 18 editor-focused tests passed on the corrected
+branch, and its locked Windows workspace build passed.
+
 ## Verification limits
 
-Native application screenshot acceptance and macOS/Linux native visual
-acceptance were not performed. Application-window interaction tests use GPUI
-headless windows; the comparison image establishes palette differences only.
+macOS/Linux native source-editor visual acceptance was not performed. Their
+Markdown screenshots are recorded separately in the Markdown acceptance
+document. Native screenshots above establish Windows appearance; automated
+GPUI tests cover state and focus behavior. Additional Windows DPI and 200%
+application-scale checks remain outside the user-approved acceptance scope.
 
 Tree-sitter maps existing syntax roles to website colors rather than reproducing
 every browser or TextMate grammar. CMake, C#, GraphQL, Protocol Buffers and Swift
