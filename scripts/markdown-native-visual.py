@@ -37,7 +37,7 @@ def capture(binary, output, dark, width, scale, anchor):
                             try:
                                 subprocess.run([
                                     "/usr/bin/lldb", "--batch", "-o", "run",
-                                    "-o", "thread backtrace all", "--", str(binary),
+                                    "-k", "thread backtrace all", "--", str(binary),
                                     "--config-dir", temporary, "--markdown-visual", str(options),
                                 ], stdout=trace_stream, stderr=trace_stream, timeout=45)
                             except subprocess.TimeoutExpired:

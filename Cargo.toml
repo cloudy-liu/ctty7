@@ -367,6 +367,10 @@ smol = { opt-level = 3 }
 gpui = { opt-level = 3 }
 gpui_platform = { opt-level = 3 }
 gpui_macros = { opt-level = 3 }
+# Markdown parsing sends a large ParsedContent through an unbounded queue.
+# Unoptimized generic queue frames overflow macOS GCD worker stacks in the
+# native visual fixture; keep this UI hot path optimized like gpui above.
+gpui-component = { opt-level = 3 }
 # The VT parser + grid run on every PTY byte; at opt-level 0 a `cat bigfile`
 # crawls under `cargo dev`.
 alacritty_terminal = { opt-level = 3 }
