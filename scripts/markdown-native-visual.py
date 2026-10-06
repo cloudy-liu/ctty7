@@ -67,10 +67,32 @@ def main():
     binary = args.binary.resolve(strict=True)
     output = args.output.resolve()
     output.mkdir(parents=True, exist_ok=True)
-    for dark in (False, True):
-        for width in (1076, 500):
-            for anchor in ("", "lists-and-tasks", "code-and-diff"):
-                capture(binary, output, dark, width, 1, anchor)
+    # Use a managed X11 desktop rather than a bare X server.
+    manager = None
+    if sys.platform != "darwin":
+        manager = subprocess.Popen(["openbox"], stdout=subprocess.DEVNULL,
+                                   stderr=subprocess.DEVNULL)
+    try:
+        if manager is not None:
+            deadline = time.monotonic() + 10
+            while time.monotonic() < deadline:
+                property_value = subprocess.check_output(
+                    ["xprop", "-root", "_NET_SUPPORTING_WM_CHECK"], text=True)
+                if "window id #" in property_value:
+                    break
+                if manager.poll() is not None:
+                    raise RuntimeError("Openbox exited before initializing the desktop")
+                time.sleep(0.1)
+            else:
+                raise TimeoutError("Openbox did not initialize the desktop")
+        for dark in (False, True):
+            for width in (1076, 500):
+                for anchor in ("", "lists-and-tasks", "code-and-diff"):
+                    capture(binary, output, dark, width, 1, anchor)
+    finally:
+        if manager is not None:
+            manager.terminate()
+            manager.wait(timeout=10)
 
 
 if __name__ == "__main__":

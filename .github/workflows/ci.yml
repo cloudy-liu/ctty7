@@ -145,7 +145,7 @@ jobs:
 
       - name: Install native visual capture dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get install -y xvfb xdotool imagemagick mesa-vulkan-drivers fonts-noto-cjk
+        run: sudo apt-get install -y xvfb openbox x11-utils xdotool imagemagick mesa-vulkan-drivers fonts-noto-cjk
 
       - name: Capture Linux native Markdown matrix
         if: runner.os == 'Linux'
