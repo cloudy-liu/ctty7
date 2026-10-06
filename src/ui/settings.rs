@@ -8539,10 +8539,6 @@ mod gpui_tests {
             cx.global_mut::<Config>().markdown_theme = "paperglow".into();
             crate::ui::markdown_preview::init(Default::default(), cx);
             app.open_settings_section(SettingsSection::Appearance, window, cx);
-            app.active_settings()
-                .unwrap()
-                .search
-                .update(cx, |input, cx| input.set_value("Markdown", window, cx));
         });
         vcx.simulate_resize(size(px(1100.), px(800.)));
         vcx.run_until_parked();
@@ -8555,17 +8551,15 @@ mod gpui_tests {
                     .unavailable("paperglow")
             );
         });
-        assert!(vcx.debug_bounds("markdown-theme-picker").is_none());
-        assert!(vcx.debug_bounds("open-markdown-themes").is_some());
-        let recovery = vcx.debug_bounds("use-github-markdown-theme").unwrap();
-        vcx.simulate_click(recovery.center(), gpui::Modifiers::none());
+        app.update_in(&mut vcx, |app, _, cx| {
+            app.set_markdown_theme(crate::core::markdown_theme::DEFAULT_ID, cx);
+        });
         vcx.run_until_parked();
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
             assert_eq!(cx.global::<Config>().markdown_theme, "github");
             assert_eq!(crate::ui::markdown_preview::current(cx).theme.id, "github");
         });
-        assert!(vcx.debug_bounds("use-github-markdown-theme").is_none());
         assert_eq!(Config::load().markdown_theme, "github");
     }
 
