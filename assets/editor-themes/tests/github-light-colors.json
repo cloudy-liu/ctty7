@@ -653,13 +653,82 @@
         "text": "// comment",
         "start": 0,
         "end": 10,
-        "color": "#1F2328"
+        "color": "#59636E"
       },
       {
         "text": "hello",
         "start": 38,
         "end": 43,
         "color": "#0A3069"
+      }
+    ]
+  },
+  {
+    "mode": "light",
+    "language": "rust",
+    "source": "// Reading a file can itself emit an event on Linux.\n/* block comment */\n/// Documentation comment\n/** Block documentation */\nfn main() {}\n",
+    "tokens": [
+      {
+        "text": "// Reading a file can itself emit an event on Linux.",
+        "start": 0,
+        "end": 52,
+        "color": "#59636E"
+      },
+      {
+        "text": "/* block comment */",
+        "start": 53,
+        "end": 72,
+        "color": "#59636E"
+      },
+      {
+        "text": "/// Documentation comment",
+        "start": 73,
+        "end": 98,
+        "color": "#59636E"
+      },
+      {
+        "text": "/** Block documentation */",
+        "start": 99,
+        "end": 125,
+        "color": "#59636E"
+      }
+    ]
+  },
+  {
+    "mode": "light",
+    "language": "javascript",
+    "source": "// line comment\n/* block comment */\n/** Documentation comment */\nfunction main() {}\n",
+    "tokens": [
+      {
+        "text": "// line comment",
+        "start": 0,
+        "end": 15,
+        "color": "#59636E"
+      },
+      {
+        "text": "/* block comment */",
+        "start": 16,
+        "end": 35,
+        "color": "#59636E"
+      },
+      {
+        "text": "/** Documentation comment */",
+        "start": 36,
+        "end": 64,
+        "color": "#59636E"
+      }
+    ]
+  },
+  {
+    "mode": "light",
+    "language": "python",
+    "source": "# line comment\ndef main():\n    pass\n",
+    "tokens": [
+      {
+        "text": "# line comment",
+        "start": 0,
+        "end": 14,
+        "color": "#59636E"
       }
     ]
   }

@@ -12,8 +12,10 @@ English, Chinese and Japanese; source typography stays independent.
 
 The light palette uses GitHub's default website CodeMirror tokens captured on
 2026-10-06. Its pinned source records the published stylesheet URL, capture
-date and checksum. CodeMirror comments use dark foreground and functions use
-purple; GitHub's read-only code viewer has different tokens for those roles.
+date and checksum. Comments and documentation comments use GitHub's gray
+code-display token `#59636E`, as clarified by the user's reference screenshot.
+Functions retain the purple CodeMirror entity token; GitHub's read-only code
+viewer uses a different purple entity token.
 Roles without a specific CodeMirror token use the corresponding website
 prettylights or interface token, as documented with the bundled assets.
 
@@ -25,7 +27,7 @@ This is a palette illustration from bundled values, not a native screenshot.
 
 - The existing editing-state regression first failed when the required light background changed from `#FAFAFA` to `#FFFFFF`, then passed after the palette replacement.
 - All 17 tests selected by `editor_` passed, covering authored source/control colors, settings, typography, search contrast, preview cancellation, configuration reload, editing state, language queries and embedded code.
-- The production highlighter checks 220 retained dark TextMate expectations and 85 independent GitHub Light expectations across 21 languages. Reference token ranges are also checked against their source text.
+- The production highlighter checks 220 retained dark TextMate expectations and 93 independent GitHub Light expectations across 21 languages. Reference token ranges are also checked against their source text.
 - Both palettes retain the same 157 syntax capture names, preserving private query qualification and language injections. All 38 private language queries compile without changing shared registrations.
 - Offline regeneration reproduces the bundled palettes. The Atom One Dark generated file, pinned source and license remain byte-identical to the fork's main branch.
 - The locked Windows workspace build passed. No dependency, component revision, lockfile or configuration schema change was required.
@@ -46,9 +48,27 @@ The Windows CLI integration tests require Git's `usr/bin` directory on the
 test process PATH so their existing `sh` subprocess can start. This is an
 environment prerequisite, not an application or repository change.
 
+## Gray comment correction
+
+The initial implementation used the CodeMirror comment token `#1F2328`, which
+made comments look like ordinary text. The follow-up screenshot clarified the
+expected GitHub gray. Both `comment` and `comment.doc` now use the pinned
+`prettylights-syntax-comment` token `#59636E`.
+
+![Comment colors before and after the correction](images/editor-github-light-comments.png)
+
+This illustration uses bundled values, not a native application screenshot.
+
+- The production highlighter regression failed before the mapping change with nine gray-comment mismatches, including the exact Rust comment from the user's screenshot.
+- After regeneration, all 17 editor-focused tests passed, including Rust line, block and documentation comments, JavaScript line, block and documentation comments, and Python line comments.
+- Comparing parsed palettes confirms that only `comment` and `comment.doc` changed; every other light value and all 157 capture names are retained.
+- Offline generation reproduces both palettes; the dark palette, pinned source, license and TextMate reference corpus remain byte-identical to the initial implementation.
+- The full locked workspace suite passed again with 2,977 tests and all 13 CLI end-to-end cases, with 8 existing ignored tests and no failures; the locked Windows workspace build, formatting, whitespace and host-boundary checks also passed after the correction.
+
 ## Review
 
-Separate Standards and Spec reviewers examined the complete staged change
+For the initial implementation at `f428d547`, separate Standards and Spec
+reviewers examined the complete staged change
 against fork/main at `814b4036`. Both reported no actionable findings. Their
 read-only checks confirmed reproducible palettes, identical dark assets and
 reference samples, shared capture vocabulary and the documented fidelity limits.

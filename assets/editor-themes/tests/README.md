@@ -6,12 +6,14 @@ upstream theme files using `vscode-textmate` 9.2.0 and `vscode-oniguruma` 1.7.0
 with the installed Cursor language grammars. TOML uses Even Better TOML 0.21.2.
 The samples are local test code; they contain no user document contents.
 
-`github-light-colors.json` contains 22 light source samples and 85 selected
+`github-light-colors.json` contains 25 light source samples and 93 selected
 token expectations in the same 21 languages. Literal expected colors were
 recorded independently from GitHub's default light website tokens captured on
 2026-10-06, without reading the generated palette or production mapping script.
 The corpus checks representative keywords, constants, strings, functions,
-types, variables, tags, markup and the website CodeMirror comment color.
+types, variables, tags, markup and the website's gray code-display comment color.
+Comment regressions cover Rust line, block and documentation comments,
+JavaScript line, block and documentation comments, and Python line comments.
 Embedded JavaScript, JSX/TSX and Rust Markdown fences retain separate regressions.
 
 The languages are Python, JavaScript, TypeScript, JSON, Rust, CSS, Java, C,

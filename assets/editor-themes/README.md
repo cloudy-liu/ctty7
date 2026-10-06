@@ -29,9 +29,11 @@ brown variable/type roles. Ordinary Python and JavaScript identifiers use the
 foreground. Tags, regular expressions, links and Markdown roles use the
 corresponding website prettylights tokens where CodeMirror has no specific key.
 These are Tree-sitter role adaptations, not a browser editor runtime.
-The current website CodeMirror comment token is `#1F2328`; the read-only code
-viewer instead uses `#59636E` comments and a different purple entity token.
-The light editor deliberately follows CodeMirror for these shared roles.
+Comments and documentation comments use the website code-display token
+`prettylights-syntax-comment` (`#59636E`) to match GitHub's gray comments.
+The captured CodeMirror comment token is `#1F2328`, but is not used for comments.
+Functions retain the CodeMirror purple entity token; GitHub's code viewer uses
+a different purple entity token.
 
 The palettes retain the authored editor backgrounds, text, line numbers,
 selections, cursor and syntax colors. GitHub Light uses the website border token

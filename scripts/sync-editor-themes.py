@@ -162,7 +162,6 @@ def generate_github(data):
         "support": "type.builtin string.escape escape attribute label",
         "constant": "constant number boolean float string.special.symbol",
         "string": "string string.special character text.literal text.code.span",
-        "comment": "comment comment.doc",
     }
     syntax = {}
     for token, captures in groups.items():
@@ -173,6 +172,8 @@ def generate_github(data):
     for capture in ["punctuation.bracket", "punctuation.delimiter", "punctuation.special", "punctuation.list_marker"]:
         syntax[capture] = {"color": foreground}
     for capture, token in {
+        # Match GitHub's gray code-display comments, including documentation.
+        "comment": "prettylights-syntax-comment", "comment.doc": "prettylights-syntax-comment",
         "tag": "prettylights-syntax-entityTag", "string.regex": "prettylights-syntax-stringRegexp",
         "string.special.regex": "prettylights-syntax-stringRegexp", "link_text": "fgColor-accent",
         "link_uri": "prettylights-syntax-string", "text.uri": "prettylights-syntax-string",

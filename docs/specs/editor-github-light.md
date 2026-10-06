@@ -74,3 +74,8 @@ published adaptive source appearance specification. Atom One Dark and the
 existing appearance, configuration, typography and editing-state contracts
 remain the baseline. The tracking issue and implementation PR belong to
 cloudy-liu/ctty7 and use the ready-for-agent triage vocabulary.
+
+The user's follow-up screenshot clarifies that light comments must match
+GitHub's gray code-display comments (`#59636E`), including line, block and
+documentation comments. Use the pinned prettylights comment token for these
+roles instead of the CodeMirror dark-foreground comment token.

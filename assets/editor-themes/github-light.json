@@ -131,12 +131,6 @@
         "text.code.span": {
           "color": "#0A3069"
         },
-        "comment": {
-          "color": "#1F2328"
-        },
-        "comment.doc": {
-          "color": "#1F2328"
-        },
         "variable.parameter": {
           "color": "#1F2328"
         },
@@ -145,6 +139,12 @@
         },
         "string.special.regex": {
           "color": "#116329"
+        },
+        "comment": {
+          "color": "#59636E"
+        },
+        "comment.doc": {
+          "color": "#59636E"
         },
         "tag": {
           "color": "#0550AE"
