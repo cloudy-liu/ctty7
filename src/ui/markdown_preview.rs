@@ -1226,7 +1226,7 @@ mod tests {
     #[test]
     fn markdown_remote_svg_uses_the_same_animation_pipeline_as_host_images() {
         use gpui::http_client::{FakeHttpClient, Response};
-        let bytes = crate::core::markdown_svg::tests::TYPING.to_vec();
+        let bytes = crate::core::markdown_svg::tests::typing_with_embedded_font().into_bytes();
         let body = bytes.clone();
         let client = FakeHttpClient::create(move |request| {
             assert_eq!(

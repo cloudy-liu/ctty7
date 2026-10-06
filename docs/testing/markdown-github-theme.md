@@ -325,3 +325,12 @@ Windows, and the rebuilt combined application supplied the final screenshots.
 Formatting of touched component files, application formatting and the
 host-boundary checks passed. The PR remains a draft for the outstanding
 platform/DPI matrix and complete browser parity.
+
+## Merge validation follow-up
+
+Linux CI rendered two text-only SVG playback fixtures as empty frames because
+their generic monospace family depended on the runner's installed fonts.
+The playback and shared HTTP/Host tests now embed the existing JetBrains Mono
+subset, like the actual README title, while keeping the independently loaded
+font pixel reference. Production font loading and rendering are unchanged.
+The local SVG suite passed all seven tests after this fixture correction.

@@ -500,9 +500,20 @@ pub(crate) mod tests {
       <text font-family="monospace" font-size="20" fill="#ff5fa2"><textPath xlink:href="#line">ctty7</textPath></text>
     </svg>"##;
 
+    pub(crate) fn typing_with_embedded_font() -> String {
+        use base64::Engine;
+        let encoded = base64::engine::general_purpose::STANDARD.encode(include_bytes!(
+            "../../tests/fixtures/markdown/jetbrains-mono-ctty7.ttf"
+        ));
+        std::str::from_utf8(TYPING)
+            .unwrap()
+            .replace("font-family=\"monospace\"", "font-family=\"Typing fixture\"")
+            .replace("<path", &format!("<style>@font-face {{font-family:'Typing fixture';src:url('data:font/ttf;base64,{encoded}')}}</style><path"))
+    }
+
     #[test]
     fn markdown_svg_typing_renders_changing_pixels() {
-        let image = render(TYPING)
+        let image = render(typing_with_embedded_font().as_bytes())
             .unwrap()
             .expect("animated SVG must produce playback frames");
         assert!(image.frame_count() > 1);
@@ -553,13 +564,8 @@ pub(crate) mod tests {
 
     #[test]
     fn markdown_svg_embedded_font_matches_explicit_font_pixels() {
-        use base64::Engine;
         let font = include_bytes!("../../tests/fixtures/markdown/jetbrains-mono-ctty7.ttf");
-        let encoded = base64::engine::general_purpose::STANDARD.encode(font);
-        let svg = std::str::from_utf8(TYPING)
-            .unwrap()
-            .replace("font-family=\"monospace\"", "font-family=\"Typing fixture\"")
-            .replace("<path", &format!("<style>@font-face {{font-family:'Typing fixture';src:url('data:font/ttf;base64,{encoded}')}}</style><path"));
+        let svg = typing_with_embedded_font();
         let doc = Document::parse(&svg).unwrap();
         let nodes: Vec<_> = doc
             .descendants()
