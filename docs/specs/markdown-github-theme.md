@@ -2,43 +2,40 @@
 
 2026-10-06：应用 PR #88、#91 及组件 PR #4 已合并，issue #85 已关闭。
 macOS/Linux 原生截图矩阵与最终 CI 已完成；新增 Windows DPI 与应用 200% 检查由用户取消。
+配置回退和 ID 规则按 [#95](https://github.com/cloudy-liu/ctty7/issues/95) 更新，所有非内置 ID 均按普通自定义主题处理。
 验收范围和限制见[验证记录](../testing/markdown-github-theme.md)，剩余工作见[项目状态](../maintenance/status.md)。
 
 ## Problem Statement
 
-ctty7 的 Markdown 阅读应采用 GitHub Light / Dark。此前规格保留 Paperglow，并让自定义主题缺省字段继续继承 Paperglow，造成默认主题、升级行为与自定义主题基底不一致。用户希望删除 Paperglow，保留自定义能力，同时明确旧主题升级和阅读区与应用背景的关系。
+ctty7 的 Markdown 阅读应采用 GitHub Light / Dark。默认阅读主题和自定义主题缺省值需要使用一致的 GitHub 基底，同时保留自定义能力，并明确旧主题升级和阅读区与应用背景的关系。
 
 ## Solution
 
-GitHub 成为唯一内置 Markdown 阅读主题。旧 Paperglow 选择自动迁移到 GitHub。自定义主题采用 v2，缺省值来自 GitHub；v1 提示升级且保留原文件。2026-10-05 用户确认调整背景方案：内置 GitHub 的阅读区外层与正文背景默认采用当前应用背景，不增加开关；其余文字、元素颜色和排版保留 GitHub 参数。自定义主题的背景继续按包内配置。
+GitHub 成为唯一内置 Markdown 阅读主题。不可用的自定义选择回退到 GitHub，并保留原 ID。自定义主题采用 v2，缺省值来自 GitHub；v1 提示升级且保留原文件。2026-10-05 用户确认调整背景方案：内置 GitHub 的阅读区外层与正文背景默认采用当前应用背景，不增加开关；其余文字、元素颜色和排版保留 GitHub 参数。自定义主题的背景继续按包内配置。
 
 ## User Stories
 
 1. As a reader, I want GitHub to be the only bundled Markdown theme, so that the default reading experience has one clear standard.
 2. As a new user, I want GitHub selected by default, so that documents look familiar immediately.
-3. As an existing Paperglow user, I want my saved selection migrated to GitHub, so that upgrading does not leave a missing-theme warning.
-4. As a user with other settings, I want migration to preserve my other configuration, so that my terminal and workspace preferences stay intact.
-5. As a user with a separate config directory, I want migration to respect that directory, so that other installations remain untouched.
-6. As a user with an unwritable config, I want GitHub to work in memory with a save-failure notice, so that I know the migration was not persisted.
-7. As a light-mode reader, I want GitHub Light colors, so that Markdown matches the fixed GitHub light style.
-8. As a dark-mode reader, I want GitHub Dark colors, so that Markdown matches the fixed GitHub dark style.
-9. As a user changing application themes, I want Markdown to follow actual light/dark mode but retain its own palette, so that GitHub colors remain predictable.
-10. As a user previewing an application theme, I want Markdown to follow preview and cancellation, so that the visible reading mode is consistent with the active mode.
-11. As a reader, I want GitHub headings, lists, tables, alerts, inline code, keyboard keys and diff colors, so that document structure is recognizable.
-12. As a reader in a narrow pane, I want correct wrapping and horizontally scrollable wide tables, so that content is not clipped or lost.
-13. As a reader using display scaling, I want correct logical sizes at different DPI and application scales, so that text remains readable.
-14. As a reader selecting text, I want selection and reading position retained across theme changes, so that I can continue reading and copying.
-15. As an author, I want unsaved text and undo history preserved, so that theme changes cannot discard my work.
-16. As a Mermaid reader, I want diagrams recolored without losing selection, so that diagrams remain usable while switching themes.
-17. As a user without custom themes, I want a simple GitHub label instead of a one-option picker, so that settings stay concise.
-18. As a custom-theme user, I want local theme installation, selection and hot reload retained, so that I can still customize reading.
-19. As a v2 theme author, I want omitted styles to inherit GitHub, so that small theme packages have a consistent base.
-20. As a v2 theme author, I want explicit values, arrays and nullable fields to have documented merge behavior, so that my overrides have predictable results.
-21. As a v1 theme user, I want an actionable upgrade message without file modification, so that I can decide how to migrate my theme.
-22. As a user whose selected theme is unavailable, I want GitHub fallback with the original ID retained, so that repairing the theme restores my choice.
-23. As a user editing a valid theme, I want the last valid version retained after an invalid edit, so that reading continues during repairs.
-24. As a theme author, I want clear validation and duplicate-ID errors, so that I can correct my package.
-25. As a localized-app user, I want theme and migration messages in my selected language, so that I can understand settings and failures.
+3. As a light-mode reader, I want GitHub Light colors, so that Markdown matches the fixed GitHub light style.
+4. As a dark-mode reader, I want GitHub Dark colors, so that Markdown matches the fixed GitHub dark style.
+5. As a user changing application themes, I want Markdown to follow actual light/dark mode but retain its own palette, so that GitHub colors remain predictable.
+6. As a user previewing an application theme, I want Markdown to follow preview and cancellation, so that the visible reading mode is consistent with the active mode.
+7. As a reader, I want GitHub headings, lists, tables, alerts, inline code, keyboard keys and diff colors, so that document structure is recognizable.
+8. As a reader in a narrow pane, I want correct wrapping and horizontally scrollable wide tables, so that content is not clipped or lost.
+9. As a reader using display scaling, I want correct logical sizes at different DPI and application scales, so that text remains readable.
+10. As a reader selecting text, I want selection and reading position retained across theme changes, so that I can continue reading and copying.
+11. As an author, I want unsaved text and undo history preserved, so that theme changes cannot discard my work.
+12. As a Mermaid reader, I want diagrams recolored without losing selection, so that diagrams remain usable while switching themes.
+13. As a user without custom themes, I want a simple GitHub label instead of a one-option picker, so that settings stay concise.
+14. As a custom-theme user, I want local theme installation, selection and hot reload retained, so that I can still customize reading.
+15. As a v2 theme author, I want omitted styles to inherit GitHub, so that small theme packages have a consistent base.
+16. As a v2 theme author, I want explicit values, arrays and nullable fields to have documented merge behavior, so that my overrides have predictable results.
+17. As a v1 theme user, I want an actionable upgrade message without file modification, so that I can decide how to migrate my theme.
+18. As a user whose selected theme is unavailable, I want GitHub fallback with the original ID retained, so that repairing the theme restores my choice.
+19. As a user editing a valid theme, I want the last valid version retained after an invalid edit, so that reading continues during repairs.
+20. As a theme author, I want clear validation and duplicate-ID errors, so that I can correct my package.
+21. As a localized-app user, I want theme and fallback messages in my selected language, so that I can understand settings and failures.
 
 ## Implementation Decisions
 
@@ -46,13 +43,13 @@ GitHub 成为唯一内置 Markdown 阅读主题。旧 Paperglow 选择自动迁�
 
 GitHub 是一个主题包，ID 为 github，显示名为 GitHub，包含 Light default 和 Dark default 两个变体。应用实际处于浅色时采用 Light，深色时采用 Dark。应用跟随系统、临时预览主题和取消预览时，Markdown 同步实际生效的模式。不新增独立的 Markdown 深浅开关，不增加 github-light、github-dark 配置 ID。
 
-新配置、未保存主题的配置默认 GitHub。旧 Paperglow 选择迁移成 GitHub。内置主题的正文背景与当前应用背景统一，没有外层卡片边框、圆角或阴影。GitHub 源调色板仍完整保留，运行时只替换内置主题的外层与纸张背景；自定义包仍使用自己的背景。阅读主题不改变应用界面、终端和源码编辑器配色。
+新配置、未保存主题的配置默认 GitHub。不可用的自定义选择回退到 GitHub，但保留原 ID。内置主题的正文背景与当前应用背景统一，没有外层卡片边框、圆角或阴影。GitHub 源调色板仍完整保留，运行时只替换内置主题的外层与纸张背景；自定义包仍使用自己的背景。阅读主题不改变应用界面、终端和源码编辑器配色。
 
 ### 2.2 设置
 
 保留“设置 → 外观 → Markdown 阅读主题”和“打开主题目录”。没有有效自定义主题时显示 GitHub 及“内置，浅色／深色随应用切换”的说明，无需提供只有一个选项的下拉菜单。有有效自定义主题时显示选择器，GitHub 排首位，其后沿用现有自定义主题排序。文件加载错误仍可查看，即使没有可选自定义主题。所选自定义主题不可用且没有其他有效自定义主题时，显示“使用 GitHub”恢复按钮；只有用户点击后才改写所选 ID。
 
-移除 Paperglow 选项和对应的三语言产品文案。英文、中文、日文覆盖新说明、旧版本提示和迁移写入失败提示。
+英文、中文、日文覆盖主题说明、不可用主题提示和旧版本升级提示。
 
 ### 2.3 状态保持
 
@@ -121,19 +118,16 @@ SVG 动画仅支持指向父元素的 SMIL `<animate>`：从零开始的无限�
 
 动画 SVG 可读取 base64 TTF/OTF `@font-face` 和 CSS 字体别名，字体仅作用于当前文档，上限 2 MiB 和 16 个字体面。WOFF/WOFF2、外部字体 URL、嵌套图片和其他外部资源不加载。CSS/JavaScript 动画、animateTransform/animateMotion、有限或事件时间线、叠加动画、弧线路径变形和不同轨道周期不支持；不支持的 SMIL 显示图片错误、替代文本及提示。
 
-### 配置迁移
+### 配置回退
 
 | 配置值 | 启动后的行为 | 持久化 |
 |---|---|---|
 | 缺少 markdown_theme | 使用 GitHub | 正常保存配置时记录 github |
 | github | 使用 GitHub | 保持 |
-| paperglow | 规范化为 github，使用 GitHub，不报普通“主题缺失”错误 | 通过现有配置保存机制持久化迁移 |
 | 有效 v2 自定义 ID | 加载所选自定义主题 | 保持 ID |
 | v1、缺失或无效自定义 ID | 使用 GitHub，并提示原主题不能加载及原因 | 保留原 ID，便于修复后恢复 |
 
-迁移只针对配置里的精确 paperglow 值，必须覆盖实际有效的配置目录，包括 --config-dir。不得删除主题文件，不得重置其他设置。迁移应幂等；写入失败时本次运行仍使用 GitHub，显示一次可理解的保存失败提示，不宣称迁移已经持久化。
-
-paperglow 保持为历史保留 ID，不能由自定义主题占用，以免与迁移冲突。提示文案称其为历史保留 ID，不声称仍有这个内置主题。
+回退使用实际有效的配置目录，包括 --config-dir。不删除主题文件、不改写原 ID、不重置其他设置。只有用户在设置中选择有效主题后，才保存新的选择。github 是唯一保留 ID；其他 ID 遵循统一的自定义主题校验规则。
 
 ### v2 自定义主题
 
@@ -145,48 +139,48 @@ paperglow 保持为历史保留 ID，不能由自定义主题占用，以免与�
 
 例如，只覆盖链接颜色的主题，其余颜色和排版来自 GitHub。只有 light: {} 和 dark: {} 的最小主题必须与内置 GitHub 的完整阅读样式相等。
 
-内置 GitHub 默认值必须独立完整加载，不再先以 Paperglow 为底合并。删除 Paperglow 后，不能用隐藏旧主题或改名的旧默认值继续作为用户包基底。
+内置 GitHub 默认值必须独立完整加载，不能用隐藏旧主题或改名的旧默认值作为用户包基底。
 
 ### 5.2 v1 与异常处理
 
-遇到 v1 文件，显示文件来源和明确提示：“此主题使用 v1，当前支持 v2。升级后，未填写的样式将使用 GitHub 默认值。”不自动修改文件，也不自动改版本号。文件不能作为有效新主题启用，选中它时依照配置迁移约定回退；修复为有效 v2 后，原 ID 自动恢复。
+遇到 v1 文件，显示文件来源和明确提示：“此主题使用 v1，当前支持 v2。升级后，未填写的样式将使用 GitHub 默认值。”不自动修改文件，也不自动改版本号。文件不能作为有效新主题启用，选中它时依照配置回退约定回退；修复为有效 v2 后，原 ID 自动恢复。
 
-升级说明要明确：将版本改为 2 表示接受 GitHub 缺省值；如要保留旧外观，作者需要显式填写原先省略的颜色、字体和布局。仅改版本号不保证旧外观不变。本次不提供自动转换工具，也不内置 v1/Paperglow 兼容运行时。
+升级说明要明确：将版本改为 2 表示接受 GitHub 缺省值；如要保留旧外观，作者需要显式填写原先省略的颜色、字体和布局。仅改版本号不保证旧外观不变。本次不提供自动转换工具，也不内置 v1 兼容运行时。
 
-保持现有文件大小上限 256 KiB、ID 字符集、重复 ID 排除、颜色范围和尺寸校验。github 为内置保留 ID，paperglow 为历史保留 ID。其他未知版本明确报不支持，不猜测版本语义。
+保持现有文件大小上限 256 KiB、ID 字符集、重复 ID 排除、颜色范围和尺寸校验。github 是唯一内置保留 ID。其他未知版本明确报不支持，不猜测版本语义。
 
 ### 5.3 目录与热加载
 
 保留有效配置目录下的 markdown-themes，只扫描直接子文件。新增主题不自动切换；文件名变化但 ID 不变仍保留选择。热加载沿用 200ms 防抖；两种变体都校验成功后才发布。
 
-当前有效 v2 在运行中损坏、删除、变成 v1 或出现重复 ID 时，本次运行保留最近有效的内存版本并展示错误，不应用无效新文件。重新启动时没有内存旧版本，则回退 GitHub。文件修复后自动恢复。普通自定义主题回退不改写所选 ID，与 Paperglow 的一次迁移区分。
+当前有效 v2 在运行中损坏、删除、变成 v1 或出现重复 ID 时，本次运行保留最近有效的内存版本并展示错误，不应用无效新文件。重新启动时没有内存旧版本，则回退 GitHub。文件修复后自动恢复。自定义主题回退不改写所选 ID。
 
 ### 模块与交付边界
 
-- 修改主题解析、主题注册表、配置读取与持久化、阅读设置及三语言文案、示例、文档与测试。删除不再使用的 Paperglow 内置资源和纯历史外观回归样本。
-- 替换 Blue Paper 默认示例为以 GitHub 为基底的 v2 示例。保留仍被分发的派生素材所需署名与许可，不改历史发布记录。
-- 不再要求 Paperglow 外观零变化。组件库的通用样式能力与非 GitHub 消费者默认行为继续保留，源码编辑器搜索高亮修复不能回退。
+- 修改主题解析、主题注册表、配置读取与持久化、阅读设置及三语言文案、示例、文档与测试。只保留当前内置资源和仍验证通用渲染行为的回归样本。
+- 提供以 GitHub 为基底的 v2 示例。保留仍被分发的派生素材所需署名与许可，不改历史发布记录。
+- 组件库的通用样式能力与非 GitHub 消费者默认行为继续保留，源码编辑器搜索高亮修复不能回退。
 - 应用和组件资源依赖锁定同一个已推送的 fork 提交，不提交本地依赖路径覆盖。组件没有新增改动时不制造新提交。
 - 在现有应用与组件 PR 上继续交付。验收尚未完成时保持草稿，不合并或发布。
 
 ## Testing Decisions
 
-沿用已经约定的高层入口：主题包解析／注册及真实文件加载、应用 Markdown 阅读流程；组件样式有改动时才在 TextView 公开行为入口新增对应测试。配置迁移沿用已有配置加载／保存往返测试，不增加测试专用的生产接口。
+沿用已经约定的高层入口：主题包解析／注册及真实文件加载、应用 Markdown 阅读流程；组件样式有改动时才在 TextView 公开行为入口新增对应测试。配置加载沿用已有配置加载／保存往返测试，不增加测试专用的生产接口。
 
 好测试观察完整解析样式、可选主题、加载提示、配置与文件持久化结果、用户选择／复制及缓冲区状态，不 mock 内部协作者。先例为现有主题加载与热恢复测试、GPUI 阅读窗口测试和配置文件损坏保护测试。源样式断言来自独立固定快照，不从实现复制常量。
 
 ### 7.1 自动化
 
-- 空配置得到 GitHub；旧 Paperglow 迁移及再次加载均得到 GitHub，其他配置不变；覆盖迁移保存失败和自定义配置目录。
-- 注册表只有一个内置主题；用户主题仍可注册、选择、重载，两个保留 ID 规则明确。
+- 空配置得到 GitHub；不可用的主题选择回退 GitHub 并保留原 ID，加载不改写配置文件；覆盖其他设置保持和自定义配置目录。
+- 注册表只有一个内置主题；用户主题仍可注册、选择、重载，只有 GitHub 是保留 ID。
 - 最小 v2 的浅色、深色、排版和布局均与 GitHub 相等；部分覆盖只改变指定字段；数组替换、null、未知字段和非法值符合规范。
 - v1 文件显示升级错误，原文件字节保持不变；被选中的 v1 回退但保存原 ID；修成 v2 后恢复。
-- 热加载错误保留最近有效版本，重启后正确回退；缺失主题不误走 Paperglow 迁移。
+- 热加载错误保留最近有效版本，重启后正确回退；缺失主题不改写原 ID。
 - GitHub 源样式比对继续通过；应用入口覆盖自定义与 GitHub 切换、深浅模式、字体重排、Mermaid、选区和未保存内容。
 - 组件公开行为测试继续覆盖五种提示块、行内代码换行与选择、kbd、表格、列表、diff 背景及非 GitHub 消费者的默认行为。
 - 最终提交在独立 checkout、无本地依赖覆盖下通过 workspace 测试、构建、格式和 host boundary；组件有修改时运行对应组件验证。
 
-不保留“Paperglow 外观零变化”作为验收目标；不因此删掉仍验证通用渲染行为的测试。
+保留仍验证通用渲染行为的测试。
 
 ### 7.2 视觉与交互
 
@@ -207,7 +201,7 @@ paperglow 保持为历史保留 ID，不能由自定义主题占用，以免与�
 ## Out of Scope
 
 - 删除自定义主题能力，或增加独立 Markdown 深浅模式开关。
-- 保留 Paperglow 为隐藏默认值、保留 v1 运行时外观兼容或自动改写用户主题文件。
+- 增加隐藏内置主题、保留 v1 运行时外观兼容或自动改写用户主题文件。
 - 新增 GitHub Dark Dimmed、高对比、色盲模式或主题商店。
 - 修改源码编辑器、Git diff 浮层、终端或应用界面主题。
 - 合并 PR、打标签、发布 release，或触碰主工作树中其他编辑器主题工作的改动。
@@ -216,7 +210,7 @@ paperglow 保持为历史保留 ID，不能由自定义主题占用，以免与�
 
 - 标题悬停锚点、任务框外观、代表性语法与 Mermaid 修正、平台原生截图已在后续验收中处理。原生字体栅格化、所有语言的语法分类及 Mermaid 横向几何仍不保证与浏览器完全一致。脚注、details/summary、sup/sub、mark、数学公式、emoji 短码等未支持能力不计入本次完成范围；参见验证记录中的限制。
 
-- 本规格替代此前的双内置主题、保留 Paperglow 选择、v1 缺省值继承 Paperglow 等约定。用户已确认保留自定义主题及 v2 / v1 升级策略，并接受 GitHub 固定配色方案。
+- 本规格采用单一 GitHub 内置主题和 GitHub 自定义主题基底。用户已确认保留自定义主题及 v2 / v1 升级策略，并接受 GitHub 固定配色方案。
 - 应用 PR：https://github.com/cloudy-liu/ctty7/pull/88 ，组件 PR：https://github.com/cloudy-liu/gpui-component/pull/4 。只交付到这些 fork，不能向上游开 PR。
-- 实施顺序为独立 GitHub 基底与 v2、配置迁移、设置和资源清理、文档与测试、CI 和视觉验收、更新现有 PR。
+- 实施顺序为独立 GitHub 基底与 v2、配置回退、设置和资源清理、文档与测试、CI 和视觉验收、更新现有 PR。
 - 效果示意仅用于产品对齐，不能替代原生渲染截图、性能验证或人工评审。
