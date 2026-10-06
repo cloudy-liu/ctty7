@@ -353,7 +353,7 @@ fn github_reading_palette_and_typography_match_the_upstream_css_snapshot() {
 }
 
 #[test]
-fn new_theme_fields_reject_invalid_input_and_builtin_and_legacy_ids_are_reserved() {
+fn new_theme_fields_reject_invalid_input_and_only_the_builtin_id_is_reserved() {
     let base = "schema_version: 2\nid: custom\nname: Custom\nlight: {}\ndark: {}\n";
     for (section, field, value) in [
         ("typography", "bold_weight", "901"),
@@ -385,14 +385,24 @@ fn new_theme_fields_reject_invalid_input_and_builtin_and_legacy_ids_are_reserved
         .unwrap();
     }
     let snapshot = scan(Some(dir.path()));
-    assert!(snapshot.themes.is_empty());
-    assert_eq!(snapshot.errors.len(), 2);
+    assert_eq!(snapshot.themes.len(), 1);
+    assert_eq!(snapshot.errors.len(), 1);
     assert!(
         snapshot
             .errors
             .iter()
             .all(|(_, reason)| reason.contains("reserved"))
     );
+    let mut registry = Registry::default();
+    registry.replace(Snapshot::default(), "paperglow");
+    assert!(registry.unavailable("paperglow"));
+    assert_eq!(registry.resolve("paperglow").theme.id, "github");
+    registry.replace(snapshot, "paperglow");
+    assert!(!registry.unavailable("paperglow"));
+    assert_eq!(registry.resolve("paperglow").theme.id, "paperglow");
+    assert!(registry.resolve("paperglow").source.is_some());
+    assert_eq!(registry.entries.len(), 2);
+    assert_eq!(registry.resolve("github").theme, builtin());
 }
 
 #[test]

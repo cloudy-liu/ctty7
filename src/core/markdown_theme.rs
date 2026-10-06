@@ -511,11 +511,6 @@ pub fn scan(directory: Option<&Path>) -> Snapshot {
                 return Err("theme exceeds 256 KiB".into());
             }
             let theme = parse(&text)?;
-            if theme.id == "paperglow" {
-                return Err(
-                    "id \"paperglow\" is reserved for legacy configuration migration".into(),
-                );
-            }
             if theme.id == DEFAULT_ID {
                 return Err(format!(
                     "id {:?} is reserved for a built-in theme",
@@ -828,6 +823,31 @@ mod tests {
         std::fs::write(dir.path().join("study.yaml"), CUSTOM).unwrap();
         registry.replace(scan(Some(dir.path())), "study");
         assert_eq!(registry.resolve("study").theme.id, "study");
+        assert!(registry.errors.is_empty());
+    }
+
+    #[test]
+    fn formerly_reserved_id_uses_missing_theme_fallback_and_recovers_when_installed() {
+        let dir = tempfile::tempdir().unwrap();
+        let selected = "paperglow";
+        let mut registry = Registry::default();
+        registry.replace(scan(Some(dir.path())), selected);
+        assert!(registry.unavailable(selected));
+        assert_eq!(registry.resolve(selected).theme.id, "github");
+        assert!(registry.errors.iter().any(|(id, _)| id == selected));
+
+        let package = dir.path().join("custom.yaml");
+        std::fs::write(
+            &package,
+            CUSTOM.replace("id: study", &format!("id: {selected}")),
+        )
+        .unwrap();
+        registry.replace(scan(Some(dir.path())), selected);
+        assert!(!registry.unavailable(selected));
+        let entry = registry.resolve(selected);
+        assert_eq!(entry.theme.id, selected);
+        assert_eq!(entry.source.as_ref(), Some(&package));
+        assert_eq!(entry.theme.light.link, parse_color("#123456").unwrap());
         assert!(registry.errors.is_empty());
     }
 

@@ -31,8 +31,9 @@ on each side, for a 1076px total reading-width cap.
   duplicate IDs, partial overrides, array replacement, explicit nulls, v1
   upgrade errors and package repair. Automated scale checks include 100%,
   150% and 200% in both modes.
-- Configuration tests migrate only saved Paperglow selections, preserve
-  other settings and custom IDs, and use GitHub in memory after a save failure.
+- Configuration tests retain selected theme IDs and leave the saved file
+  unchanged. Unavailable selections use GitHub until repaired or explicitly
+  changed in Settings; valid custom packages follow the normal ID rules.
 - Application tests cover theme reload, file-event isolation, preview and
   source round trips, unsaved edits, selection, undo, anchor navigation and
   reading-position restoration after reflow. Stale asynchronous results do
@@ -66,10 +67,17 @@ reading view uses real platform executors and font shaping. The capture script
 and nonempty images before uploading screenshots and logs.
 
 Windows Computer Use checks ran at the existing 175% display scale, including
-wide code and narrow dark lists. The unchanged
+wide code and narrow dark lists. The
 [acceptance sample](../examples/markdown-github-theme.md) and repository
 READMEs were inspected for headings, inline code, links, tasks, five alerts,
 overflowing tables, Rust/diff colors, image failures and unsaved source edits.
+
+After capture, an obsolete theme name inside the sample's quoted diff string
+was replaced with `old-theme`. This equal-length normalization preserves the
+source offsets, token classes and captured styles; the remaining rendered
+sample content is unchanged. See the
+[live fixture README](../../tests/fixtures/github-live-2026-10-06/README.md)
+for details.
 
 Mermaid labels, transparent built-in canvases and custom backgrounds were
 checked inline and expanded. Copy, zoom, pan, reset, close and focus recovery
