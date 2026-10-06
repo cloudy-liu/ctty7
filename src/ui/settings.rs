@@ -8536,9 +8536,7 @@ mod gpui_tests {
         crate::ui::i18n::set_locale("en");
         let (app, mut vcx) = harness(cx);
         app.update_in(&mut vcx, |app, window, cx| {
-            cx.update_global::<Config, _>(|config, _| {
-                config.markdown_theme = "paperglow".into();
-            });
+            cx.global_mut::<Config>().markdown_theme = "paperglow".into();
             crate::ui::markdown_preview::init(Default::default(), cx);
             app.open_settings_section(SettingsSection::Appearance, window, cx);
             app.active_settings()
