@@ -38,6 +38,7 @@ pub struct PendingPane {
     pub machine: SharedString,
     pub state: PendingState,
     pub spawn: PendingSpawn,
+    pub on_ready_command: Option<String>,
 }
 
 impl EventEmitter<RetryRequested> for PendingPane {}
@@ -53,6 +54,7 @@ impl PendingPane {
             machine: machine.into(),
             state: PendingState::Connecting,
             spawn,
+            on_ready_command: None,
         }
     }
 

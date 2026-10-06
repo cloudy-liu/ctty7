@@ -120,6 +120,15 @@ pub(crate) fn desired_tabs(
     let mut active = None;
     let mut held = Vec::new();
     for (index, tab) in app.tabs.iter().enumerate() {
+        // A fresh pending leaf has no daemon id yet. Publishing only its
+        // ready sibling would collapse the split before the spawn can land.
+        if tab.pane.leaves().iter().any(|leaf| {
+            matches!(leaf, PaneSlot::Connecting(pending)
+                if pending.read(cx).spawn.restore_pane.is_none())
+        }) {
+            held.push(tab.tree_id.get());
+            continue;
+        }
         let Some(root) = desired_node(&tab.pane, remote, cx) else {
             if !(remote && every_leaf_is_native_ssh(&tab.pane, cx)) {
                 held.push(tab.tree_id.get());

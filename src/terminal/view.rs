@@ -8843,6 +8843,15 @@ pub(crate) fn quiet_test_pane(
     window: &mut Window,
     cx: &mut gpui::App,
 ) -> (gpui::Entity<TerminalView>, crate::daemon::transport::Stream) {
+    let (parts, daemon_side) = quiet_test_shell_parts(pane_id);
+    let view = cx.new(|cx| TerminalView::from_shell_parts(parts, window, cx));
+    (view, daemon_side)
+}
+
+#[cfg(test)]
+pub(crate) fn quiet_test_shell_parts(
+    pane_id: u64,
+) -> (ShellParts, crate::daemon::transport::Stream) {
     #[cfg(unix)]
     let (client_side, daemon_side) = std::os::unix::net::UnixStream::pair().unwrap();
     #[cfg(windows)]
@@ -8855,8 +8864,17 @@ pub(crate) fn quiet_test_pane(
     };
     let terminal = RemoteTerminal::from_stream(client_side, TermSize::new(80, 24))
         .expect("quiet test terminal");
-    let view = cx.new(|cx| TerminalView::with_terminal(terminal, pane_id, window, cx));
-    (view, daemon_side)
+    (
+        ShellParts {
+            terminal,
+            pane_id,
+            shell_spec: None,
+            workspace: None,
+            restored: false,
+            owner: None,
+        },
+        daemon_side,
+    )
 }
 
 #[cfg(all(test, unix))]
