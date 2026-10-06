@@ -91,7 +91,9 @@ tool is currently exposed in this session. Full website parity remains open.
 Use [the acceptance sample](../examples/markdown-github-theme.md) unchanged in
 ctty7 and on its GitHub file page. Compare the rendered Markdown area, excluding
 application chrome. Repeat Light default and Dark default at wide and narrow
-reading widths, then Windows display scale 100% and 150%.
+reading widths. The additional Windows DPI and application 200% visual
+checks were cancelled by the user on 2026-10-06; existing automated scale
+coverage remains in place.
 
 Check all six headings, h1/h2 rules, inline code and heading code, kbd keys,
 five alerts, nested lists, task states, narrow/overflowing tables, a horizontal
@@ -163,11 +165,12 @@ switch speedup; they exclude native GPU presentation. The former synchronous
 profile stopped at the first draw, so its timing is not a comparable complete-page
 measurement.
 
-Windows 100%/150% display scale, application zoom 200%, and macOS/Linux native
-visual checks remain open. Native font rasterization, all syntax token boundaries
+At this stage Windows 100%/150% display scale, application zoom 200%, and
+macOS/Linux native visual checks remained open. The user subsequently cancelled
+the additional DPI/200% checks. Native font rasterization, all syntax token boundaries
 and pure-Rust Mermaid geometry have not been established as identical to GitHub.
 The user-approved application background is an intentional exception to website
-background parity; the PR remains a draft pending the outstanding matrix.
+background parity. PR #88 was subsequently merged; follow-up results are below.
 
 ## Mermaid background follow-up
 
@@ -323,8 +326,9 @@ Combined local main passed 2,960 tests plus 13 CLI end-to-end cases, with
 end-to-end cases, with 8 ignored. The native CJK test passed explicitly on
 Windows, and the rebuilt combined application supplied the final screenshots.
 Formatting of touched component files, application formatting and the
-host-boundary checks passed. The PR remains a draft for the outstanding
-platform/DPI matrix and complete browser parity.
+host-boundary checks passed. PR #88 was a draft at this verification stage
+and was subsequently merged. Follow-up results and the revised acceptance
+scope are recorded below.
 
 ## Merge validation follow-up
 
@@ -334,3 +338,43 @@ The playback and shared HTTP/Host tests now embed the existing JetBrains Mono
 subset, like the actual README title, while keeping the independently loaded
 font pixel reference. Production font loading and rendering are unchanged.
 The local SVG suite passed all seven tests after this fixture correction.
+
+## Issue #85 acceptance follow-up, 2026-10-06
+
+The user requested the remaining work, merge and closure of #85, then cancelled
+the additional Windows DPI and application 200% visual checks. This follow-up
+preserves existing scale coverage and checks the current reading behavior.
+
+Live GitHub Rust and diff captures are committed under
+`tests/fixtures/github-live-2026-10-06`. The regression compares foreground,
+background and font weight at each non-whitespace sample byte in Light and
+Dark default. It caught `diff --git` using a bold heading style instead of
+GitHub's ordinary-weight blue constant style; the corrected mapping passes.
+
+The live Mermaid flowchart has a 150px canvas height. Missing GitHub canvas
+padding originally produced 94px. With padding corrected, ordinary HTML labels
+still acquired an extra line from the Rust renderer's wrapping measurement.
+The builtin flowchart adapter now measures those labels without soft wrapping
+inside the capped label box, while retaining the raw Markdown-label path.
+The canvas-height regression passes after both corrections. Sequence diagrams
+also inherit GitHub's 40px vertical margin. Custom themes keep their existing
+renderer configuration and colors.
+
+The opt-in `markdown-visual-tests` feature launches the production reading view
+with real platform executors and font shaping. `scripts/markdown-native-visual.py`
+captures both modes at 1076px and 500px, at the top, lists/tasks and code/diff
+anchors. CI captures macOS Metal output and Linux X11 windows under Xvfb,
+checks that the scroll container fits the window, that the requested heading
+is visible, and that images are nonempty, then uploads screenshots and logs.
+The fixture binds its root to the native viewport and waits for layout before
+navigating; an earlier unbounded root produced duplicate top-of-document captures
+and those captures are not evidence for the requested sections. Native Windows
+probes for wide code and narrow dark lists failed before the correction and pass
+with the heading at 12px in the bounded viewport. These probes used the existing
+175% display scale, which was confirmed rather than changed. The screenshot
+matrix deliberately excludes the cancelled 200% checks.
+
+This acceptance does not establish identical browser/native glyph rasterization,
+every language's syntax classification, or all Mermaid horizontal geometry.
+Earlier native Windows interaction, README image layout and CJK font evidence
+remain applicable. The application-background exception was approved separately.

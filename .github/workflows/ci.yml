@@ -105,6 +105,8 @@ jobs:
           targets: ${{ matrix.target }}
 
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
 
       # `--locked` on the build so a Cargo.lock that disagrees with Cargo.toml
       # fails here instead of being silently rewritten. Without it the drift is
@@ -137,6 +139,40 @@ jobs:
       - name: Test desktop updater
         timeout-minutes: 10
         run: cargo test --locked --features updater --bin tty7-updater --target ${{ matrix.target }}
+
+      - name: Build native Markdown visual fixture
+        if: runner.os != 'Windows'
+        timeout-minutes: 15
+        run: cargo build --locked --features markdown-visual-tests --bin tty7-app --target ${{ matrix.target }}
+
+      - name: Install native visual capture dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get install -y xvfb openbox x11-utils xdotool imagemagick mesa-vulkan-drivers fonts-noto-cjk
+
+      - name: Capture Linux native Markdown matrix
+        if: runner.os == 'Linux'
+        timeout-minutes: 10
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+        run: xvfb-run -a -s '-screen 0 1800x1200x24' python3 scripts/markdown-native-visual.py target/${{ matrix.target }}/debug/tty7-app native-markdown-linux
+
+      - name: Capture macOS native Markdown matrix
+        if: runner.os == 'macOS'
+        timeout-minutes: 10
+        run: |
+          binary=target/${{ matrix.target }}/debug/tty7-app
+          if ! codesign --verify --verbose=2 "$binary"; then
+            codesign --force --sign - "$binary"
+          fi
+          python3 scripts/markdown-native-visual.py "$binary" native-markdown-macos
+
+      - name: Upload native Markdown visual evidence
+        if: always() && runner.os != 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-markdown-${{ runner.os }}
+          path: native-markdown-*/
+          if-no-files-found: error
 
       # There is deliberately no post-mortem step here, and that is worth
       # recording, because an earlier version of this file had one: on failure it

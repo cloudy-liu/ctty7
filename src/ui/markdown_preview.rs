@@ -183,9 +183,7 @@ fn highlight(theme: &Theme, dark: bool, revision: u64) -> Arc<HighlightTheme> {
                 diff_hunk: s
                     .diff_hunk
                     .map(|c| ThemeStyle::from(color(c)).weight(FontWeightContent::Bold)),
-                diff_header: s
-                    .markup_heading
-                    .map(|c| ThemeStyle::from(color(c)).weight(FontWeightContent::Bold)),
+                diff_header: token(s.constant.unwrap_or(s.number)),
                 variable_builtin: s.constant.and_then(token),
                 keyword: token(s.keyword),
                 boolean: token(s.constant.unwrap_or(s.keyword)),
@@ -1178,6 +1176,109 @@ mod tests {
         time::{Duration, Instant},
     };
     use tty7_core::host::{self, Host, HostId, Meta};
+
+    #[test]
+    fn reading_code_matches_live_github_token_styles() {
+        use gpui_component::highlighter::SyntaxHighlighter;
+        #[derive(serde::Deserialize)]
+        struct Token {
+            start: usize,
+            end: usize,
+            text: String,
+            color: String,
+            background: String,
+            weight: String,
+        }
+        #[derive(serde::Deserialize)]
+        struct Sample {
+            language: String,
+            source: String,
+            tokens: Vec<Token>,
+        }
+        #[derive(serde::Deserialize)]
+        struct Capture {
+            samples: Vec<Sample>,
+        }
+        fn rgb(value: &str) -> Hsla {
+            let components: Vec<u32> = value
+                .trim_start_matches("rgb(")
+                .trim_end_matches(')')
+                .split(',')
+                .map(|part| part.trim().parse().unwrap())
+                .collect();
+            gpui::rgb((components[0] << 16) | (components[1] << 8) | components[2]).into()
+        }
+        let entry = Entry {
+            theme: markdown_theme::builtin(),
+            source: None,
+            revision: 0,
+        };
+        let mut failures = Vec::new();
+        for (dark, fixture) in [
+            (
+                false,
+                include_str!("../../tests/fixtures/github-live-2026-10-06/code-light.json"),
+            ),
+            (
+                true,
+                include_str!("../../tests/fixtures/github-live-2026-10-06/code-dark.json"),
+            ),
+        ] {
+            let capture: Capture = serde_json::from_str(fixture).unwrap();
+            let style = reading_style(&entry, dark, 1., "Mono".into());
+            for sample in capture.samples {
+                let language = if sample.language.contains("source-rust") {
+                    "rust"
+                } else {
+                    "diff"
+                };
+                let alias = style
+                    .code_block_languages
+                    .get(language)
+                    .map(|name| name.as_ref())
+                    .unwrap_or(language);
+                let mut highlighter = SyntaxHighlighter::new(alias);
+                highlighter.update(None, &sample.source.as_str().into(), None);
+                let runs = highlighter.styles(&(0..sample.source.len()), &style.highlight_theme);
+                for token in sample.tokens {
+                    for offset in token.start..token.end {
+                        if sample.source.as_bytes()[offset].is_ascii_whitespace() {
+                            continue;
+                        }
+                        let actual = runs
+                            .iter()
+                            .find(|(range, _)| range.contains(&offset))
+                            .map(|(_, run)| *run)
+                            .unwrap_or_default();
+                        let foreground = actual
+                            .color
+                            .or(style.highlight_theme.style.editor_foreground);
+                        let expected_background = if token.background.starts_with("rgb(") {
+                            rgb(&token.background)
+                        } else {
+                            style.highlight_theme.style.editor_background.unwrap()
+                        };
+                        let background = actual
+                            .background_color
+                            .or(style.highlight_theme.style.editor_background);
+                        let weight = actual.font_weight.unwrap_or(FontWeight::NORMAL).0;
+                        if foreground != Some(rgb(&token.color))
+                            || background != Some(expected_background)
+                            || weight != token.weight.parse::<f32>().unwrap()
+                        {
+                            failures.push(format!("{language} {:?} at {offset}: foreground={foreground:?}, background={background:?}, weight={weight}", token.text));
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "Live GitHub style differences:\n{}",
+            failures.join("\n")
+        );
+    }
 
     #[test]
     #[ignore = "requires the native Windows font collection with Noto Sans SC"]
