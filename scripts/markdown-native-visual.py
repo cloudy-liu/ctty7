@@ -31,6 +31,17 @@ def capture(binary, output, dark, width, scale, anchor):
                 if "NATIVE_MARKDOWN_READY" in log.read_text(encoding="utf-8"):
                     break
                 if process.poll() is not None:
+                    if sys.platform == "darwin" and process.returncode < 0:
+                        trace = output / f"{name}-backtrace.log"
+                        with trace.open("w", encoding="utf-8") as trace_stream:
+                            try:
+                                subprocess.run([
+                                    "/usr/bin/lldb", "--batch", "-o", "run",
+                                    "-o", "thread backtrace all", "--", str(binary),
+                                    "--config-dir", temporary, "--markdown-visual", str(options),
+                                ], stdout=trace_stream, stderr=trace_stream, timeout=45)
+                            except subprocess.TimeoutExpired:
+                                trace_stream.write("Debugger timed out\n")
                     raise RuntimeError(f"{name}: fixture exited before drawing with code "
                                        f"{process.returncode}: {log.read_text()}")
                 time.sleep(0.1)

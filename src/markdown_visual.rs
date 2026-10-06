@@ -59,7 +59,9 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
         .with_quit_mode(QuitMode::Explicit).run(move |cx| {
             eprintln!("NATIVE_MARKDOWN_APPLICATION_READY");
             gpui_component::init(cx);
+            eprintln!("NATIVE_MARKDOWN_COMPONENTS_READY");
             crate::register_bundled_fonts(cx);
+            eprintln!("NATIVE_MARKDOWN_FONTS_READY");
             let mut config = Config::default();
             config.theme_follow_system = false;
             config.theme_preset = if options.dark { "dark" } else { "light" }.into();
@@ -71,6 +73,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             crate::ui::keymap::init(cx);
             crate::ui::markdown_preview::init(Default::default(), cx);
             let mut reading = None;
+            eprintln!("NATIVE_MARKDOWN_OPENING_WINDOW");
             let handle = cx.open_window(WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                     None, size(px(options.width), px(options.height)), cx))),
@@ -79,9 +82,12 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 focus: true,
                 ..Default::default()
             }, |window, cx| {
+                eprintln!("NATIVE_MARKDOWN_APPLYING_THEME");
                 crate::ui::theme::apply_theme(Some(window), cx);
+                eprintln!("NATIVE_MARKDOWN_CREATING_OWNER");
                 let owner = cx.new(|cx| Tty7App::with_session(None,
                     Some(crate::core::session::Session::default()), window, cx));
+                eprintln!("NATIVE_MARKDOWN_OWNER_READY");
                 window.set_window_title("Markdown visual acceptance");
                 let input = cx.new(|cx| {
                     let mut input = InputState::new(window, cx).multi_line(true);
