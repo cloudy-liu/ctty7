@@ -15,3 +15,8 @@ The token regression compares every non-whitespace sample byte in both modes.
 The Mermaid regression checks canvas height, which catches the extra label
 line and missing canvas padding. It does not assert identical horizontal
 geometry, fonts, or browser/native pixels.
+
+The obsolete theme-name string in the diff samples was normalized to
+`old-theme` after capture. This is an equal-length replacement inside a quoted
+string; source offsets, token boundaries and captured styles are unchanged.
+The acceptance document uses the same normalized source.

@@ -80,7 +80,7 @@ diff --git a/config.json b/config.json
 --- a/config.json
 +++ b/config.json
 @@ -1,3 +1,3 @@
--  "markdown_theme": "paperglow"
+-  "markdown_theme": "old-theme"
 +  "markdown_theme": "github"
    "enabled": true
 ```

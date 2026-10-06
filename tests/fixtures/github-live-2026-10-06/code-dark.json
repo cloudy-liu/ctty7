@@ -289,7 +289,7 @@
     },
     {
       "language": "highlight highlight-source-diff notranslate position-relative overflow-auto",
-      "source": "diff --git a/config.json b/config.json\n--- a/config.json\n+++ b/config.json\n@@ -1,3 +1,3 @@\n-  \"markdown_theme\": \"paperglow\"\n+  \"markdown_theme\": \"github\"\n   \"enabled\": true",
+      "source": "diff --git a/config.json b/config.json\n--- a/config.json\n+++ b/config.json\n@@ -1,3 +1,3 @@\n-  \"markdown_theme\": \"old-theme\"\n+  \"markdown_theme\": \"github\"\n   \"enabled\": true",
       "tokens": [
         {
           "start": 0,
@@ -375,7 +375,7 @@
         {
           "start": 92,
           "end": 123,
-          "text": "  \"markdown_theme\": \"paperglow\"",
+          "text": "  \"markdown_theme\": \"old-theme\"",
           "color": "rgb(255, 220, 215)",
           "background": "rgb(103, 6, 12)",
           "weight": "400",
