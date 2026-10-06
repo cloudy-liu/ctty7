@@ -10524,6 +10524,7 @@ dependencies = [
  "log",
  "mac-notification-sys",
  "merman",
+ "merman-render",
  "notify 8.2.0",
  "notify-rust",
  "objc2 0.6.4",
