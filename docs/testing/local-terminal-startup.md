@@ -24,6 +24,7 @@ pending pane so it cannot publish a split as only its ready sibling.
 - The locked workspace build, formatting, whitespace, offline editor-palette regeneration and 98-file host-boundary check passed.
 - Native startup produced a first shell without a new Spawn timeout. A new PowerShell tab and horizontal split showed the expected fixture directory.
 - With session restoration enabled in the isolated test config, a GUI restart restored the same workspace and horizontal split with both prompts visible.
+- All nine [CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/37450774839) passed on `ffa76e55`, including the corrected macOS fixture and the macOS/Linux native Markdown matrices; PR #92 merged as `57c7c511`.
 
 ## Limits
 
