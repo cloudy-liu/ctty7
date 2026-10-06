@@ -633,7 +633,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsSidebarAgentStatusText => "サイドバーにエージェント状態テキストを表示",
         L10nKey::SettingsSidebarAgentStatusTextDesc => {
-            "タブの2行目に idle や working などの状態テキストを表示します。オフにするとアバターのバッジのみで表示されます。"
+            "タブの2行目に IDLE、RUN、INPUT、DONE の状態タグを表示します。オフにするとアバターのバッジのみで表示されます。"
         }
         L10nKey::DocumentDock => "ターミナルの隣にドック",
         L10nKey::DocumentFill => "ウィンドウ全体",

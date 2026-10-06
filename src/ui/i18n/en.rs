@@ -623,7 +623,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         }
         L10nKey::SettingsSidebarAgentStatusText => "Show agent status text in sidebar",
         L10nKey::SettingsSidebarAgentStatusTextDesc => {
-            "Display status words like idle or working in tab rows. Off shows status only through the avatar badge."
+            "Display IDLE, RUN, INPUT, and DONE tags in tab rows. Off shows status only through the avatar badge."
         }
         L10nKey::DocumentDock => "Dock beside terminal",
         L10nKey::DocumentFill => "Fill window",

@@ -558,7 +558,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsSidebarAgentStatusText => "在侧栏显示 Agent 状态文本",
         L10nKey::SettingsSidebarAgentStatusTextDesc => {
-            "在侧栏标签页第二行显示 idle、working 等状态文本。关闭时仅通过头像角标指示状态。"
+            "在侧栏标签页第二行显示 IDLE、RUN、INPUT、DONE 状态标签。关闭时仅通过头像角标指示状态。"
         }
         L10nKey::DocumentDock => "停靠在终端旁",
         L10nKey::DocumentFill => "铺满窗口",

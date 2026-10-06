@@ -52,6 +52,10 @@ mod row_metrics {
     pub(super) const META_GAP: f32 = 6.;
     /// The branch icon.
     pub(super) const BRANCH_ICON: f32 = 11.;
+    /// Status tags use smaller type than the metadata, at medium weight.
+    pub(super) const STATUS_REM: f32 = 0.6875;
+    /// Horizontal padding on each side of the status tag.
+    pub(super) const STATUS_PAD: f32 = 5.;
 
     /// What a row can spend on text, before the badge is taken out.
     pub(super) const fn text_budget(width: f32) -> f32 {
@@ -303,31 +307,38 @@ impl Tty7App {
                 let title_size = 0.875 * rem;
                 let meta_size = 0.75 * rem;
                 let title_font = if is_active { &title_font_active } else { &font };
-                // An agent row opens its second line with the status, in the
-                // badge's colour, when enabled by configuration. The mark never
+                // An agent row opens its second line with a status tag, in the
+                // badge's colour, when enabled by configuration. The tag never
                 // elides; whatever follows it gives up the room.
                 let show_status_text = cx.global::<Config>().sidebar_agent_status_text;
-                let status_word = if show_status_text {
-                    agent_indicator
-                        .and_then(|s| s.word().map(|word| (word, s.color(cx.theme().sidebar))))
+                let status_tag = if show_status_text {
+                    agent_indicator.and_then(|s| {
+                        s.sidebar_tag()
+                            .map(|tag| (tag, s.color(cx.theme().sidebar)))
+                    })
                 } else {
                     None
                 };
-                let status_w = status_word.map_or(0., |(word, _)| {
-                    measure_text(&window.text_system(), &font, meta_size, word)
-                        + measure_text(&window.text_system(), &font, meta_size, "·")
-                        + 2. * row_metrics::META_GAP
+                let status_size = row_metrics::STATUS_REM * rem;
+                let status_w = status_tag.map_or(0., |(tag, _)| {
+                    measure_text(&window.text_system(), &title_font_active, status_size, tag)
+                        + 2. * row_metrics::STATUS_PAD
+                        + row_metrics::META_GAP
                 });
-                // The `·` only separates: with nothing after it, it goes.
-                let status_lead = |followed: bool| {
-                    status_word.map(|(word, colour)| {
-                        h_flex()
+                let status_lead = || {
+                    status_tag.map(|(tag, colour)| {
+                        div()
                             .id(("sidebar-status", i))
                             .flex_shrink_0()
-                            .items_center()
-                            .gap_1p5()
-                            .child(div().text_color(colour).child(word))
-                            .when(followed, |lead| lead.child(div().child("·")))
+                            .text_size(px(status_size))
+                            .font_weight(FontWeight::MEDIUM)
+                            .line_height(gpui::relative(1.2))
+                            .px(px(row_metrics::STATUS_PAD))
+                            .py(px(1.))
+                            .rounded(px(4.))
+                            .text_color(colour)
+                            .bg(colour.opacity(0.12))
+                            .child(tag)
                     })
                 };
                 // Title: elide the *full* label against the row budget, so a
@@ -387,7 +398,7 @@ impl Tty7App {
                         .gap_1p5()
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
-                        .children(status_lead(true))
+                        .children(status_lead())
                         .child(
                             gpui::svg()
                                 .path("icons/git-branch.svg")
@@ -535,7 +546,7 @@ impl Tty7App {
                     .is_none()
                     .then(|| {
                         let cwd = cwd_shown.as_ref().map(|(cwd, _)| cwd.clone());
-                        (status_word.is_some() || cwd.is_some()).then(|| {
+                        (status_tag.is_some() || cwd.is_some()).then(|| {
                             h_flex()
                                 .id(("sidebar-cwd", i))
                                 .w_full()
@@ -543,7 +554,7 @@ impl Tty7App {
                                 .gap_1p5()
                                 .text_xs()
                                 .text_color(cx.theme().muted_foreground.opacity(0.8))
-                                .children(status_lead(cwd.is_some()))
+                                .children(status_lead())
                                 .children(
                                     cwd.map(|cwd| div().flex_1().min_w_0().truncate().child(cwd)),
                                 )
