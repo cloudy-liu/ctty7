@@ -177,7 +177,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsMarkdownTheme => "Markdown reading theme",
         L10nKey::SettingsEditorTheme => "Code editor colors",
         L10nKey::SettingsEditorThemeDesc => {
-            "Automatically use Atom One Dark or Light with the app's appearance, including the editor background. Font settings stay independent."
+            "Automatically use GitHub Light in light mode and Atom One Dark in dark mode, including the editor background. Font settings stay independent."
         }
         L10nKey::SettingsEditorThemeResolved => "Currently using {active}.",
         L10nKey::SettingsEditorFont => "Editor font",
@@ -196,7 +196,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
             "code editor font family size line height typography monospace"
         }
         L10nKey::SettingsSearchEditorThemeKeywords => {
-            "code editor source syntax highlighting atom one dark light theme"
+            "code editor source syntax highlighting github light atom one dark theme"
         }
         L10nKey::SettingsMarkdownThemeDesc => {
             "GitHub follows the app background and light/dark mode. Custom v2 themes keep their own backgrounds and reload automatically."

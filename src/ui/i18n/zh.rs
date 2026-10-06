@@ -161,7 +161,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsMarkdownTheme => "Markdown 阅读主题",
         L10nKey::SettingsEditorTheme => "代码编辑区配色",
         L10nKey::SettingsEditorThemeDesc => {
-            "根据应用的深浅外观自动使用 Atom One Dark 或 Light，背景也使用对应配色。字体设置独立保存。"
+            "浅色模式自动使用 GitHub Light，深色模式使用 Atom One Dark，编辑区背景也采用对应配色。字体设置独立保存。"
         }
         L10nKey::SettingsEditorThemeResolved => "当前使用 {active}。",
         L10nKey::SettingsEditorFont => "编辑器字体",
@@ -176,7 +176,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
             "代码 编辑器 编辑区 字体 字号 大小 行高 排版 等宽 font size"
         }
         L10nKey::SettingsSearchEditorThemeKeywords => {
-            "代码 编辑器 编辑区 源码 语法 高亮 配色 深色 浅色 主题 atom one dark light"
+            "代码 编辑器 编辑区 源码 语法 高亮 配色 深色 浅色 主题 github light atom one dark"
         }
         L10nKey::SettingsMarkdownThemeDesc => {
             "GitHub 默认跟随应用背景和深浅模式。自定义 v2 主题保留自己的背景，修改后自动加载。"

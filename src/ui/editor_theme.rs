@@ -24,10 +24,9 @@ fn palettes() -> &'static Palettes {
             "../../assets/editor-themes/atom-one-dark.json"
         ))
         .expect("bundled Atom One Dark palette");
-        let light: CodeEditorStyle = serde_json::from_str(include_str!(
-            "../../assets/editor-themes/atom-one-light.json"
-        ))
-        .expect("bundled Atom One Light palette");
+        let light: CodeEditorStyle =
+            serde_json::from_str(include_str!("../../assets/editor-themes/github-light.json"))
+                .expect("bundled GitHub Light palette");
         Palettes {
             dark: Arc::new(dark),
             light: Arc::new(light),
@@ -39,7 +38,7 @@ pub(crate) fn resolved_name(cx: &App) -> &'static str {
     if cx.theme().mode == ThemeMode::Dark {
         "Atom One Dark"
     } else {
-        "Atom One Light"
+        "GitHub Light"
     }
 }
 
@@ -118,7 +117,17 @@ pub(crate) fn language(language: &'static str) -> &'static str {
                 let end = query.find("; Function definitions").expect("Python definitions section");
                 format!("{}\n{}\n{}{}", &query[start..end], extra_highlights(name), &query[..start], &query[end..])
             } else if name == "rust" {
-                format!("{}\n{}\n{}", include_str!("../../assets/editor-themes/rust-imports.scm"), query, extra_highlights(name))
+                // Exact subroles retain their parent style in One Dark while
+                // GitHub Light distinguishes references, fields and variants.
+                let query = query
+                    .replace("@constructor", "@constructor.variant")
+                    // Macro token trees are re-parsed by the Rust injection;
+                    // a broad outer capture would mask its called constructor.
+                    .replace("((identifier) @constructor.variant", "([(_expression/identifier) (_pattern/identifier)] @constructor.variant")
+                    .replace("@property", "@property.rust")
+                    .replace("\"&\" @operator", "\"&\" @operator.reference");
+                let variables = extra_highlights(name).replace("@variable", "@variable.rust");
+                format!("{}\n{}\n{}\n{}", include_str!("../../assets/editor-themes/rust-imports.scm"), include_str!("../../assets/editor-themes/rust-calls.scm"), query, variables)
             } else {
                 format!("{}\n{}", extra_highlights(name), query)
             };

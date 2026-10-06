@@ -8546,10 +8546,7 @@ mod gpui_tests {
         });
         vcx.simulate_resize(size(px(1100.), px(800.)));
         vcx.run_until_parked();
-        for (preset, expected) in [
-            ("one_dark_pro", "Atom One Dark"),
-            ("light", "Atom One Light"),
-        ] {
+        for (preset, expected) in [("one_dark_pro", "Atom One Dark"), ("light", "GitHub Light")] {
             app.update_in(&mut vcx, |app, window, cx| {
                 app.set_preset(preset, window, cx)
             });

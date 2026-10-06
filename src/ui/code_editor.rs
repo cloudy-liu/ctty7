@@ -1435,10 +1435,7 @@ impl Tty7App {
             .border_color(cx.theme().border)
             .text_xs()
             .text_color(muted)
-            .when_some(path_text, |this, t| {
-                this.child(div().min_w_0().text_ellipsis().child(t))
-            })
-            .child(div().flex_1())
+            .child(div().flex_1().min_w_0().truncate().children(path_text))
             .when(is_markdown, |this| {
                 this.child(
                     Button::new("status-md-preview")
@@ -1479,7 +1476,9 @@ impl Tty7App {
                         })),
                 )
             })
-            .when_some(cursor, |this, t| this.child(div().child(t)))
+            .when_some(cursor, |this, t| {
+                this.child(div().flex_none().whitespace_nowrap().child(t))
+            })
     }
 
     fn render_editor_empty(&self, cx: &Context<Self>) -> gpui::Div {
@@ -1602,6 +1601,34 @@ mod tests {
         (app, vcx)
     }
 
+    #[gpui::test]
+    fn editor_palette_dismiss_restores_source_and_reading_focus(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/focus.md".into(),
+                "# Focus\n".into(),
+                None,
+                window,
+                cx,
+            );
+        });
+        for _ in 0..2 {
+            app.update_in(&mut vcx, |app, window, cx| {
+                assert!(app.editor_has_focus(window, cx));
+                app.open_palette("theme", window, cx);
+                assert!(!app.editor_has_focus(window, cx));
+                app.close_palette(window, cx);
+                assert!(
+                    app.editor_has_focus(window, cx),
+                    "closing the palette must return the keyboard to the document"
+                );
+                app.editor_toggle_preview(window, cx);
+            });
+        }
+    }
+
     fn wait_for_markdown(
         vcx: &mut VisualTestContext,
         mut ready: impl FnMut(&mut VisualTestContext) -> bool,
@@ -1628,10 +1655,10 @@ mod tests {
         use crate::ui::editor_theme;
         use gpui_component::highlighter::SyntaxHighlighter;
         let (app, mut vcx) = markdown_window(cx);
-        let source = "use std::borrow::Cow;\nmod core;\nfn make(cx: &mut App) {\n    let fonts = \"a\\n\";\n    let file: std::path::PathBuf;\n    cx.add_fonts(fonts);\n    let outer = LIMIT;\n    wrap! { let inner = load_fonts(); let count = OTHER_LIMIT; let maybe = Some(inner); }\n}\n";
+        let source = "use std::borrow::Cow;\nmod core;\nfn make(cx: &mut App) {\n    let fonts = \"a\\n\";\n    let file: std::path::PathBuf;\n    cx.add_fonts(fonts);\n    let outer = LIMIT;\n    let generic = Some::<u8>(1);\n    let qualified = Option::Some::<u16>(1);\n    wrap! { let inner = load_fonts(); let count = OTHER_LIMIT; let maybe = Some(inner); }\n}\n";
         for (preference, variable, keyword, function, ty, foreground) in [
             ("dark", 0xe06c75, 0xc678dd, 0x61afef, 0x56b6c2, 0xabb2bf),
-            ("light", 0xe45649, 0xa626a4, 0x4078f2, 0x0184bc, 0x383a42),
+            ("light", 0x1f2328, 0xcf222e, 0x6639ba, 0x1f2328, 0x1f2328),
         ] {
             app.update_in(&mut vcx, |app, window, cx| {
                 app.set_theme_follow_system(false, window, cx);
@@ -1656,7 +1683,7 @@ mod tests {
                         if preference == "dark" {
                             0xd19a66
                         } else {
-                            0x986801
+                            0x0550ae
                         },
                     ),
                     (
@@ -1664,11 +1691,13 @@ mod tests {
                         if preference == "dark" {
                             0xd19a66
                         } else {
-                            0x986801
+                            0x0550ae
                         },
                     ),
-                    ("Some", function),
-                    ("\\n", ty),
+                    ("Some::<u8>", function),
+                    ("Some::<u16>", function),
+                    ("Some(inner)", function),
+                    ("\\n", if preference == "dark" { ty } else { 0x0550ae }),
                 ] {
                     let offset = source.find(token).unwrap();
                     let color = runs
@@ -1687,12 +1716,12 @@ mod tests {
     }
 
     #[gpui::test]
-    fn editor_theme_python_variables_match_atom_one_foreground(cx: &mut TestAppContext) {
+    fn editor_theme_python_variables_match_the_palette_foreground(cx: &mut TestAppContext) {
         use crate::ui::editor_theme;
         use gpui_component::highlighter::SyntaxHighlighter;
         let (app, mut vcx) = markdown_window(cx);
         let source = "import json\nDEST = Path(__file__).parent\nroot = Path(\"icons\")\nversion = json.loads(root.read_text())\n";
-        for (preference, foreground) in [("dark", 0xabb2bf), ("light", 0x383a42)] {
+        for (preference, foreground) in [("dark", 0xabb2bf), ("light", 0x1f2328)] {
             app.update_in(&mut vcx, |app, window, cx| {
                 app.set_theme_follow_system(false, window, cx);
                 app.set_preset(preference, window, cx);
@@ -1737,7 +1766,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn editor_theme_matches_upstream_textmate_color_samples(cx: &mut TestAppContext) {
+    fn editor_theme_matches_authored_color_samples(cx: &mut TestAppContext) {
         use crate::ui::editor_theme;
         use gpui_component::highlighter::SyntaxHighlighter;
         #[derive(serde::Deserialize)]
@@ -1754,10 +1783,22 @@ mod tests {
             source: String,
             tokens: Vec<Token>,
         }
-        let samples: Vec<Sample> = serde_json::from_str(include_str!(
+        let mut samples: Vec<Sample> = serde_json::from_str(include_str!(
             "../../assets/editor-themes/tests/textmate-colors.json"
         ))
         .unwrap();
+        samples.extend(
+            serde_json::from_str::<Vec<Sample>>(include_str!(
+                "../../assets/editor-themes/tests/github-light-colors.json"
+            ))
+            .unwrap(),
+        );
+        samples.extend(
+            serde_json::from_str::<Vec<Sample>>(include_str!(
+                "../../assets/editor-themes/tests/github-website-colors.json"
+            ))
+            .unwrap(),
+        );
         let (app, mut vcx) = markdown_window(cx);
         let mut failures = Vec::new();
         for sample in samples {
@@ -1779,6 +1820,13 @@ mod tests {
                 highlighter.update(None, &sample.source.as_str().into(), None);
                 let runs = highlighter.styles(&(0..sample.source.len()), &style.highlight_theme);
                 for token in &sample.tokens {
+                    assert_eq!(
+                        &sample.source[token.start..token.end],
+                        token.text,
+                        "{} {}: reference token range",
+                        sample.mode,
+                        language
+                    );
                     let expected =
                         u32::from_str_radix(token.color.trim_start_matches('#'), 16).unwrap();
                     for offset in token.start..token.end {
@@ -1848,7 +1896,7 @@ mod tests {
             ),
             (
                 "light",
-                include_str!("../../assets/editor-themes/upstream/OneLight.json"),
+                include_str!("../../assets/editor-themes/upstream/GitHubLight.json"),
             ),
         ] {
             let source: serde_json::Value = serde_json::from_str(source).unwrap();
@@ -1857,36 +1905,69 @@ mod tests {
                 app.set_preset(preference, window, cx);
                 let style = crate::ui::editor_theme::current(cx);
                 let colors = &style.highlight_theme.style;
-                for (actual, key) in [
-                    (colors.editor_background.unwrap(), "editor.background"),
-                    (colors.editor_foreground.unwrap(), "editor.foreground"),
+                for (actual, key, github_key) in [
+                    (
+                        colors.editor_background.unwrap(),
+                        "editor.background",
+                        "codeMirror-bgColor",
+                    ),
+                    (
+                        colors.editor_foreground.unwrap(),
+                        "editor.foreground",
+                        "codeMirror-fgColor",
+                    ),
                     (
                         colors.editor_gutter_background.unwrap(),
                         "editor.background",
+                        "codeMirror-gutters-bgColor",
                     ),
                     (
                         colors.editor_active_line.unwrap(),
                         "editor.lineHighlightBackground",
+                        "codeMirror-activeline-bgColor",
                     ),
                     (
                         colors.editor_line_number.unwrap(),
                         "editorLineNumber.foreground",
+                        "codeMirror-lineNumber-fgColor",
                     ),
                     (
                         colors.editor_active_line_number.unwrap(),
                         "editorLineNumber.activeForeground",
+                        "codeMirror-fgColor",
                     ),
                     (
                         colors.editor_invisible.unwrap(),
                         "editorWhitespace.foreground",
+                        "borderColor-default",
                     ),
-                    (style.selection, "editor.selectionBackground"),
-                    (style.caret, "editorCursor.foreground"),
-                    (style.muted_foreground, "editorLineNumber.foreground"),
-                    (style.border, "editorIndentGuide.background"),
+                    (
+                        style.selection,
+                        "editor.selectionBackground",
+                        "selection-bgColor",
+                    ),
+                    (
+                        style.caret,
+                        "editorCursor.foreground",
+                        "codeMirror-cursor-fgColor",
+                    ),
+                    (
+                        style.muted_foreground,
+                        "editorLineNumber.foreground",
+                        "fgColor-muted",
+                    ),
+                    (
+                        style.border,
+                        "editorIndentGuide.background",
+                        "borderColor-default",
+                    ),
                 ] {
-                    let expected: gpui::Hsla =
-                        serde_json::from_value(source["colors"][key].clone()).unwrap();
+                    let value = if preference == "dark" {
+                        &source["colors"][key]
+                    } else {
+                        &source["tokens"][github_key]
+                    };
+                    let expected: gpui::Hsla = serde_json::from_value(value.clone()).unwrap();
                     assert_eq!(actual, expected, "{preference}: {key}");
                 }
             });
@@ -1901,18 +1982,18 @@ mod tests {
                 "dark", 0xabb2bf, 0xd19a66, 0x56b6c2, 0xe06c75, 0x98c379, 0x61afef,
             ),
             (
-                "light", 0x383a42, 0x986801, 0x0184bc, 0xe45649, 0x50a14f, 0x4078f2,
+                "light", 0x1f2328, 0x0550ae, 0x0550ae, 0x953800, 0x0a3069, 0x6639ba,
             ),
         ] {
             app.update_in(&mut vcx, |app, window, cx| {
                 app.set_theme_follow_system(false, window, cx);
                 app.set_preset(preference, window, cx);
                 for (language, source, tokens) in [
-                    ("html", "<script>let root = obj.parent + 2;</script>", vec![("root", foreground), ("=", cyan), ("parent", red), ("2", orange)]),
-                    ("tsx", "const root: string = obj.parent + 2; const view = <div id=\"main\">{root}</div>;", vec![("root", orange), ("string", cyan), ("parent", red), ("div", red), ("id", orange), ("main", green)]),
-                    ("javascript", "const view = <div id=\"main\">{item}</div>;", vec![("div", red), ("id", orange), ("main", green), ("item", foreground)]),
-                    ("markdown", "```rust\nstruct Widget;\n```\n", vec![("Widget", cyan)]),
-                    ("python", "from pathlib import Path\nDEST = Path(__file__).parent\n", vec![("Path", foreground), ("Path(__file__)", blue), ("__file__", red), ("parent", foreground)]),
+                    ("html", "<script>let root = obj.parent + 2;</script>", vec![("root", foreground), ("=", if preference == "dark" { cyan } else { 0xcf222e }), ("parent", red), ("2", orange)]),
+                    ("tsx", "const root: string = obj.parent + 2; const view = <div id=\"main\">{root}</div>;", vec![("root", orange), ("string", cyan), ("parent", red), ("div", if preference == "dark" { red } else { 0x0550ae }), ("id", orange), ("main", green)]),
+                    ("javascript", "const view = <div id=\"main\">{item}</div>;", vec![("div", if preference == "dark" { red } else { 0x0550ae }), ("id", orange), ("main", green), ("item", foreground)]),
+                    ("markdown", "```rust\nstruct Widget;\n```\n", vec![("Widget", if preference == "dark" { cyan } else { foreground })]),
+                    ("python", "from pathlib import Path\nDEST = Path(__file__).parent\n", vec![("Path", foreground), ("Path(__file__)", blue), ("__file__", if preference == "dark" { red } else { 0x0550ae }), ("parent", foreground)]),
                 ] {
                     let style = crate::ui::editor_theme::current(cx);
                     let mut highlighter = gpui_component::highlighter::SyntaxHighlighter::new(crate::ui::editor_theme::language(language));
@@ -1941,7 +2022,7 @@ mod tests {
         );
         for (preference, keyword, function, string, number) in [
             ("dark", 0xc678dd, 0x61afef, 0x98c379, 0xd19a66),
-            ("light", 0xa626a4, 0x4078f2, 0x50a14f, 0x986801),
+            ("light", 0xcf222e, 0x6639ba, 0x0a3069, 0x0550ae),
         ] {
             app.update_in(&mut vcx, |app, window, cx| {
                 app.set_theme_follow_system(false, window, cx);
@@ -2047,15 +2128,15 @@ mod tests {
         assert!(!selected.is_empty());
         assert!(scroll.y < px(0.));
         for (legacy, preset, background) in [
-            ("auto", "light", 0xfafafa),
+            ("auto", "light", 0xffffff),
             ("auto", "dark", 0x282c34),
-            ("atom_one_dark", "light", 0xfafafa),
+            ("atom_one_dark", "light", 0xffffff),
             ("atom_one_light", "dark", 0x282c34),
-            ("one_dark_pro", "light", 0xfafafa),
+            ("one_dark_pro", "light", 0xffffff),
             ("one_dark_pro", "one_dark_pro", 0x282c34),
             ("future-theme", "dracula", 0x282c34),
             ("auto", "nord", 0x282c34),
-            ("atom_one_dark", "custom-dark-name", 0xfafafa),
+            ("atom_one_dark", "custom-dark-name", 0xffffff),
             ("atom_one_light", "custom-light-name", 0x282c34),
         ] {
             app.update_in(&mut vcx, |app, window, cx| {
@@ -2127,13 +2208,13 @@ mod tests {
             app.set_preset("one_dark_pro", window, cx);
             assert_eq!(editor_theme::resolved_name(cx), "Atom One Dark");
             app.preview_preset("light", window, cx);
-            assert_eq!(editor_theme::resolved_name(cx), "Atom One Light");
+            assert_eq!(editor_theme::resolved_name(cx), "GitHub Light");
             app.cancel_preset_preview(window, cx);
             assert_eq!(editor_theme::resolved_name(cx), "Atom One Dark");
             app.set_preset("dracula", window, cx);
             assert_eq!(editor_theme::resolved_name(cx), "Atom One Dark");
             app.set_preset("light", window, cx);
-            assert_eq!(editor_theme::resolved_name(cx), "Atom One Light");
+            assert_eq!(editor_theme::resolved_name(cx), "GitHub Light");
             assert_eq!(cx.global::<Config>().editor_font_size, 16.);
             assert_eq!(cx.global::<Config>().editor_line_height, 1.8);
             assert_eq!(editor_theme::font_family(cx).as_ref(), "Hack");
@@ -2200,11 +2281,11 @@ mod tests {
                     .highlight_theme
                     .style
                     .editor_background,
-                Some(gpui::rgb(0xfafafa).into())
+                Some(gpui::rgb(0xffffff).into())
             );
         });
         vcx.update(|_, cx| {
-            for (preset, background) in [("one_dark_pro", 0x282c34), ("light", 0xfafafa)] {
+            for (preset, background) in [("one_dark_pro", 0x282c34), ("light", 0xffffff)] {
                 let mut saved = serde_json::to_value(&cx.global::<Config>().0).unwrap();
                 saved["editor_theme"] = serde_json::json!("atom_one_dark");
                 saved["theme_preset"] = serde_json::json!(preset);

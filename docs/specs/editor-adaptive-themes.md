@@ -1,5 +1,8 @@
 # Adaptive Atom One source editor appearance
 
+Historical record: the light-palette choice is superseded by
+[GitHub Light source editor appearance](editor-github-light.md).
+
 Published spec: [cloudy-liu/ctty7#84](https://github.com/cloudy-liu/ctty7/issues/84).
 Implementation PR: [cloudy-liu/ctty7#86](https://github.com/cloudy-liu/ctty7/pull/86).
 

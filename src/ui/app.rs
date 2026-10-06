@@ -762,6 +762,7 @@ pub struct Tty7App {
     _appearance_watch: Subscription,
     palette: Option<Entity<PaletteView>>,
     palette_sub: Option<Subscription>,
+    palette_return_focus: Option<gpui::FocusHandle>,
     /// Preset that was live when the palette's theme picker started previewing.
     /// `Some` means the theme on screen is a preview that was never written to
     /// disk, and closing the palette without confirming puts this one back.
@@ -1387,6 +1388,7 @@ impl Tty7App {
             _appearance_watch: appearance_watch,
             palette: None,
             palette_sub: None,
+            palette_return_focus: None,
             theme_preview_restore: None,
             closed: Vec::new(),
             renaming: None,
@@ -4975,6 +4977,9 @@ impl Tty7App {
         cx: &mut Context<Self>,
     ) {
         let commands = self.palette_commands(window, cx);
+        if self.palette.is_none() {
+            self.palette_return_focus = window.focused(cx);
+        }
         let view = cx.new(|cx| PaletteView::seeded(commands, query, window, cx));
         self.palette_sub = Some(cx.subscribe_in(&view, window, Self::on_palette_event));
         self.palette = Some(view);
@@ -5015,7 +5020,11 @@ impl Tty7App {
         // A previewed theme was never persisted: closing the palette any way
         // other than confirming the pick puts the old one back.
         self.cancel_preset_preview(window, cx);
-        self.focus_active(window, cx);
+        if let Some(focus) = self.palette_return_focus.take() {
+            window.focus(&focus, cx);
+        } else {
+            self.focus_active(window, cx);
+        }
         cx.notify();
     }
 

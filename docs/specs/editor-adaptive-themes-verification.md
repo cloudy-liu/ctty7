@@ -1,5 +1,8 @@
 # Source editor appearance verification
 
+Historical record: the light-palette choice is superseded by
+[GitHub Light source editor appearance](editor-github-light.md).
+
 Spec: [cloudy-liu/ctty7#84](https://github.com/cloudy-liu/ctty7/issues/84).
 PR: [cloudy-liu/ctty7#86](https://github.com/cloudy-liu/ctty7/pull/86).
 Verification date: 2026-10-04 on Windows.
