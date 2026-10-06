@@ -270,7 +270,7 @@ impl FileTreeState {
             repo_roots: ByHost::default(),
             repo_root_loads: InFlight::default(),
             search: SearchState::default(),
-            show_hidden: false,
+            show_hidden: true,
             editing: None,
             editing_subs: Vec::new(),
             watch: None,
@@ -2602,6 +2602,7 @@ mod tests {
     fn hidden_nested_root_reopens_for_creation_and_reveal(cx: &mut gpui::TestAppContext) {
         let (app, mut vcx) = tree_app(cx);
         let (nested, file) = app.update_in(&mut vcx, |app, window, cx| {
+            app.file_tree.show_hidden = false;
             let outer = PathBuf::from("/x");
             let nested = outer.join(".nested");
             let file = nested.join("main.rs");
@@ -3607,6 +3608,10 @@ mod render_idle_gpui_tests {
         let root = scratch("hidden");
         std::fs::write(root.join(".hidden"), "").unwrap();
         let (app, mut vcx, _pane) = files_panel_on(cx, &root);
+        app.update_in(&mut vcx, |app, _, cx| {
+            app.file_tree.show_hidden = false;
+            cx.notify();
+        });
         assert_eq!(rows(&app, &mut vcx), 1, "the dotfile is filtered out");
         assert_eq!(draws_while_idle(&mut vcx), 0);
         let _ = std::fs::remove_dir_all(&root);
