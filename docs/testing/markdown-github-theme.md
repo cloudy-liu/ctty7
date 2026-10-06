@@ -317,10 +317,11 @@ the new native font test also passed when run explicitly. An initial run
 missed Git's `usr/bin` in PATH and four child-process tests could not find
 `cat`/`sleep`; the complete rerun with those test dependencies passed.
 
-The component workspace passed 300 tests, with 2 documentation tests ignored.
+The component workspace passed 301 tests, with 2 documentation tests ignored.
 Combined local main passed 2,960 tests plus 13 CLI end-to-end cases, with
-7 ignored. The isolated PR branch passed 2,947 tests plus the same 13 CLI
-end-to-end cases, with 7 ignored, and built the native GUI successfully.
+8 ignored. The isolated PR branch passed 2,947 tests plus the same 13 CLI
+end-to-end cases, with 8 ignored. The native CJK test passed explicitly on
+Windows, and the rebuilt combined application supplied the final screenshots.
 Formatting of touched component files, application formatting and the
 host-boundary checks passed. The PR remains a draft for the outstanding
 platform/DPI matrix and complete browser parity.
