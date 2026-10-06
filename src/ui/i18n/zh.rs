@@ -179,15 +179,29 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
             "代码 编辑器 编辑区 源码 语法 高亮 配色 深色 浅色 主题 atom one dark light"
         }
         L10nKey::SettingsMarkdownThemeDesc => {
-            "选择阅读样式，深浅配色自动跟随应用。修改主题文件后自动生效。"
+            "GitHub 默认跟随应用背景和深浅模式。自定义 v2 主题保留自己的背景，修改后自动加载。"
         }
         L10nKey::SettingsMarkdownThemeUnavailable => {
             "无法加载 {requested}，当前使用 {active}。修复主题文件后会自动恢复。"
         }
         L10nKey::SettingsMarkdownThemeBuiltin => "内置",
         L10nKey::SettingsMarkdownThemeUser => "自定义",
+        L10nKey::SettingsMarkdownGithub => "GitHub",
+        L10nKey::SettingsMarkdownGithubDesc => {
+            "GitHub 的 Markdown 配色与排版，浅色和深色变体随应用模式切换。"
+        }
+        L10nKey::SettingsMarkdownV1Upgrade => {
+            "此主题使用 v1。请升级到 v2，未填写的样式将采用 GitHub 默认值。原文件未被修改。"
+        }
+        L10nKey::SettingsMarkdownMigrationSaveFailed => {
+            "已使用 GitHub，但未能将磁盘上的 Paperglow 选择更新为 GitHub。请检查配置目录是否可写。"
+        }
+        L10nKey::SettingsMarkdownUseGithub => "使用 GitHub",
         L10nKey::EditorCopyCode => "复制代码",
         L10nKey::MarkdownAnchorMissing => "未找到该标题",
+        L10nKey::MarkdownExpandDiagram => "展开图表",
+        L10nKey::MarkdownZoomIn => "放大",
+        L10nKey::MarkdownZoomOut => "缩小",
         L10nKey::ThemeDuplicateFailed => "无法复制主题",
         L10nKey::ThemeSaveFailed => "无法保存主题",
         L10nKey::OpenInFileManagerFailed => "无法打开 {path}",

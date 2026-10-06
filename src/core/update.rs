@@ -13,6 +13,7 @@ use tty7_core::daemon::install::AssetFetcher as _;
 use tty7_core::daemon::install::asset::{CHECKSUMS_ASSET, download_url};
 
 use crate::core::config::Config;
+use crate::core::http::build_http_client;
 use crate::ui::i18n::{L10nKey, t, t_fmt};
 
 pub const RELEASES_URL: &str = "https://github.com/cloudy-liu/ctty7/releases/latest";
@@ -1725,20 +1726,6 @@ fn published_gui_assets(tag: &str, version: &str) -> Vec<GitHubAsset> {
         name,
     })
     .collect()
-}
-
-fn build_http_client(manual_proxy: Option<&str>) -> Result<ReqwestClient> {
-    let user_agent = concat!("tty7/", env!("CARGO_PKG_VERSION"));
-    // Normalise through the same helper the downloader uses, so a bare
-    // `127.0.0.1:7890` proxies the check as well as the download.
-    if let Some(proxy) = manual_proxy
-        .and_then(tty7_core::daemon::install::proxy::normalize_manual)
-        .and_then(|url| http_client::Url::parse(&url).ok())
-    {
-        ReqwestClient::proxy_and_user_agent(Some(proxy), user_agent).context("building HTTP client")
-    } else {
-        ReqwestClient::user_agent(user_agent).context("building HTTP client")
-    }
 }
 
 fn github_http_error(status: http_client::http::StatusCode, body: &[u8]) -> String {

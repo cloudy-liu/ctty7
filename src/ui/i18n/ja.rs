@@ -203,15 +203,29 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
             "コード エディタ ソース 構文 ハイライト テーマ atom one dark light"
         }
         L10nKey::SettingsMarkdownThemeDesc => {
-            "閲覧スタイルを選択します。明暗はアプリに追従し、テーマファイルの変更は自動的に反映されます。"
+            "GitHub はアプリの背景とライト／ダークモードに従います。カスタム v2 テーマは独自の背景を保ち、変更は自動で反映されます。"
         }
         L10nKey::SettingsMarkdownThemeUnavailable => {
             "{requested} を読み込めません。現在は {active} を使用しています。ファイルを修復すると自動的に復元されます。"
         }
         L10nKey::SettingsMarkdownThemeBuiltin => "組み込み",
         L10nKey::SettingsMarkdownThemeUser => "カスタム",
+        L10nKey::SettingsMarkdownGithub => "GitHub",
+        L10nKey::SettingsMarkdownGithubDesc => {
+            "GitHub の Markdown 配色と組版。ライト／ダークの切り替えはアプリのモードに従います。"
+        }
+        L10nKey::SettingsMarkdownV1Upgrade => {
+            "このテーマは v1 です。v2 に更新すると、省略したスタイルには GitHub の既定値が適用されます。元のファイルは変更されていません。"
+        }
+        L10nKey::SettingsMarkdownMigrationSaveFailed => {
+            "GitHub を使用していますが、保存済みの Paperglow 設定を更新できませんでした。設定フォルダーへの書き込み権限を確認してください。"
+        }
+        L10nKey::SettingsMarkdownUseGithub => "GitHub を使用",
         L10nKey::EditorCopyCode => "コードをコピー",
         L10nKey::MarkdownAnchorMissing => "見出しが見つかりません",
+        L10nKey::MarkdownExpandDiagram => "図を拡大",
+        L10nKey::MarkdownZoomIn => "拡大",
+        L10nKey::MarkdownZoomOut => "縮小",
         L10nKey::ThemeDuplicateFailed => "テーマを複製できませんでした",
         L10nKey::ThemeSaveFailed => "テーマを保存できませんでした",
         L10nKey::OpenInFileManagerFailed => "{path} を開けませんでした",

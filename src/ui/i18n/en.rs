@@ -199,15 +199,29 @@ pub fn translate_en(key: L10nKey) -> &'static str {
             "code editor source syntax highlighting atom one dark light theme"
         }
         L10nKey::SettingsMarkdownThemeDesc => {
-            "Choose a reading style. Its light and dark colors follow the app. Theme file changes apply automatically."
+            "GitHub follows the app background and light/dark mode. Custom v2 themes keep their own backgrounds and reload automatically."
         }
         L10nKey::SettingsMarkdownThemeUnavailable => {
             "Could not load {requested}. Currently using {active}. The selected theme will return when its file is repaired."
         }
         L10nKey::SettingsMarkdownThemeBuiltin => "Built-in",
         L10nKey::SettingsMarkdownThemeUser => "Custom",
+        L10nKey::SettingsMarkdownGithub => "GitHub",
+        L10nKey::SettingsMarkdownGithubDesc => {
+            "GitHub's Markdown colors and typography, with light and dark variants that follow the app mode."
+        }
+        L10nKey::SettingsMarkdownV1Upgrade => {
+            "This theme uses v1. Upgrade to v2; omitted styles will use GitHub defaults. The original file has not been changed."
+        }
+        L10nKey::SettingsMarkdownMigrationSaveFailed => {
+            "GitHub is active, but the previous Paperglow selection could not be updated on disk. Check that your configuration folder is writable."
+        }
+        L10nKey::SettingsMarkdownUseGithub => "Use GitHub",
         L10nKey::EditorCopyCode => "Copy code",
         L10nKey::MarkdownAnchorMissing => "heading not found",
+        L10nKey::MarkdownExpandDiagram => "Expand diagram",
+        L10nKey::MarkdownZoomIn => "Zoom in",
+        L10nKey::MarkdownZoomOut => "Zoom out",
         L10nKey::ThemeDuplicateFailed => "Could not duplicate the theme",
         L10nKey::ThemeSaveFailed => "Could not save the theme",
         L10nKey::OpenInFileManagerFailed => "Could not open {path}",

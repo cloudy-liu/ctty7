@@ -1800,7 +1800,6 @@ mod aggregate_tests {
 #[cfg(test)]
 mod pool_tests {
     use super::*;
-    use std::sync::atomic::AtomicBool;
     use std::time::Instant;
 
     #[test]
@@ -1885,28 +1884,37 @@ mod pool_tests {
     fn closing_the_pool_drops_queued_work() {
         let pool = Pool::new();
         let gate = Arc::new((Mutex::new(false), Condvar::new()));
-        let ran = Arc::new(AtomicBool::new(false));
-
-        let blocker = Arc::clone(&gate);
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        // Occupy every worker before submitting the job under test. Blocking
+        // just one worker lets submit spawn another and run it before close.
+        for _ in 0..MAX_WORKERS {
+            let blocker = Arc::clone(&gate);
+            let ready = ready_tx.clone();
+            assert!(pool.submit(move || {
+                let (lock, cv) = &*blocker;
+                let mut open = lock.lock().unwrap();
+                ready.send(()).unwrap();
+                while !*open {
+                    open = cv.wait(open).unwrap();
+                }
+            }));
+        }
+        for _ in 0..MAX_WORKERS {
+            ready_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+        let (ran_tx, ran_rx) = std::sync::mpsc::channel();
         assert!(pool.submit(move || {
-            let (lock, cv) = &*blocker;
-            let mut open = lock.lock().unwrap();
-            while !*open {
-                open = cv.wait(open).unwrap();
-            }
+            let _ = ran_tx.send(());
         }));
-        std::thread::sleep(Duration::from_millis(100));
-        let ran2 = Arc::clone(&ran);
-        pool.submit(move || ran2.store(true, Ordering::SeqCst));
 
         pool.close();
         let (lock, cv) = &*gate;
         *lock.lock().unwrap() = true;
         cv.notify_all();
-        std::thread::sleep(Duration::from_millis(200));
-        assert!(
-            !ran.load(Ordering::SeqCst),
-            "a job queued at close still ran"
+        assert_eq!(
+            ran_rx.recv_timeout(Duration::from_secs(5)),
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected),
+            "closing must drop the queued job without running it"
         );
         assert!(!pool.submit(|| {}), "a closed pool must refuse work");
     }

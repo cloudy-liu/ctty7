@@ -1,6 +1,10 @@
 //! Local reading-theme packages. Document hosts never participate in loading
 //! application configuration, including when the document itself is remote.
 
+#[cfg(test)]
+#[path = "markdown_github_tests.rs"]
+mod github_tests;
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::io::Read as _;
 use std::path::{Path, PathBuf};
@@ -9,9 +13,10 @@ use std::sync::{Arc, OnceLock};
 use serde::{Deserialize, Deserializer};
 use serde_yaml::Value;
 
-pub const DEFAULT_ID: &str = "paperglow";
+pub const DEFAULT_ID: &str = "github";
 pub const DIRECTORY: &str = "markdown-themes";
-pub const PAPERGLOW: &str = include_str!("../../assets/markdown-themes/paperglow.yaml");
+pub const GITHUB: &str = include_str!("../../assets/markdown-themes/github.yaml");
+pub const V1_UPGRADE_REQUIRED: &str = "This theme uses schema_version 1. Upgrade to v2; omitted styles will use GitHub defaults. The original file has not been changed.";
 const MAX_THEME_BYTES: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -62,9 +67,19 @@ fn parse_color(value: &str) -> Result<Color, String> {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Typography {
+    pub resolve_font_stack: bool,
+    pub bold_weight: f32,
+    pub heading_bottom_gap: Option<f32>,
+    pub heading_padding: Option<[f32; 6]>,
+    pub heading_borders: [bool; 6],
+    pub code_line_height: Option<f32>,
+    pub inline_code_size: Option<f32>,
+    pub kbd_size: Option<f32>,
+    #[serde(deserialize_with = "font_stack")]
     pub fonts: Vec<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "font_stack")]
     pub heading_fonts: Vec<String>,
+    #[serde(deserialize_with = "font_stack")]
     pub code_fonts: Vec<String>,
     pub font_size: f32,
     pub code_size: f32,
@@ -76,9 +91,42 @@ pub struct Typography {
     pub heading_gap: f32,
 }
 
+fn font_stack<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Vec<String>, D::Error> {
+    // serde_yaml accepts null as an empty sequence; v2 distinguishes an
+    // explicit empty fallback list from an invalid null field.
+    Option::<Vec<String>>::deserialize(deserializer)?
+        .ok_or_else(|| serde::de::Error::custom("expected a font list, not null"))
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Layout {
+    pub paper_border_width: f32,
+    pub code_border_width: f32,
+    pub inline_code_radius: Option<f32>,
+    pub inline_code_padding_x: f32,
+    pub inline_code_padding_y: f32,
+    /// Heading code padding in multiples of the heading font size.
+    pub heading_code_padding_x_em: Option<f32>,
+    pub heading_code_padding_y_em: Option<f32>,
+    pub kbd_padding: f32,
+    pub kbd_radius: f32,
+    pub kbd_line_height: f32,
+    pub table_radius: Option<f32>,
+    pub table_gap: Option<f32>,
+    pub table_fill: bool,
+    pub table_padding_x: Option<f32>,
+    pub table_padding_y: Option<f32>,
+    pub rule_height: f32,
+    pub rule_gap: Option<f32>,
+    pub link_underline: LinkUnderline,
+    pub roman_ordered_lists: bool,
+    pub list_indent: Option<f32>,
+    pub list_paragraph_gap: Option<f32>,
+    pub alert_padding_y: Option<f32>,
+    pub alert_padding_x: Option<f32>,
+    pub alert_title_weight: f32,
+    pub alert_title_line_height: Option<f32>,
     pub max_width: f32,
     pub compact_below: f32,
     pub outer_padding: f32,
@@ -90,15 +138,50 @@ pub struct Layout {
     pub code_padding: f32,
     pub code_radius: f32,
     pub quote_padding: f32,
+    pub quote_padding_y: Option<f32>,
     pub quote_border: f32,
     pub quote_radius: f32,
     pub table_padding: f32,
     pub list_gap: f32,
 }
 
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
+pub enum LinkUnderline {
+    Always,
+    Hover,
+    Never,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct DiffStyle {
+    pub foreground: Color,
+    pub background: Option<Color>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct AlertPalette {
+    pub border: Color,
+    pub title: Color,
+    pub icon: String,
+}
+
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Syntax {
+    pub constant: Option<Color>,
+    pub entity: Option<Color>,
+    pub tag_name: Option<Color>,
+    pub escape: Option<Color>,
+    pub markup_heading: Option<Color>,
+    pub markup_list: Option<Color>,
+    pub link_uri: Option<Color>,
+    pub diff_added: Option<DiffStyle>,
+    pub diff_deleted: Option<DiffStyle>,
+    pub diff_changed: Option<DiffStyle>,
+    pub diff_hunk: Option<Color>,
     pub keyword: Color,
     pub number: Color,
     pub function: Color,
@@ -113,6 +196,16 @@ pub struct Syntax {
 #[derive(Debug, Clone, Deserialize, PartialEq)]
 #[serde(deny_unknown_fields)]
 pub struct Palette {
+    pub heading_colors: Option<[Color; 6]>,
+    pub heading_border: Option<Color>,
+    pub rule: Option<Color>,
+    pub inline_code_border: Option<Color>,
+    pub kbd_background: Option<Color>,
+    pub kbd_border: Option<Color>,
+    pub kbd_shadow: Option<Color>,
+    pub table_stripe: Option<Color>,
+    pub table_row_border: Option<Color>,
+    pub alerts: Option<[AlertPalette; 5]>,
     pub background: Color,
     pub paper: Color,
     pub paper_border: Color,
@@ -139,10 +232,10 @@ pub struct Palette {
     pub nested_quote_background: Color,
     pub nested_quote_border: Color,
     pub alert_background: Color,
-    pub alert_foreground: Color,
+    pub alert_foreground: Option<Color>,
     pub alert_border: Color,
     pub table_code_background: Color,
-    pub table_hover: Color,
+    pub table_hover: Option<Color>,
     pub syntax: Syntax,
 }
 
@@ -177,9 +270,9 @@ impl Theme {
     }
 
     fn validate(&self) -> Result<(), String> {
-        if self.schema_version != 1 {
+        if self.schema_version != 2 {
             return Err(format!(
-                "unsupported schema_version {}; expected 1",
+                "unsupported schema_version {}; expected 2",
                 self.schema_version
             ));
         }
@@ -203,6 +296,7 @@ impl Theme {
             ("typography.heading_line_height", t.heading_line_height),
             ("layout.max_width", l.max_width),
             ("layout.compact_below", l.compact_below),
+            ("layout.kbd_line_height", l.kbd_line_height),
         ] {
             if !value.is_finite() || value <= 0. {
                 return Err(format!("{key} must be a finite positive number"));
@@ -212,6 +306,55 @@ impl Theme {
             if !value.is_finite() || value <= 0. {
                 return Err("typography.heading_sizes must contain six positive numbers".into());
             }
+        }
+        for (key, value) in [
+            ("typography.bold_weight", t.bold_weight),
+            ("layout.alert_title_weight", l.alert_title_weight),
+        ] {
+            if !value.is_finite() || !(100. ..=900.).contains(&value) {
+                return Err(format!("{key} must be in 100..900"));
+            }
+        }
+        for (key, value) in [
+            ("typography.code_line_height", t.code_line_height),
+            ("typography.inline_code_size", t.inline_code_size),
+            ("typography.kbd_size", t.kbd_size),
+            ("layout.alert_title_line_height", l.alert_title_line_height),
+        ] {
+            if value.is_some_and(|v| !v.is_finite() || v <= 0.) {
+                return Err(format!("{key} must be a finite positive number"));
+            }
+        }
+        for (key, value) in [
+            ("typography.heading_bottom_gap", t.heading_bottom_gap),
+            ("layout.inline_code_radius", l.inline_code_radius),
+            (
+                "layout.heading_code_padding_x_em",
+                l.heading_code_padding_x_em,
+            ),
+            (
+                "layout.heading_code_padding_y_em",
+                l.heading_code_padding_y_em,
+            ),
+            ("layout.table_radius", l.table_radius),
+            ("layout.table_gap", l.table_gap),
+            ("layout.quote_padding_y", l.quote_padding_y),
+            ("layout.table_padding_x", l.table_padding_x),
+            ("layout.table_padding_y", l.table_padding_y),
+            ("layout.rule_gap", l.rule_gap),
+            ("layout.list_indent", l.list_indent),
+            ("layout.list_paragraph_gap", l.list_paragraph_gap),
+            ("layout.alert_padding_x", l.alert_padding_x),
+            ("layout.alert_padding_y", l.alert_padding_y),
+        ] {
+            if value.is_some_and(|v| !v.is_finite() || v < 0.) {
+                return Err(format!("{key} must be a finite nonnegative number"));
+            }
+        }
+        if t.heading_padding
+            .is_some_and(|values| values.into_iter().any(|v| !v.is_finite() || v < 0.))
+        {
+            return Err("typography.heading_padding must contain six nonnegative numbers".into());
         }
         for value in t.heading_weights {
             if !value.is_finite() || !(100. ..=900.).contains(&value) {
@@ -234,6 +377,13 @@ impl Theme {
             ("layout.quote_radius", l.quote_radius),
             ("layout.table_padding", l.table_padding),
             ("layout.list_gap", l.list_gap),
+            ("layout.paper_border_width", l.paper_border_width),
+            ("layout.code_border_width", l.code_border_width),
+            ("layout.inline_code_padding_x", l.inline_code_padding_x),
+            ("layout.inline_code_padding_y", l.inline_code_padding_y),
+            ("layout.kbd_padding", l.kbd_padding),
+            ("layout.kbd_radius", l.kbd_radius),
+            ("layout.rule_height", l.rule_height),
         ] {
             if !value.is_finite() || value < 0. {
                 return Err(format!("{key} must be a finite nonnegative number"));
@@ -261,6 +411,9 @@ fn merge(base: &mut Value, overrides: Value) {
 pub fn parse(text: &str) -> Result<Theme, String> {
     let value: Value = serde_yaml::from_str(text).map_err(|e| e.to_string())?;
     let mapping = value.as_mapping().ok_or("theme must be a YAML mapping")?;
+    if value["schema_version"].as_u64() == Some(1) {
+        return Err(V1_UPGRADE_REQUIRED.into());
+    }
     for key in ["schema_version", "id", "name", "light", "dark"] {
         if !mapping.contains_key(Value::String(key.into())) {
             return Err(format!("missing field {key}"));
@@ -273,7 +426,7 @@ pub fn parse(text: &str) -> Result<Theme, String> {
     }
     static BASE: OnceLock<Value> = OnceLock::new();
     let mut base = BASE
-        .get_or_init(|| serde_yaml::from_str(PAPERGLOW).expect("bundled theme YAML"))
+        .get_or_init(|| serde_yaml::from_str(GITHUB).expect("bundled theme YAML"))
         .clone();
     // Metadata is not inherited from the author of the default palette.
     for key in ["author", "description", "license"] {
@@ -288,7 +441,11 @@ pub fn parse(text: &str) -> Result<Theme, String> {
 pub fn builtin() -> Arc<Theme> {
     static THEME: OnceLock<Arc<Theme>> = OnceLock::new();
     THEME
-        .get_or_init(|| Arc::new(parse(PAPERGLOW).expect("valid bundled Paperglow theme")))
+        .get_or_init(|| {
+            let theme: Theme = serde_yaml::from_str(GITHUB).expect("complete bundled GitHub theme");
+            theme.validate().expect("valid bundled GitHub theme");
+            Arc::new(theme)
+        })
         .clone()
 }
 
@@ -354,8 +511,16 @@ pub fn scan(directory: Option<&Path>) -> Snapshot {
                 return Err("theme exceeds 256 KiB".into());
             }
             let theme = parse(&text)?;
+            if theme.id == "paperglow" {
+                return Err(
+                    "id \"paperglow\" is reserved for legacy configuration migration".into(),
+                );
+            }
             if theme.id == DEFAULT_ID {
-                return Err("id 'paperglow' is reserved for the built-in theme".into());
+                return Err(format!(
+                    "id {:?} is reserved for a built-in theme",
+                    theme.id
+                ));
             }
             Ok(theme)
         })();
@@ -476,24 +641,90 @@ mod tests {
     use super::*;
 
     const CUSTOM: &str =
-        "schema_version: 1\nid: study\nname: Study\nlight:\n  link: '#123456'\ndark: {}\n";
+        "schema_version: 2\nid: study\nname: Study\nlight:\n  link: '#123456'\ndark: {}\n";
 
     #[test]
-    fn markdown_package_fills_both_variants_without_inheriting_authorship() {
+    fn v2_empty_variants_use_the_complete_github_style() {
+        let custom =
+            parse("schema_version: 2\nid: empty\nname: Empty\nlight: {}\ndark: {}\n").unwrap();
+        let github = builtin();
+        assert_eq!(custom.light, github.light);
+        assert_eq!(custom.dark, github.dark);
+        assert_eq!(custom.typography, github.typography);
+        assert_eq!(custom.layout, github.layout);
+        assert!(custom.author.is_empty());
+        assert!(custom.license.is_empty());
+    }
+
+    #[test]
+    fn v1_packages_are_untouched_and_recover_when_the_author_upgrades() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("study.yaml");
+        let legacy = CUSTOM.replace("schema_version: 2", "schema_version: 1");
+        std::fs::write(&path, &legacy).unwrap();
+        let snapshot = scan(Some(dir.path()));
+        assert!(snapshot.themes.is_empty());
+        assert!(snapshot.errors[0].1.contains("Upgrade to v2"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), legacy);
+        let mut registry = Registry::default();
+        registry.replace(snapshot, "study");
+        assert_eq!(registry.entries.len(), 1);
+        assert_eq!(registry.resolve("study").theme.id, "github");
+        std::fs::write(&path, CUSTOM).unwrap();
+        registry.replace(scan(Some(dir.path())), "study");
+        assert_eq!(registry.resolve("study").theme.id, "study");
+        let good = registry.resolve("study").clone();
+        std::fs::write(&path, &legacy).unwrap();
+        registry.replace(scan(Some(dir.path())), "study");
+        assert_eq!(registry.resolve("study").theme, good.theme);
+        assert!(registry.unavailable("study"));
+    }
+
+    #[test]
+    fn github_is_the_only_builtin_and_missing_custom_themes_fall_back() {
+        let config: tty7_core::core::config::Config = serde_json::from_str("{}").unwrap();
+        assert_eq!(config.markdown_theme, "github");
+        let mut registry = Registry::default();
+        assert_eq!(registry.entries.keys().collect::<Vec<_>>(), vec!["github"]);
+        registry.replace(Snapshot::default(), "missing-theme");
+        assert_eq!(registry.resolve("missing-theme").theme.id, "github");
+        assert!(registry.errors.iter().any(|(id, _)| id == "missing-theme"));
+    }
+
+    #[test]
+    fn markdown_package_overrides_only_explicit_fields_without_inheriting_authorship() {
         let theme = parse(CUSTOM).unwrap();
-        assert_eq!(theme.light.link, parse_color("#123456").unwrap());
+        let mut expected = builtin().light.clone();
+        expected.link = parse_color("#123456").unwrap();
+        assert_eq!(theme.light, expected);
         assert_eq!(theme.dark, builtin().dark);
         assert_eq!(theme.typography, builtin().typography);
+        assert_eq!(theme.layout, builtin().layout);
         assert!(theme.author.is_empty());
-        assert_eq!(builtin().light.background, parse_color("#f7f2eb").unwrap());
-        assert_eq!(builtin().dark.background, parse_color("#222120").unwrap());
+    }
+
+    #[test]
+    fn v2_arrays_replace_defaults_and_null_is_an_explicit_override() {
+        let source =
+            format!("{CUSTOM}typography:\n  fonts: [Only]\nlayout:\n  table_radius: null\n");
+        let source = source.replace(
+            "light:\n  link: '#123456'",
+            "light:\n  link: '#123456'\n  table_stripe: null",
+        );
+        let theme = parse(&source).unwrap();
+        assert_eq!(theme.typography.fonts, vec!["Only"]);
+        assert_eq!(theme.typography.code_fonts, builtin().typography.code_fonts);
+        assert_eq!(theme.light.table_stripe, None);
+        assert_eq!(theme.dark.table_stripe, builtin().dark.table_stripe);
+        assert_eq!(theme.layout.table_radius, None);
+        assert!(parse(&source.replace("fonts: [Only]", "fonts: null")).is_err());
     }
 
     #[test]
     fn markdown_package_rejects_invalid_fields_and_values() {
         for (yaml, expected) in [
             (
-                CUSTOM.replace("schema_version: 1", "schema_version: 2"),
+                CUSTOM.replace("schema_version: 2", "schema_version: 3"),
                 "schema_version",
             ),
             (CUSTOM.replace("id: study", "id: Study"), "id"),
@@ -539,7 +770,7 @@ mod tests {
             CUSTOM.replace("id: study", "id: other"),
         )
         .unwrap();
-        std::fs::write(dir.path().join("reserved.yml"), PAPERGLOW).unwrap();
+        std::fs::write(dir.path().join("reserved.yml"), GITHUB).unwrap();
         let snapshot = scan(Some(dir.path()));
         assert_eq!(snapshot.themes.keys().collect::<Vec<_>>(), vec!["other"]);
         assert_eq!(snapshot.errors.len(), 5);
@@ -579,7 +810,7 @@ mod tests {
             registry.resolve("study").theme.light.link,
             parse_color("#654321").unwrap()
         );
-        assert_eq!(registry.resolve("paperglow").theme.id, DEFAULT_ID);
+        assert_eq!(registry.resolve("github").theme.id, "github");
     }
 
     #[test]

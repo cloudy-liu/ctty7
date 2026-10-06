@@ -1,5 +1,7 @@
 # Markdown 默认预览与可配置阅读主题
 
+> 历史记录：主题组成、配置迁移及文件格式已由 [规格 #85](https://github.com/cloudy-liu/ctty7/issues/85) 更新。当前使用唯一内置 GitHub 与 v2 自定义主题，见 [阅读主题文档](../customization/markdown-themes.mdx)。
+
 发布目标：`cloudy-liu/ctty7` 的 GitHub Issues，标签 `ready-for-agent`。
 
 当前阶段：fork PR 评审与验收。用户已批准在独立 worktree 中实施，并在实现后授权提交、推送和创建 fork PR。范围包括默认 Paperglow 配色、用户主题文件、设置选择、动态加载，以及本文列出的 Markdown 和 README 兼容能力。用户已确认 Markdown 预览范围和两处测试入口；验证结果及尚待人工验收的项目记录在 [实现验证记录](../testing/markdown-preview.md)。

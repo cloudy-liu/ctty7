@@ -24,6 +24,24 @@ impl AssetSource for Assets {
 
 fn agent_icon(path: &str) -> Option<&'static [u8]> {
     let bytes: &'static [u8] = match path {
+        "icons/github/info.svg" => include_bytes!("../../assets/icons/github/info.svg"),
+        "icons/github/link.svg" => include_bytes!("../../assets/icons/github/link.svg"),
+        "icons/github/light-bulb.svg" => include_bytes!("../../assets/icons/github/light-bulb.svg"),
+        "icons/github/report.svg" => include_bytes!("../../assets/icons/github/report.svg"),
+        "icons/github/alert.svg" => include_bytes!("../../assets/icons/github/alert.svg"),
+        "icons/github/stop.svg" => include_bytes!("../../assets/icons/github/stop.svg"),
+        "markdown-themes/GITHUB-NOTICE" => {
+            include_bytes!("../../assets/markdown-themes/GITHUB-NOTICE")
+        }
+        "markdown-themes/GITHUB-LICENSE" => {
+            include_bytes!("../../assets/markdown-themes/GITHUB-LICENSE")
+        }
+        "markdown-themes/PRIMER-LICENSE" => {
+            include_bytes!("../../assets/markdown-themes/PRIMER-LICENSE")
+        }
+        "markdown-themes/OCTICONS-LICENSE" => {
+            include_bytes!("../../assets/markdown-themes/OCTICONS-LICENSE")
+        }
         "icons/terminal.svg" => include_bytes!("../../assets/icons/terminal.svg"),
         "icons/git-branch.svg" => include_bytes!("../../assets/icons/git-branch.svg"),
         // Deliberately not `refresh.svg`: the panel header already carries a

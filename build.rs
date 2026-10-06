@@ -1,6 +1,15 @@
 fn main() {
     embed_file_icons();
 
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows")
+        && std::env::var("CARGO_CFG_TARGET_ENV").as_deref() == Ok("msvc")
+    {
+        // gpui-component's own Cargo config reserves a larger Windows stack,
+        // but dependency configs do not reach this application. Match the
+        // component's 8 MiB reserve instead of the linker's 1 MiB default.
+        println!("cargo:rustc-link-arg-bin=tty7-app=/STACK:8388608");
+    }
+
     #[cfg(windows)]
     {
         println!("cargo:rerun-if-changed=assets/favicon.ico");

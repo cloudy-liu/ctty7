@@ -90,12 +90,18 @@ pub const MAX_IMAGE_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Validate the format and dimensions before sending encoded data to GPUI.
 pub fn image_format(bytes: &[u8]) -> Result<gpui::ImageFormat, String> {
-    let prefix = String::from_utf8_lossy(&bytes[..bytes.len().min(1024)]);
-    if prefix
-        .trim_start_matches('\u{feff}')
-        .trim_start()
-        .starts_with("<svg")
-        || (prefix.trim_start().starts_with("<?xml") && prefix.contains("<svg"))
+    if std::str::from_utf8(bytes).ok().and_then(|text| {
+        resvg::usvg::roxmltree::Document::parse(text)
+            .ok()
+            .map(|doc| {
+                let root = doc.root_element();
+                root.tag_name().name() == "svg"
+                    && matches!(
+                        root.tag_name().namespace(),
+                        None | Some("http://www.w3.org/2000/svg")
+                    )
+            })
+    }) == Some(true)
     {
         // Use the renderer's parser for units, percentages and viewBox sizing.
         // Dimension validation must not load nested images or local files.
@@ -141,6 +147,25 @@ pub fn image_format(bytes: &[u8]) -> Result<gpui::ImageFormat, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_svg_accepts_xml_prologs_and_rejects_other_xml() {
+        for prolog in [
+            "<!-- generator -->",
+            "\u{feff}",
+            "<?xml version=\"1.0\"?><!-- generator -->",
+        ] {
+            let svg = format!(
+                "{prolog}<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"16\" height=\"16\"/>"
+            );
+            assert!(matches!(
+                image_format(svg.as_bytes()),
+                Ok(gpui::ImageFormat::Svg)
+            ));
+        }
+        assert!(image_format(b"<!-- svg --><document/>").is_err());
+        assert!(image_format(b"<!-- unclosed <svg/>").is_err());
+    }
 
     #[test]
     fn markdown_svg_dimensions_bound_the_gpui_render_allocation() {
