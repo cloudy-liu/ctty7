@@ -5,6 +5,8 @@
 
 mod core;
 mod daemon;
+#[cfg(feature = "markdown-visual-tests")]
+mod markdown_visual;
 mod terminal;
 mod ui;
 
@@ -532,6 +534,12 @@ fn main() {
     }
 
     apply_config_dir_arg(&args);
+
+    #[cfg(feature = "markdown-visual-tests")]
+    if let Some(index) = args.iter().position(|arg| arg == "--markdown-visual") {
+        markdown_visual::run(args.get(index + 1).expect("visual fixture options path"));
+        return;
+    }
 
     let daemon = args
         .iter()

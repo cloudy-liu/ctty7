@@ -124,10 +124,60 @@ impl Render for DiagramViewer {
 
 /// Render Mermaid `source` to an SVG string styled with `theme`'s palette.
 pub fn render_mermaid(source: &str, theme: &Theme, dark: bool) -> Result<String, String> {
-    HeadlessRenderer::new()
+    let mut renderer = HeadlessRenderer::new();
+    if theme.id == crate::core::markdown_theme::DEFAULT_ID
+        && renderer
+            .parse_metadata_sync(source)
+            .map_err(|err| err.to_string())?
+            .is_some_and(|meta| meta.diagram_type.starts_with("flowchart"))
+    {
+        renderer = renderer.with_text_measurer(std::sync::Arc::new(GithubFlowchartText::default()));
+    }
+    renderer
         .render_svg_with_host_theme_sync(source, &build_theme_profile(theme, dark))
         .map_err(|err| err.to_string())?
         .ok_or_else(|| "not a recognized Mermaid diagram".to_string())
+}
+
+/// GitHub's ordinary HTML flowchart labels use nowrap in a capped box.
+/// Markdown labels use the renderer's raw measurement path and still wrap.
+#[derive(Default)]
+struct GithubFlowchartText(merman::render::VendoredFontMetricsTextMeasurer);
+
+impl merman::render::TextMeasurer for GithubFlowchartText {
+    fn measure(
+        &self,
+        text: &str,
+        style: &merman_render::text::TextStyle,
+    ) -> merman_render::text::TextMetrics {
+        self.0.measure(text, style)
+    }
+
+    fn measure_wrapped(
+        &self,
+        text: &str,
+        style: &merman_render::text::TextStyle,
+        max_width: Option<f64>,
+        mode: merman_render::text::WrapMode,
+    ) -> merman_render::text::TextMetrics {
+        if mode == merman_render::text::WrapMode::HtmlLike {
+            let mut metrics = self.0.measure_wrapped(text, style, None, mode);
+            metrics.width = metrics.width.min(max_width.unwrap_or(200.));
+            metrics
+        } else {
+            self.0.measure_wrapped(text, style, max_width, mode)
+        }
+    }
+
+    fn measure_wrapped_raw(
+        &self,
+        text: &str,
+        style: &merman_render::text::TextStyle,
+        max_width: Option<f64>,
+        mode: merman_render::text::WrapMode,
+    ) -> merman_render::text::TextMetrics {
+        self.0.measure_wrapped_raw(text, style, max_width, mode)
+    }
 }
 
 /// Map the Markdown theme palette onto merman's semantic theme roles.
@@ -142,6 +192,8 @@ fn build_theme_profile(theme: &Theme, dark: bool) -> HostThemeProfile {
         return HostThemeProfile::builder()
             .output(output)
             .site_config("theme", if dark { "dark" } else { "default" })
+            .site_config("flowchart", serde_json::json!({ "diagramPadding": 48 }))
+            .site_config("sequence", serde_json::json!({ "diagramMarginY": 40 }))
             .build();
     }
     let p = theme.palette(dark);
@@ -194,6 +246,31 @@ fn color_to_hex(color: &Color) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtin_mermaid_matches_live_github_canvas_padding() {
+        let source = "flowchart LR\n  Choose[Choose reading theme] --> Palette[Resolve light or dark palette]\n  Palette --> Preview[Render Markdown preview]\n";
+        let svg = render_mermaid(source, &crate::core::markdown_theme::builtin(), false).unwrap();
+        let live: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/github-live-2026-10-06/mermaid-light.json"
+        ))
+        .unwrap();
+        let viewbox = regex::Regex::new(r#"viewBox="([^"]+)""#).unwrap();
+        let native: Vec<f32> = viewbox.captures(&svg).unwrap()[1]
+            .split_whitespace()
+            .map(|v| v.parse().unwrap())
+            .collect();
+        let website: Vec<f32> = live["viewBox"]
+            .as_str()
+            .unwrap()
+            .split_whitespace()
+            .map(|v| v.parse().unwrap())
+            .collect();
+        assert!(
+            (native[3] - website[3]).abs() < 1.,
+            "Mermaid canvas height differs from live GitHub: {native:?} vs {website:?}"
+        );
+    }
 
     #[test]
     fn diagram_canvas_matches_the_builtin_and_custom_background_contract() {

@@ -49,6 +49,7 @@ url = "2"
 
 # Mermaid diagram rendering
 merman = { version = "0.7", features = ["render"] }
+merman-render = "0.7"
 
 # Grapheme-cluster boundaries for the sidebar's label elision
 # (`ui::tab_strip`). Cutting a label by `char` tears emoji apart: a ZWJ
@@ -262,6 +263,7 @@ workspace = true
 [features]
 default = []
 updater = ["dep:async_zip"]
+markdown-visual-tests = ["gpui_platform/test-support"]
 
 # ---- Standalone workspace mirroring gpui-component's pins so the git/source
 # ---- caches are shared and versions stay aligned. ----
