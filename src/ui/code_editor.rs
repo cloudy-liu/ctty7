@@ -1203,7 +1203,13 @@ impl Tty7App {
                 let reading = f.reading.as_ref().expect("Markdown preview state").clone();
                 let revision = f.edit_seq;
                 reading.update(cx, |reading, cx| reading.sync(revision, cx));
-                reading.into_any_element()
+                // Keep the expensive Markdown layout while the document pane
+                // changes between docked and filled modes. The preview entity
+                // remains the same, so GPUI can reuse its measured tree until
+                // the preview notifies it about a real document or style change.
+                gpui::AnyView::from(reading)
+                    .cached(gpui::StyleRefinement::default())
+                    .into_any_element()
             }
             Some(f) => {
                 f.prepare_source(cx);
@@ -1428,6 +1434,7 @@ impl Tty7App {
             .flex_none()
             .w_full()
             .h(px(26.))
+            .bg(cx.theme().background)
             .items_center()
             .gap_3()
             .px_3()
