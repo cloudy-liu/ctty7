@@ -4,7 +4,7 @@ Tracking issue: [cloudy-liu/ctty7#89](https://github.com/cloudy-liu/ctty7/issues
 
 ## Problem Statement
 
-The source editor currently uses Atom One Light in every light application
+The source editor previously used Atom One Light in every light application
 appearance. The user prefers GitHub's default light code editor colors and
 wants exactly two automatic source palettes: GitHub Light and Atom One Dark.
 
@@ -52,6 +52,19 @@ appearance and independent source typography behavior.
 6. Update English, Chinese and Japanese settings text, active-theme names, customization documentation and reference documentation. Remove obsolete Atom One Light runtime assets and generation rules.
 7. Keep independent source typography and retired editor-theme compatibility. No new configuration fields, application themes, dependencies or runtime downloads are needed.
 
+Source typography retains `editor_font_family`, `editor_font_size` and
+`editor_line_height` as independent saved preferences. Font size supports
+8 to 72 px with a 13 px default; line height supports 1 to 3 times the text
+size with a 1.5 default. Numeric controls submit on Enter or blur, preserve
+in-progress input during unrelated refreshes and bound invalid values.
+Font-size shortcuts change focused source text and otherwise retain terminal
+behavior.
+
+The retired `editor_theme` key is ignored on load and omitted on save,
+including legacy fixed palettes, unknown strings and malformed values.
+Other valid preferences remain intact. Theme names do not select palettes:
+One Dark Pro remains an application preset and uses Atom One Dark for source.
+
 ## Testing Decisions
 
 1. Prefer the existing application-window tests as the main behavior boundary. Exercise theme selection, settings, system appearance, preview and cancellation, opaque backgrounds and retention of editing state.
@@ -69,11 +82,12 @@ appearance and independent source typography behavior.
 
 ## Further Notes
 
-This specification supersedes only the light-palette choice in the previously
-published adaptive source appearance specification. Atom One Dark and the
-existing appearance, configuration, typography and editing-state contracts
-remain the baseline. The tracking issue and implementation PR belong to
-cloudy-liu/ctty7 and use the ready-for-agent triage vocabulary.
+This specification consolidates the source appearance and typography contract
+from [PR #86](https://github.com/cloudy-liu/ctty7/pull/86) with the GitHub Light
+replacement in [PR #90](https://github.com/cloudy-liu/ctty7/pull/90).
+Both are merged; implementation history remains available in those PRs.
+Final results and verification limits are recorded in the
+[verification record](editor-github-light-verification.md).
 
 The user's follow-up screenshot and alignment request establish GitHub's default
 light file viewer as the syntax reference. Use the pinned prettylights syntax

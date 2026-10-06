@@ -95,7 +95,7 @@ GitHub 是一个主题包，ID 为 github，显示名为 GitHub，包含 Light d
 | 元素 | 标准 |
 |---|---|
 | 正文 | 16px，字重 400，行高 1.5；加粗 600 |
-| 正文字体 | 本机系统 UI 字体、Segoe UI、Noto Sans、Helvetica、Arial 及 emoji 回退；中文补充 Microsoft YaHei、PingFang SC、Noto Sans SC，并标明这些中文回退并非 GitHub 原样式定义 |
+| 正文字体 | 本机系统 UI 字体、Segoe UI、Noto Sans、Helvetica、Arial 及 emoji 回退；中文补充按 Noto Sans SC、PingFang SC、Microsoft YaHei 顺序回退，并标明这些中文回退并非 GitHub 原样式定义 |
 | 代码字体 | SFMono-Regular、SF Mono、Menlo、Consolas、Liberation Mono；最终本机等宽回退，不下载字体 |
 | h1–h6 | 32 / 24 / 20 / 16 / 14 / 13.6px，字重 600，行高 1.25；通常上间距 24、下间距 16，首元素遵循源样式 |
 | h1、h2 | 底部内边距 0.3em，1px 弱边线 |
@@ -112,6 +112,14 @@ GitHub 是一个主题包，ID 为 github，显示名为 GitHub，包含 Light d
 | 链接 | 默认始终显示下划线，悬停保持同色与下划线 |
 
 任务项采用灰色、只读的复选框。标题提供悬停锚点链接，代码复制、正文选择和现有键盘滚动行为保留。内置 GitHub 的 Mermaid 使用渲染器的 default/dark 主题，背景透明以显示应用底色，文字转换为原生 SVG 可绘制形式；自定义主题继续使用包内语义颜色。图表提供复制、展开、缩放、平移和复位操作；渲染器与 GitHub mermaid.js 的字体栅格化和布局仍须分别核验。
+
+### 图片与动画边界
+
+图片及相对链接通过文档所属 Host 读取；HTTP(S) 图片使用应用 HTTP 客户端，代理选择在启动时生效。单张编码图片上限 8 MiB，远程请求超时 15 秒，每篇文档最多缓存 64 个图片地址和 32 MiB 编码数据。新文档版本释放旧缓存，并丢弃过期异步结果。
+
+SVG 动画仅支持指向父元素的 SMIL `<animate>`：从零开始的无限或自重启循环、linear/discrete 插值、数字或颜色属性，以及命令结构相同且不含弧线的路径。最多 32 条轨道，各轨道必须共享 0.1 至 12 秒周期，以每秒 20 帧采样，最多 240 帧和 800 万总帧像素；生成帧也计入文档缓存预算。
+
+动画 SVG 可读取 base64 TTF/OTF `@font-face` 和 CSS 字体别名，字体仅作用于当前文档，上限 2 MiB 和 16 个字体面。WOFF/WOFF2、外部字体 URL、嵌套图片和其他外部资源不加载。CSS/JavaScript 动画、animateTransform/animateMotion、有限或事件时间线、叠加动画、弧线路径变形和不同轨道周期不支持；不支持的 SMIL 显示图片错误、替代文本及提示。
 
 ### 配置迁移
 
