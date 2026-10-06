@@ -225,7 +225,6 @@ l10n_keys! {
     SettingsMarkdownGithub,
     SettingsMarkdownGithubDesc,
     SettingsMarkdownV1Upgrade,
-    SettingsMarkdownMigrationSaveFailed,
     SettingsMarkdownUseGithub,
     EditorCopyCode,
     MarkdownAnchorMissing,

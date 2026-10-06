@@ -213,9 +213,6 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsMarkdownV1Upgrade => {
             "This theme uses v1. Upgrade to v2; omitted styles will use GitHub defaults. The original file has not been changed."
         }
-        L10nKey::SettingsMarkdownMigrationSaveFailed => {
-            "GitHub is active, but the previous Paperglow selection could not be updated on disk. Check that your configuration folder is writable."
-        }
         L10nKey::SettingsMarkdownUseGithub => "Use GitHub",
         L10nKey::EditorCopyCode => "Copy code",
         L10nKey::MarkdownAnchorMissing => "heading not found",

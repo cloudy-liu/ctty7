@@ -8531,6 +8531,47 @@ mod gpui_tests {
     }
 
     #[gpui::test]
+    fn unavailable_markdown_selection_requires_an_explicit_github_choice(cx: &mut TestAppContext) {
+        crate::core::config::pin_test_config_dir();
+        crate::ui::i18n::set_locale("en");
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            cx.update_global::<Config, _>(|config, _| {
+                config.markdown_theme = "paperglow".into();
+            });
+            crate::ui::markdown_preview::init(Default::default(), cx);
+            app.open_settings_section(SettingsSection::Appearance, window, cx);
+            app.active_settings()
+                .unwrap()
+                .search
+                .update(cx, |input, cx| input.set_value("Markdown", window, cx));
+        });
+        vcx.simulate_resize(size(px(1100.), px(800.)));
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+            assert_eq!(cx.global::<Config>().markdown_theme, "paperglow");
+            assert_eq!(crate::ui::markdown_preview::current(cx).theme.id, "github");
+            assert!(
+                cx.global::<crate::core::markdown_theme::Registry>()
+                    .unavailable("paperglow")
+            );
+        });
+        assert!(vcx.debug_bounds("markdown-theme-picker").is_none());
+        assert!(vcx.debug_bounds("open-markdown-themes").is_some());
+        let recovery = vcx.debug_bounds("use-github-markdown-theme").unwrap();
+        vcx.simulate_click(recovery.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+            assert_eq!(cx.global::<Config>().markdown_theme, "github");
+            assert_eq!(crate::ui::markdown_preview::current(cx).theme.id, "github");
+        });
+        assert!(vcx.debug_bounds("use-github-markdown-theme").is_none());
+        assert_eq!(Config::load().markdown_theme, "github");
+    }
+
+    #[gpui::test]
     fn editor_colors_show_automatic_palette_without_a_picker(cx: &mut TestAppContext) {
         crate::core::config::pin_test_config_dir();
         crate::ui::i18n::set_locale("en");

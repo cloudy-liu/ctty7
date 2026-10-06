@@ -193,9 +193,6 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsMarkdownV1Upgrade => {
             "此主题使用 v1。请升级到 v2，未填写的样式将采用 GitHub 默认值。原文件未被修改。"
         }
-        L10nKey::SettingsMarkdownMigrationSaveFailed => {
-            "已使用 GitHub，但未能将磁盘上的 Paperglow 选择更新为 GitHub。请检查配置目录是否可写。"
-        }
         L10nKey::SettingsMarkdownUseGithub => "使用 GitHub",
         L10nKey::EditorCopyCode => "复制代码",
         L10nKey::MarkdownAnchorMissing => "未找到该标题",

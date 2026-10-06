@@ -217,9 +217,6 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsMarkdownV1Upgrade => {
             "このテーマは v1 です。v2 に更新すると、省略したスタイルには GitHub の既定値が適用されます。元のファイルは変更されていません。"
         }
-        L10nKey::SettingsMarkdownMigrationSaveFailed => {
-            "GitHub を使用していますが、保存済みの Paperglow 設定を更新できませんでした。設定フォルダーへの書き込み権限を確認してください。"
-        }
         L10nKey::SettingsMarkdownUseGithub => "GitHub を使用",
         L10nKey::EditorCopyCode => "コードをコピー",
         L10nKey::MarkdownAnchorMissing => "見出しが見つかりません",
