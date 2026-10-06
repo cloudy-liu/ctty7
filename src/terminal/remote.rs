@@ -665,7 +665,7 @@ impl RemoteTerminal {
             restore,
         }
         .encode(&mut stream)?;
-        let pane_id = match spawn_reply(&mut stream, attach_reply_wait(route), "Spawn")? {
+        let pane_id = match spawn_reply(&mut stream, SPAWN_REPLY_WAIT, "Spawn")? {
             DaemonMsg::Spawned { pane_id } => pane_id,
             // Passed through, not wrapped: the caller already logs which
             // spawn this was, and the window shows only this text.
@@ -2150,15 +2150,12 @@ fn attach_reply_wait(route: &PaneRoute) -> std::time::Duration {
     }
 }
 
-/// Read the daemon's answer to a spawn request, under the deadline `Attach`
-/// uses for the same route.
-///
-/// A daemon caught mid-restart accepts the connection and then never serves
-/// it. `Attach` has been guarded against that silence since #673, and core's
-/// `PaneSession::spawn_over` bounds the identical exchange, but this path read
-/// with no deadline at all — and the local route spawns synchronously on the
-/// UI thread (`ui::app`'s `PaneRoute::Local` branch), so a daemon that went
-/// quiet froze the whole window on "new tab".
+// Shell creation runs off the UI thread and may include cold ConPTY startup.
+// Match core's pane-open budget rather than the short Attach acknowledgement.
+const SPAWN_REPLY_WAIT: std::time::Duration = std::time::Duration::from_secs(15);
+
+/// Read the daemon's answer under the caller's spawn deadline. Shell creation
+/// may take longer than Attach, but a silent daemon must still time out.
 ///
 /// The timeout is reported as a plain message with no `io::Error` in its
 /// chain, which is what keeps `daemon_disconnected_before_spawn_reply` from
@@ -2867,6 +2864,35 @@ fn win_size(size: TermSize, cell_w: u16, cell_h: u16) -> WinSize {
 #[cfg(test)]
 mod agent_resume_tests {
     use super::*;
+
+    #[test]
+    fn spawn_reply_accepts_cold_start_beyond_local_attach_deadline() {
+        let (mut client, mut daemon) = socket_pair();
+        let delayed = std::thread::spawn(move || {
+            std::thread::sleep(
+                attach_reply_wait(&PaneRoute::Local) + std::time::Duration::from_millis(200),
+            );
+            DaemonMsg::Spawned { pane_id: 42 }
+                .encode(&mut daemon)
+                .unwrap();
+        });
+        assert!(matches!(
+            spawn_reply(&mut client, SPAWN_REPLY_WAIT, "Spawn").unwrap(),
+            DaemonMsg::Spawned { pane_id: 42 }
+        ));
+        assert_eq!(client.read_timeout().unwrap(), None);
+        delayed.join().unwrap();
+    }
+
+    #[test]
+    fn unanswered_spawn_times_out_without_becoming_a_disconnect_retry() {
+        let (mut client, _daemon) = socket_pair();
+        let error =
+            spawn_reply(&mut client, std::time::Duration::from_millis(25), "Spawn").unwrap_err();
+        assert!(error.to_string().contains("no answer to Spawn"));
+        assert!(!daemon_disconnected_before_spawn_reply(&error));
+        assert_eq!(client.read_timeout().unwrap(), None);
+    }
 
     #[test]
     fn resume_sends_one_ordered_request_and_falls_back_for_older_servers() {
