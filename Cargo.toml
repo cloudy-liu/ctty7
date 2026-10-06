@@ -253,6 +253,7 @@ ksni = { version = "0.3.6", default-features = false, features = ["blocking", "a
 # App/Window harness the view/event tests run on. Dev-only: the feature merges
 # into test builds and never reaches a release binary.
 [dev-dependencies]
+tree-sitter = "0.26.8"
 gpui = { workspace = true, features = ["test-support"] }
 
 [lints]
@@ -283,8 +284,8 @@ version = "0.1.0"
 
 [workspace.dependencies]
 # The maintenance fork retains tty7's existing menu, button and input changes
-# and adds instance-scoped Markdown styles, highlighting, document resources,
-# selection snapshots for toolbar-driven layout changes, and code editor colors.
+# and adds instance-scoped Markdown and source editor styles, highlighting,
+# document resources and selection snapshots for toolbar layout changes.
 # Both packages use the same commit, also recorded in Cargo.lock.
 # For co-developing the UI crate, point these back at a sibling
 # checkout: `path = "../gpui-component/crates/{ui,assets}"` — but never commit

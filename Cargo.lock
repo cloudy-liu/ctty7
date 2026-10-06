@@ -10544,6 +10544,7 @@ dependencies = [
  "tempfile",
  "toml 0.8.23",
  "tray-icon",
+ "tree-sitter",
  "tty7-core",
  "unicode-segmentation",
  "unicode-width",

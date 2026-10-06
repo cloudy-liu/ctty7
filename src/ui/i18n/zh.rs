@@ -82,15 +82,15 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsThemeIntroTitle => "主题",
         L10nKey::SettingsThemeIntroDesc => "选择配色主题。每个主题都有各自的浅色或深色外观。",
         L10nKey::SettingsTypography => "字体排版",
-        L10nKey::SettingsFontSize => "字号",
+        L10nKey::SettingsFontSize => "终端字号",
         L10nKey::SettingsFontSizeDesc => "终端文字大小（像素）。",
         L10nKey::SettingsUiFontSize => "界面字号",
         L10nKey::SettingsUiFontSizeDesc => {
-            "终端以外所有地方的文字大小——标签页、面板、设置。非 Retina 显示器上可以调大。"
+            "标签页、面板和设置等界面文字大小。终端与代码编辑器的字号单独设置。"
         }
         L10nKey::SettingsLineHeight => "行高",
         L10nKey::SettingsLineHeightDesc => "行间距为字号的倍数。",
-        L10nKey::SettingsFontFamily => "字体族",
+        L10nKey::SettingsFontFamily => "终端字体",
         L10nKey::SettingsFontFamilyDesc => "从系统已安装的字体中选择。",
         L10nKey::SettingsBoldFont => "粗体字体",
         L10nKey::SettingsBoldFontDesc => "粗体文字使用的字体；默认由主字体合成。",
@@ -159,6 +159,25 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsCustomThemes => "自定义主题",
         L10nKey::SettingsThemesRejected => "主题文件夹里这些没能加载",
         L10nKey::SettingsMarkdownTheme => "Markdown 阅读主题",
+        L10nKey::SettingsEditorTheme => "代码编辑区配色",
+        L10nKey::SettingsEditorThemeDesc => {
+            "根据应用的深浅外观自动使用 Atom One Dark 或 Light，背景也使用对应配色。字体设置独立保存。"
+        }
+        L10nKey::SettingsEditorThemeResolved => "当前使用 {active}。",
+        L10nKey::SettingsEditorFont => "编辑器字体",
+        L10nKey::SettingsEditorFontDesc => "独立于终端字体与配色主题。",
+        L10nKey::SettingsEditorFontDefault => "平台默认字体",
+        L10nKey::SettingsEditorFontTerminal => "跟随终端字体",
+        L10nKey::SettingsEditorFontSize => "编辑器字号",
+        L10nKey::SettingsEditorFontSizeDesc => "代码文字大小，单位为像素（8–72）。切换主题时保留。",
+        L10nKey::SettingsEditorLineHeight => "编辑器行高",
+        L10nKey::SettingsEditorLineHeightDesc => "编辑器字号的倍数（1–3），独立于终端行高。",
+        L10nKey::SettingsSearchEditorFontKeywords => {
+            "代码 编辑器 编辑区 字体 字号 大小 行高 排版 等宽 font size"
+        }
+        L10nKey::SettingsSearchEditorThemeKeywords => {
+            "代码 编辑器 编辑区 源码 语法 高亮 配色 深色 浅色 主题 atom one dark light"
+        }
         L10nKey::SettingsMarkdownThemeDesc => {
             "GitHub 默认跟随应用背景和深浅模式。自定义 v2 主题保留自己的背景，修改后自动加载。"
         }

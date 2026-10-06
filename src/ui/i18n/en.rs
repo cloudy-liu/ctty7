@@ -88,16 +88,15 @@ pub fn translate_en(key: L10nKey) -> &'static str {
             "Pick a color theme. Each one sets its own light or dark look."
         }
         L10nKey::SettingsTypography => "Typography",
-        L10nKey::SettingsFontSize => "Font size",
+        L10nKey::SettingsFontSize => "Terminal font size",
         L10nKey::SettingsFontSizeDesc => "Terminal text size in pixels.",
         L10nKey::SettingsUiFontSize => "Interface font size",
         L10nKey::SettingsUiFontSizeDesc => {
-            "Text size everywhere outside the terminal — tabs, panels and settings. \
-             Raise it on a display that is not Retina."
+            "Text size for tabs, panels and settings. Terminal and source editor sizes are set separately."
         }
         L10nKey::SettingsLineHeight => "Line height",
         L10nKey::SettingsLineHeightDesc => "Row spacing as a multiple of the font size.",
-        L10nKey::SettingsFontFamily => "Font family",
+        L10nKey::SettingsFontFamily => "Terminal font",
         L10nKey::SettingsFontFamilyDesc => "Pick from fonts installed on your system.",
         L10nKey::SettingsBoldFont => "Bold font",
         L10nKey::SettingsBoldFontDesc => {
@@ -176,6 +175,29 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsCustomThemes => "Custom themes",
         L10nKey::SettingsThemesRejected => "Not loaded from the themes folder",
         L10nKey::SettingsMarkdownTheme => "Markdown reading theme",
+        L10nKey::SettingsEditorTheme => "Code editor colors",
+        L10nKey::SettingsEditorThemeDesc => {
+            "Automatically use Atom One Dark or Light with the app's appearance, including the editor background. Font settings stay independent."
+        }
+        L10nKey::SettingsEditorThemeResolved => "Currently using {active}.",
+        L10nKey::SettingsEditorFont => "Editor font",
+        L10nKey::SettingsEditorFontDesc => "Choose independently of the terminal and color theme.",
+        L10nKey::SettingsEditorFontDefault => "Platform default",
+        L10nKey::SettingsEditorFontTerminal => "Follow terminal font",
+        L10nKey::SettingsEditorFontSize => "Editor font size",
+        L10nKey::SettingsEditorFontSizeDesc => {
+            "Source text size in pixels (8–72). Preserved when switching themes."
+        }
+        L10nKey::SettingsEditorLineHeight => "Editor line height",
+        L10nKey::SettingsEditorLineHeightDesc => {
+            "Multiple of editor font size (1–3). Independent of terminal line height."
+        }
+        L10nKey::SettingsSearchEditorFontKeywords => {
+            "code editor font family size line height typography monospace"
+        }
+        L10nKey::SettingsSearchEditorThemeKeywords => {
+            "code editor source syntax highlighting atom one dark light theme"
+        }
         L10nKey::SettingsMarkdownThemeDesc => {
             "GitHub follows the app background and light/dark mode. Custom v2 themes keep their own backgrounds and reload automatically."
         }
