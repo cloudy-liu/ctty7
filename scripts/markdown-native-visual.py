@@ -69,9 +69,11 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     # Use a managed X11 desktop rather than a bare X server.
     manager = None
+    manager_log = None
     if sys.platform != "darwin":
-        manager = subprocess.Popen(["openbox"], stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL)
+        manager_log = (output / "desktop.log").open("w", encoding="utf-8")
+        manager = subprocess.Popen(["/usr/bin/openbox"], stdout=manager_log,
+                                   stderr=manager_log)
     try:
         if manager is not None:
             deadline = time.monotonic() + 10
@@ -81,7 +83,8 @@ def main():
                 if "window id #" in property_value:
                     break
                 if manager.poll() is not None:
-                    raise RuntimeError("Openbox exited before initializing the desktop")
+                    raise RuntimeError("Openbox exited before initializing the desktop: "
+                                       + (output / "desktop.log").read_text())
                 time.sleep(0.1)
             else:
                 raise TimeoutError("Openbox did not initialize the desktop")
@@ -93,6 +96,7 @@ def main():
         if manager is not None:
             manager.terminate()
             manager.wait(timeout=10)
+            manager_log.close()
 
 
 if __name__ == "__main__":
