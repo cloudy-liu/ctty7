@@ -813,6 +813,7 @@ impl Tty7App {
             "diff-overlay-scrollbar",
             div()
                 .id("diff-overlay-scroll")
+                .debug_selector(|| "diff-scroll".into())
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
@@ -886,6 +887,7 @@ impl Tty7App {
             "diff-overlay-scrollbar",
             div()
                 .id("diff-overlay-scroll")
+                .debug_selector(|| "diff-scroll".into())
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
@@ -1025,6 +1027,13 @@ impl Tty7App {
         }
 
         let mut card = v_flex()
+            .debug_selector(|| {
+                if idx == usize::MAX {
+                    "diff-preview-card".into()
+                } else {
+                    format!("diff-card-{idx}")
+                }
+            })
             .w_full()
             .border_1()
             .border_color(cx.theme().border)
@@ -1158,6 +1167,7 @@ impl Tty7App {
             px(0.)
         };
         h_flex()
+            .debug_selector(|| "diff-row".into())
             .w_full()
             .h(px(19.))
             .items_stretch()
@@ -1176,7 +1186,15 @@ impl Tty7App {
         outer_radius: Pixels,
         cx: &Context<Self>,
     ) -> AnyElement {
-        let base = h_flex().flex_1().min_w_0().h_full().items_center();
+        let base = h_flex()
+            .debug_selector(|| match side {
+                Side::Old => "diff-old-cell".into(),
+                Side::New => "diff-new-cell".into(),
+            })
+            .flex_1()
+            .min_w_0()
+            .h_full()
+            .items_center();
         let base = match side {
             Side::Old => base.rounded_bl(outer_radius),
             Side::New => base.rounded_br(outer_radius),
@@ -1249,6 +1267,7 @@ impl Tty7App {
                 .child(no.map(|n| n.to_string()).unwrap_or_default())
         };
         h_flex()
+            .debug_selector(|| "diff-row".into())
             .w_full()
             .h(px(19.))
             .items_center()
