@@ -9,7 +9,7 @@ remain a draft until its complete asset set and checksums pass.
 - Repository: `cloudy-liu/ctty7`; release branch: `codex/release-v0.2.0`.
 - Refreshed starting commit: `8fcc511a49160ee5278695c11723565990790480`, matching fetched fork main on 2026-10-08. The original preparation used `b4f7b086`.
 - Previous published release: v0.1.0, published 2026-09-29 and still Latest.
-- No open PRs. The only open issue is #100, the compact sidebar status spec.
+- Before release preparation there were no open PRs. Release preparation is tracked in [PR #115](https://github.com/cloudy-liu/ctty7/pull/115); it closes #100, the compact sidebar status spec, when merged.
 - PR #103 already implements #100, and child issue #101 is closed. The remaining native checks and stale status documentation are addressed in the [acceptance record](sidebar-status-tags.md).
 - The full history since v0.1.0 was reviewed, including the baseline merge and patch-equivalent terminal-color history reconciliation.
 - PRs #112, #113, and #114 add diff width hardening, stable Cursor hook/session identity, and a coherent GitHub diff palette. Their changes and remaining acceptance gaps are included in the release notes.
@@ -28,6 +28,12 @@ remain a draft until its complete asset set and checksums pass.
 
 ## Verification
 
+The format, workspace check, complete workspace test suite, desktop updater
+tests, and version-metadata checks were rerun successfully on 2026-10-08 with
+all changes through `8fcc511a` and this release preparation. Four workspace
+packages report 0.2.0; third-party dependency versions are unchanged. Logs are
+retained in the ignored `.tty7-dev-release/release-v0.2.0-*.log` files.
+
 | Check | Result |
 | --- | --- |
 | `cargo fmt --all -- --check` | Passed. |
@@ -35,11 +41,13 @@ remain a draft until its complete asset set and checksums pass.
 | `cargo test --locked --workspace` | Passed, with eight existing ignored tests. |
 | `cargo test --locked --features updater --bin tty7-updater` | All 17 tests passed. |
 | `git diff --check` | Passed. |
+| Markdown scroll and dark foreground regressions | Passed as part of the full workspace suite, including dock/fill bounds, the final block, short-document clamping, live theme changes, Rust neutral tokens, and custom-theme preservation. |
 | Native app | The linked executable reports file version 0.2.0; sidebar, Markdown/Mermaid, source/preview switching, and light/dark appearance were exercised. |
 | README assets | The combined light/dark hero preserves both native screenshot regions pixel for pixel; Claude Code's orange mascot was captured after removing inherited NO_COLOR from the isolated screenshot processes. The source-editor WebP also reproduces its original capture. |
 | README preview | The current Chinese preview loads the combined agent hero, logo, and source-editor screenshot without page overflow at 372 pixels. Both READMEs' local image and document paths were checked. |
 | README header alignment and spacing | Typora's Chinese preview displays the logo and animated title on the same vertical centerline with reduced spacing. The browser preview measures a 29.7 CSS-pixel gap, matching the current GitHub README; both images share a center with no page overflow at 372 pixels. |
 | Starting main CI | All nine jobs passed in [run 37500111063](https://github.com/cloudy-liu/ctty7/actions/runs/37500111063). This is the source baseline, not CI for the unpushed preparation. |
+| Refreshed main CI | All nine jobs passed in [run 37644303956](https://github.com/cloudy-liu/ctty7/actions/runs/37644303956) on `8fcc511a`. Release PR CI is tracked separately. |
 
 The Windows full suite needs Git for Windows' `usr/bin` utilities in its process
 PATH. The first run exposed the CLI test's hardcoded `sh`; later core tests also
