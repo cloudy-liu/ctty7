@@ -573,7 +573,8 @@ fn config_dir_alone_resolves_both_endpoints(daemon: &Daemon) {
     // endpoints were derived by different rules. Exercise a pane verb over the
     // same lone variable.
     let out = Command::new(env!("CARGO_BIN_EXE_tty7"))
-        .args(["run", "--json", "--", "sh", "-c", "exit 9"])
+        .args(["run", "--json", "--"])
+        .args(one_shot("exit 9"))
         .env_remove("TTY7_DATA_DIR")
         .env_remove("TTY7_CONTROL_SOCK")
         .env_remove("TTY7_PANE")

@@ -1,272 +1,127 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/logo.svg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/logo.svg">
-  <img src="assets/logo.svg" alt="ctty7" height="120" />
-</picture>
-
-<h1>
-  <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=48&duration=3000&pause=1000&color=FF5FA2&center=true&vCenter=true&width=435&lines=ctty7" alt="ctty7" />
-</h1>
-
-<h3>面向 AI 编程的现代终端工作台</h3>
-
-<p>
-  <strong>持久会话</strong> · <strong>Windows shell 深度支持</strong> · <strong>编程 Agent 感知</strong> · <strong>远程工作区</strong>
+<p align="center" style="line-height: 24px;">
+  <img src="assets/logo.svg" alt="ctty7" width="120" height="120" style="margin: 0;" />
+  <br />
+  <br />
+  <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=48&duration=3000&pause=1000&color=FF5FA2&center=true&vCenter=true&width=435&lines=ctty7" alt="ctty7" style="margin: 0;" />
 </p>
 
-<p>
-  <a href="https://github.com/cloudy-liu/ctty7/releases/latest">
-    <img src="https://img.shields.io/github/v/release/cloudy-liu/ctty7?style=for-the-badge&logo=github&color=FF5FA2&logoColor=white" alt="下载" />
-  </a>
-  <a href="https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/cloudy-liu/ctty7/ci.yml?style=for-the-badge&logo=githubactions&logoColor=white" alt="CI 状态" />
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/license-Apache--2.0-3FDD8C?style=for-the-badge" alt="许可证" />
-  </a>
-</p>
+把编码 Agent、项目文件和持久终端会话放在同一个原生工作台里。
 
-<p>
-  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
-</p>
+[下载](https://github.com/cloudy-liu/ctty7/releases/latest) · [发布说明](docs/releases/v0.2.0.md) · [文档](docs/index.mdx) · [English](README.md)
+
+[![Release](https://img.shields.io/github/v/release/cloudy-liu/ctty7)](https://github.com/cloudy-liu/ctty7/releases/latest)
+[![CI](https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 </div>
 
-<br/>
+<img src="assets/screenshots/agents-light-dark.webp" alt="ctty7 浅色与深色实际界面：中央 Claude Code 终端和左侧编码 Agent 会话列表" width="1280" />
 
-<div align="center">
-  <img src="assets/hero.webp" alt="ctty7 实际运行" width="100%" style="border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);" />
-</div>
+*浅色与深色截图来自 Windows 上的 v0.2.0 源码构建。Claude Code 和 Codex 停留在实际输入提示符，其他侧栏状态由样例 hook 事件驱动。[截图说明](assets/screenshots/README.md)。*
 
-<br/>
+ctty7 使用 Rust 和 GPUI 构建。关闭窗口后，后台 daemon 继续保留终端会话。同一个工作区里可以查看 Agent 状态、浏览文件、编辑源码、阅读 Markdown 和检查 Git diff。本地 shell、WSL 和 SSH 工作区共用这套界面。
 
-## 🚀 为什么选择 ctty7
+## 安装
 
-ctty7 专为需要可靠终端基础设施、与 AI 编程 Agent 协作的开发者打造。无论你使用 Claude Code、Codex 还是 Herdr 管理的工作流，ctty7 都能让你的会话井然有序、Agent 状态一目了然、工作区跨机器持久化。
+从 [GitHub Releases](https://github.com/cloudy-liu/ctty7/releases/latest) 选择对应的安装包。
 
-### ✨ 核心特色
+| 平台 | 文件 | 启动方式 |
+| --- | --- | --- |
+| Windows x64 | `ctty7-*-windows-x86_64-setup.exe` | 运行安装程序，从开始菜单启动 ctty7。 |
+| Windows x64 便携版 | `ctty7-*-windows-x86_64.zip` | 解压后运行 `tty7-app.exe`。 |
+| macOS Apple Silicon | `ctty7-*-macos-arm64.dmg` | 将 ctty7 拖入 Applications。 |
+| macOS Intel | `ctty7-*-macos-x86_64.dmg` | 将 ctty7 拖入 Applications。 |
+| Linux x64 | `ctty7-*-linux-x86_64.AppImage` | 添加执行权限后运行。 |
+| Linux x64 压缩包 | `ctty7-*-linux-x86_64.tar.gz` | 解压后运行 `tty7-app`。 |
 
-<table>
-<tr>
-<td width="50%">
+每次发布都附带 `checksums.txt`。Windows 安装包未签名；macOS 使用 ad hoc 签名，尚未公证。旧 26.x 版本需要[手动迁移一次](docs/maintenance/migration.md)，之后即可沿 0.x 版本线更新。检查更新入口是 **设置 → 关于 → 立即检查**。
 
-**🪟 Windows shell 一等公民待遇**
+CLI 命令仍叫 `tty7`，可执行文件和配置目录也保留原有名称。
 
-CMD 和 Cmder/Clink 完整支持：提示符边界识别、工作目录跟踪、补全、输入建议、提示符编辑。保留原生上下键历史行为；模糊搜索读取 PSReadLine 和 Clink 历史。
+## 认识当前界面
 
-</td>
-<td width="50%">
+顶部 Header 提供新建标签和左右侧栏开关。下方的工作区选择器用来切换已保存的工作区。左侧栏按仓库分组，列出会话名称、Agent 头像、Git 分支和增删行数；分组标题可以通过右键菜单重命名。
 
-**🤖 编程 Agent 状态感知**
+右侧 **Files** 打开项目文件树，默认显示点文件。旁边的按钮可以切换工作区信息和版本控制。文件树、编辑器标题及变更列表都使用 Symbols 文件与文件夹图标。
 
-标签和侧栏通过 hooks 与屏幕检测显示 Agent 状态（工作中、等待确认、完成、空闲）。Herdr 宿主识别，即使嵌套 Agent 启动时也保持羊头像可见。
+打开文档后，会出现独立的文档 Header，显示文件名、填满/还原按钮和关闭按钮。填满只占据中间工作区，左右侧栏仍可使用；还原则回到先前的分栏宽度。Markdown 的 **编辑 / 预览** 切换位于底部状态栏。Diff Header 另有按钮切换并排和统一布局。
 
-</td>
-</tr>
-<tr>
-<td width="50%">
+| 操作 | Windows / Linux | macOS |
+| --- | --- | --- |
+| 新建标签 | `Ctrl+Shift+T` | `Cmd+T` |
+| 向右分屏 | `Ctrl+Shift+D` | `Cmd+D` |
+| 命令面板 | `Ctrl+Shift+P` | `Cmd+P` |
+| 开关会话侧栏 | `Ctrl+Shift+B` | `Cmd+B` |
+| 开关右侧面板 | `Ctrl+Shift+J` | `Cmd+J` |
+| 设置 | `Ctrl+,` | `Cmd+,` |
 
-**💾 持久化工作区**
+[完整快捷键列表](docs/reference/keyboard-shortcuts.mdx)可以在设置中自定义。
 
-后台守护进程持有你的 shell。关闭窗口，会话继续运行。重新打开本地终端、WSL 和 SSH 工作区时布局完整保留。
+## 看清哪个 Agent 需要你
 
-</td>
-<td width="50%">
+头像标识当前聚焦面板中的 Agent，小符号表示状态。侧栏在分支或工作目录前增加紧凑的状态标签。
 
-**⚡ 生产力优先**
+| 标签 | 含义 |
+| --- | --- |
+| `IDLE` | 等待下一条指令，也包括你已经读过的完成结果。 |
+| `RUN` | 正在执行任务。 |
+| `INPUT` | 等待回复或权限确认。 |
+| `DONE` | 当前任务已完成，结果尚未读过。 |
+| 不显示标签 | 状态未知，或只是普通 shell。状态未知的 Agent 仍保留灰色头像状态符号。 |
 
-分屏面板、可重命名侧栏分组、主题感知头像、Git 状态视图、可配置快捷键、可选择提示符文本、默认静音响铃。
+这些标签在所有界面语言中保持英文大写。只想保留头像符号时，可以关闭 **设置 → 窗口与标签 → 在侧栏显示 Agent 状态文字**。
 
-</td>
-</tr>
-</table>
+状态来自 Agent hooks 和屏幕检测。支持的 hooks 可在 **设置 → Agents** 中安装。CLI 的 `tty7 agents` 与 `tty7 wait` 读取 hook 报告，不包含 GUI 的屏幕检测结果。
 
-## 📦 安装
+如果 Herdr 在面板中托管了其他 Agent，外层标签保留 Herdr 的紫色羊头像。另一个独立 ctty7 分屏聚焦后，显示那个分屏自己的 Agent。恢复会话时会保留已知对话身份，并在支持的情况下继续原对话；无法恢复时留下可用的 shell。
 
-<div align="center">
+[状态与通知](docs/agents/status.mdx) · [会话恢复](docs/agents/sessions.mdx)
 
-**[⬇️ 下载最新版本](https://github.com/cloudy-liu/ctty7/releases/latest)**
+## 阅读 Markdown，编辑源码
 
-</div>
+Markdown 文件默认进入预览。内置 GitHub 阅读主题支持深浅模式、表格、任务列表、提示块、链接、图片和 Mermaid 图表。图表配色随阅读主题变化。源码和预览共用同一缓冲区，未保存的修改也能直接预览。
 
-| 平台 | 安装包 | 安装方式 |
-|------|--------|----------|
-| **Windows** 🪟 | `ctty7-*-windows-x86_64-setup.exe` | 运行安装器，从开始菜单启动 |
-| Windows 便携版 | `ctty7-*-windows-x86_64.zip` | 解压后运行 `tty7-app.exe` |
-| **macOS** 🍎 | `ctty7-*-macos-arm64.dmg` (Apple Silicon)<br>`ctty7-*-macos-x86_64.dmg` (Intel) | 拖入 Applications |
-| **Linux** 🐧 | `ctty7-*-linux-x86_64.AppImage` | 添加执行权限后运行 |
-| Linux 压缩包 | `ctty7-*-linux-x86_64.tar.gz` | 解压后运行 `tty7-app` |
+可以安装 v2 YAML 主题调整 Markdown 字体、排版和颜色。有效修改会自动重载；主题不可用时回退到 GitHub，同时保留原先的主题选择。详见 [Markdown 阅读主题](docs/customization/markdown-themes.mdx)与 [Mermaid 支持范围](docs/mermaid-support.md)。
 
-<details>
-<summary>📝 安装说明</summary>
+源码配色跟随应用深浅模式：浅色使用 **GitHub Light**，深色使用 **Atom One Dark**。源码字体、字号和行高独立于终端设置；搜索时，当前匹配项使用更明显的高亮。
 
-- 每个发布版本都包含 `checksums.txt` 用于校验
-- Windows 构建未签名；操作系统可能要求手动确认
-- macOS 在未配置发布凭据时使用临时签名
-- **从旧版本迁移？** 查看[迁移指南](docs/maintenance/migration.md)
+![ctty7 中的 GitHub Light 源码编辑器](assets/screenshots/source-light.webp)
 
-</details>
+可以在应用中打开[工作区导览](docs/examples/workbench-tour.md)试用这些功能。Markdown 支持文档列出的 HTML 子集，不等同于完整浏览器。
 
-## 🎯 快速开始
+## Windows 与远程工作流
 
-1. **启动 ctty7**，创建本地终端或连接到 WSL/SSH
-2. **在设置中选择 shell**。CMD/Cmder 现有参数如 `cmd.exe /K init.bat` 继续可用
-3. **在面板中启动编程 Agent**。在 **设置 → Agents** 安装 hooks 以跟踪状态和通知
-4. **在设置 → 关于 → 检查更新** 中检查更新。更新会先下载、校验，然后明确应用
+本分支补充了 CMD、Cmder/Clink 的提示符边界、目录上报、补全、灰色建议、行内编辑和原生历史行为。`cmd.exe /K init.bat` 等自定义启动参数会按原样保留。搜索可以读取 PSReadLine 和 Clink 历史，Windows 路径可以作为完整范围选中。
 
-> 💡 命令行仍然使用 `tty7`（包括 `tty7 agents` 和 `tty7 wait`）。不会安装 `ctty7` 别名。
+对于请求 ConPTY win32-input-mode 的程序，支持带修饰键的 Enter。功能键及其修饰组合可以传给终端，单独 F11 仍用于全屏。切换深浅主题时会处理终端文字与背景的可读性，响铃默认关闭。
 
-## 🎨 功能详解
+Windows 安装包内含 WSL 启动所需的 Linux server，WSL 使用账户配置的登录 shell。托管 SSH 工作区支持文件浏览与传输；从面板内启动 SSH 时，也会识别远程上下文并更新标签信息。
 
-<details>
-<summary><strong>🪟 Windows shell 集成</strong></summary>
+[Shell 集成](docs/reference/shell-integration.mdx) · [远程工作区](docs/remote/workspaces.mdx) · [SSH](docs/remote/ssh.mdx)
 
-ctty7 将 Windows shell 视为一等公民：
+## 配置与构建
 
-- **提示符编辑** 支持 Ctrl+A/E、单词导航、行内编辑
-- **工作目录跟踪** 用于补全和状态显示
-- **原生历史** 上下键行为保留；模糊搜索读取 PSReadLine/Clink
-- **路径整段选择** 点击拖拽 Windows 路径无断裂
-- **ConPTY win32-input-mode 支持** 为请求修改 Enter 事件的程序提供支持
+大多数选项可以在设置中修改。Windows 配置位于 `%APPDATA%\tty7\config.json`，macOS/Linux 位于 `~/.config/tty7/config.json`。使用 `TTY7_CONFIG_DIR` 环境变量或 `--config-dir` 参数可以指定独立目录。
 
-</details>
+[配置参考](docs/reference/configuration.mdx) · [界面主题](docs/customization/themes.mdx) · [更新机制](docs/reference/updates.mdx)
 
-<details>
-<summary><strong>🤖 Agent 状态跟踪</strong></summary>
-
-一眼掌握 Agent 在做什么：
-
-- **可视化状态** 标签和侧栏显示：工作中、等待确认、完成、空闲
-- **Hook 集成** 准确的状态报告（`tty7 agents`、`tty7 wait`）
-- **Herdr 识别** — Herdr 生成嵌套 Agent 时羊头像保持可见
-- **会话恢复** — Agent 身份在守护进程替换后保留，尽可能恢复会话
-
-</details>
-
-<details>
-<summary><strong>🌐 远程工作区</strong></summary>
-
-跨机器无缝工作：
-
-- **原生 SSH 和 WSL 支持** 面板内检测和登录 shell 解析
-- **无需额外下载** — Windows 安装包包含用于 WSL 引导的 Linux 服务器
-- **一致体验** 本地和远程工作区体验统一
-
-</details>
-
-<details>
-<summary><strong>📝 Markdown 预览</strong></summary>
-
-无需离开终端即可阅读和编辑 Markdown：
-
-- **内置预览** 可切换源码编辑
-- **阅读主题** — 默认使用 GitHub，也可安装自己的 v2 主题（自动适配深浅模式）
-- **Mermaid 图表**：在阅读区渲染流程图、时序图等，支持展开、缩放和复制源码
-
-以上功能可从 `main` 构建使用，已发布的 v0.1.0 尚不包含 Markdown 预览。
-待合并和待发布事项见[项目状态](docs/maintenance/status.md)。
-
-</details>
-
-## ⚙️ 配置
-
-大部分设置在 GUI 中可用。配置文件位置：
-
-- **Windows**: `%APPDATA%\tty7\config.json`
-- **macOS/Linux**: `~/.config/tty7/config.json`
-
-可使用 `TTY7_CONFIG_DIR` 环境变量或 `--config-dir` 参数覆盖。
-
-### 📚 文档
-
-<table>
-<tr>
-<td width="50%">
-
-**入门指南**
-- [安装与构建](docs/getting-started/installation.mdx)
-- [配置参考](docs/reference/configuration.mdx)
-- [更新说明](docs/reference/updates.mdx)
-
-</td>
-<td width="50%">
-
-**高级功能**
-- [Agent 状态和通知](docs/agents/status.mdx)
-- [Agent 会话](docs/agents/sessions.mdx)
-- [远程工作区](docs/remote/workspaces.mdx)
-
-</td>
-</tr>
-</table>
-
-## 🛠️ 开发
-
-### 前置要求
-
-- 稳定版 Rust 工具链
-- **Windows**: MSVC C++ 构建工具、Windows SDK
-- **Linux**: X11/Wayland/字体开发库（[详情](docs/getting-started/installation.mdx#building-from-source)）
-- **macOS**: Xcode 命令行工具
-
-### 从源码构建
+使用 stable Rust。Windows 需要 MSVC C++ 构建工具和 Windows SDK；macOS 需要 Xcode command line tools；Linux 需要[对应的系统依赖](docs/getting-started/installation.mdx#building-from-source)。
 
 ```sh
 git clone https://github.com/cloudy-liu/ctty7.git
 cd ctty7
 cargo build --locked
-cargo dev  # 使用 .tty7-dev 配置而非主配置
+cargo dev
 ```
 
-提交前检查：
+`cargo dev` 使用隔离的 `.tty7-dev` 配置目录。提交前运行 `cargo fmt --all -- --check` 和 `cargo test --locked --workspace`。Windows 完整测试还需要把 Git for Windows 的 `usr/bin` 工具目录加入测试进程的 PATH。
 
-```sh
-cargo fmt --check
-cargo test --locked --workspace
-```
+Issue 和 PR 提交到 [cloudy-liu/ctty7](https://github.com/cloudy-liu/ctty7)，PR 目标分支为该仓库的 `main`。维护信息见[项目状态](docs/maintenance/status.md)、[发布流程](docs/maintenance/release.md)和[历史客制化记录](docs/maintenance/fork-history.md)。
 
-### 项目结构
+## 来源与许可
 
-Rust crate、二进制文件、协议标识和数据路径保留 `tty7` 命名以保持兼容性，并简化未来选择性 patch 导入。Pull request 提交到本仓库。
+ctty7 基于 [l0ng-ai/tty7](https://github.com/l0ng-ai/tty7) 维护，在 Windows、Agent、文档编辑和发布流程上持续客制化。保留原始版权与署名，采用 [Apache-2.0](LICENSE) 许可。
 
-**维护文档：**
-- [项目状态与剩余工作](docs/maintenance/status.md)
-- [维护历史](docs/maintenance/fork-history.md)
-- [发布操作清单](docs/maintenance/release.md)
-
-## 🤝 贡献
-
-欢迎贡献！请：
-
-1. 提交新 issue 前检查[现有 issues](https://github.com/cloudy-liu/ctty7/issues)
-2. 提交 PR 前运行测试和格式检查
-3. 所有 pull request 以 `main` 分支为目标
-
-## 📄 许可证
-
-ctty7 使用 [Apache-2.0](LICENSE) 许可证。
-
-## 🙏 致谢
-
-ctty7 源自 [tty7](https://github.com/l0ng-ai/tty7) 并独立演进，在 Windows 集成、Agent 行为、工作流特性等方面进行了大量修改。保留原作者版权和署名。
-
-文件和文件夹图标来自 Miguel Solorio 的 [Symbols](https://github.com/miguelsolorio/vscode-symbols) 图标主题（MIT）。
-
----
-
-<div align="center">
-
-<img src="https://img.shields.io/github/stars/cloudy-liu/ctty7?style=social" alt="GitHub stars" />
-<img src="https://img.shields.io/github/forks/cloudy-liu/ctty7?style=social" alt="GitHub forks" />
-
-<br/><br/>
-
-**[⬇️ 下载 ctty7](https://github.com/cloudy-liu/ctty7/releases/latest)** · **[🐛 报告问题](https://github.com/cloudy-liu/ctty7/issues)** · **[📚 文档](docs/)**
-
-<br/>
-
-用 ❤️ 为 AI 编程打造
-
-</div>
+文件和文件夹图标来自 Miguel Solorio 的 [Symbols](https://github.com/miguelsolorio/vscode-symbols)，采用 MIT 许可。其他内置主题与素材的许可说明保留在 `assets/` 中。

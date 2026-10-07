@@ -56,7 +56,9 @@ only, following the format in AGENTS.md:
 - no inherited capabilities presented as new, and no CI run IDs or checksum
   detail; link the one-time manual migration guide when it applies.
 
-Future releases follow 0.1.1, 0.1.2, etc.
+Choose the next semantic version for the accepted scope. The next candidate is
+v0.2.0; its [local review record](../testing/release-v0.2.0.md) tracks approval
+and the remaining publication steps.
 
 ## Build, verify, publish
 
