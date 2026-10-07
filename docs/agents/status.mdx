@@ -16,7 +16,7 @@ screen the way [herdr](https://herdr.dev) does.
 | Agent | |
 |---|---|
 | Claude Code · Codex · Copilot CLI · OpenCode · Pi · Grok Build · Oh My Pi · Gemini · Droid · Qwen Code · Goose · Kimi Code | Hooks available |
-| Amp · Cursor · Hermes · Antigravity | No hooks; status comes from the screen |
+| Amp · Cursor · Hermes · Antigravity | No hook installer; status comes from the screen by default |
 | Aider · Auggie · Vibe | Detected and labelled, but no status channel yet |
 
 Installing writes into that agent's own configuration directory. Once installed
@@ -28,6 +28,10 @@ ships a newer hook.
   The hooks only do anything inside tty7. Running the same agent in another
   terminal is unaffected.
 </Note>
+
+Cursor Agent also imports compatible hooks from Claude settings. If tty7's
+Claude hooks are installed, Cursor's native hook payload keeps those events
+attributed to Cursor. It has no separate hook install button.
 
 Hooks are installed per machine. Once a second
 [machine](/remote/workspaces) is linked, a row of chips appears above the table
@@ -104,9 +108,9 @@ Which means that by default — *When unfocused* — you are told the instant yo
 are the bottleneck, and left alone while you are watching.
 
 These come from agents whose hooks are installed. An agent tty7 only reads off
-its screen, such as Cursor or Antigravity, moves its symbol but does not
-interrupt you mid-session: it gets the one "finished" notice when the agent
-exits.
+its screen, such as Cursor without imported hooks or Antigravity, moves its
+symbol but does not interrupt you mid-session: it gets the one "finished"
+notice when the agent exits.
 
 ## The tray icon
 
