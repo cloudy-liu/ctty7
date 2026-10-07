@@ -54,9 +54,21 @@ fn effective_event<'a>(agent: &str, event: &'a str, stdin_json: &str) -> Option<
     Some(event)
 }
 
-fn build_hook_sequence(agent: &str, event: &str, stdin_json: &str) -> Vec<u8> {
+pub(crate) fn build_hook_sequence(agent: &str, event: &str, stdin_json: &str) -> Vec<u8> {
     let payload: serde_json::Value =
         serde_json::from_str(stdin_json).unwrap_or(serde_json::json!({}));
+    // Cursor imports Claude hook commands but sends its native payload.
+    // Environment markers can also be inherited by a genuine Claude child.
+    let agent = if agent == "claude"
+        && payload
+            .get("cursor_version")
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|version| !version.trim().is_empty())
+    {
+        "cursor"
+    } else {
+        agent
+    };
     let mut body = serde_json::json!({
         "v": 1,
         "agent": agent,

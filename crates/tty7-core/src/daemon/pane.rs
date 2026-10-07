@@ -6303,6 +6303,151 @@ mod tests {
     }
 
     #[test]
+    fn cursor_compatible_hooks_keep_identity_and_session_through_process_probes() {
+        use crate::core::agent_hooks::build_hook_sequence;
+        use crate::core::cli_agent::{AgentStatus, CLIAgent};
+
+        let mut state = test_state(true);
+        let (tx, rx) = mpsc::channel();
+        state.subscriber = Some(tx);
+        let mut sniffer = OscSniffer::new();
+        // Cursor maps the Claude config's commands onto its own hook events,
+        // then sends this native payload unchanged to the imported command.
+        for (native_event, hook_event, status) in [
+            ("sessionStart", "session-start", AgentStatus::Idle),
+            ("beforeSubmitPrompt", "prompt-submit", AgentStatus::Working),
+            ("postToolUse", "tool-complete", AgentStatus::Working),
+            ("stop", "stop", AgentStatus::Done),
+        ] {
+            let input = serde_json::json!({
+                "session_id": "cursor-session",
+                "conversation_id": "cursor-conversation",
+                "hook_event_name": native_event,
+                "cursor_version": "2026.10.01-e373342",
+                "workspace_roots": ["/w"],
+                "prompt": "fix the bug",
+            });
+            let sequence = build_hook_sequence("claude", hook_event, &input.to_string());
+            apply_signals(&mut state, sniffer.feed(&sequence));
+            assert_eq!(state.agent, Some(CLIAgent::Cursor), "{native_event}");
+            for probe in [Vec::new(), vec!["cursor-agent".into()]] {
+                apply_agent(&mut state, Some((CLIAgent::Cursor, probe)));
+                let session = state.agent_session.as_ref().expect("hook-owned session");
+                assert_eq!(session.session_id.as_deref(), Some("cursor-session"));
+                assert_eq!(session.status, status, "{native_event}");
+            }
+        }
+        let end = build_hook_sequence(
+            "claude",
+            "session-end",
+            r#"{"session_id":"cursor-session","cursor_version":"2026.10.01-e373342","hook_event_name":"sessionEnd"}"#,
+        );
+        apply_signals(&mut state, sniffer.feed(&end));
+        apply_agent(&mut state, Some((CLIAgent::Cursor, Vec::new())));
+        assert!(state.agent.is_none());
+        assert!(state.agent_session.is_none());
+        assert!(
+            rx.try_iter()
+                .all(|message| { !matches!(message, DaemonMsg::Agent(Some(CLIAgent::Claude))) }),
+            "subscribers must never receive a Claude identity"
+        );
+    }
+
+    #[test]
+    fn cursor_payload_detection_preserves_other_hook_callers() {
+        use crate::core::agent_hooks::build_hook_sequence;
+        use crate::core::cli_agent::{AgentStatus, CLIAgent};
+
+        // The runner may inherit CURSOR_VERSION / CURSOR_PROJECT_DIR from
+        // Cursor. Only the native JSON identifies the caller of this event.
+        for (agent, input, expected) in [
+            (
+                "claude",
+                r#"{"session_id":"native-session","hook_event_name":"UserPromptSubmit"}"#,
+                CLIAgent::Claude,
+            ),
+            (
+                "claude",
+                r#"{"session_id":"native-session","cursor_version":""}"#,
+                CLIAgent::Claude,
+            ),
+            (
+                "claude",
+                r#"{"session_id":"native-session","cursor_version":"   "}"#,
+                CLIAgent::Claude,
+            ),
+            (
+                "claude",
+                r#"{"session_id":"native-session","cursor_version":true}"#,
+                CLIAgent::Claude,
+            ),
+            (
+                "codex",
+                r#"{"session_id":"native-session","cursor_version":"2026.10.01"}"#,
+                CLIAgent::Codex,
+            ),
+            (
+                "grok",
+                r#"{"sessionId":"native-session","cursor_version":"2026.10.01"}"#,
+                CLIAgent::Grok,
+            ),
+            (
+                "cursor",
+                r#"{"session_id":"native-session"}"#,
+                CLIAgent::Cursor,
+            ),
+        ] {
+            let mut state = test_state(true);
+            let mut sniffer = OscSniffer::new();
+            let sequence = build_hook_sequence(agent, "prompt-submit", input);
+            apply_signals(&mut state, sniffer.feed(&sequence));
+            assert_eq!(state.agent, Some(expected), "{agent}: {input}");
+            let session = state.agent_session.as_ref().unwrap();
+            assert_eq!(session.session_id.as_deref(), Some("native-session"));
+            assert_eq!(session.status, AgentStatus::Working);
+        }
+    }
+
+    #[test]
+    fn cursor_shutdown_cannot_clear_a_replacement_session() {
+        use crate::core::agent_hooks::build_hook_sequence;
+        use crate::core::cli_agent::{AgentStatus, CLIAgent};
+
+        for (agent, input, expected) in [
+            (
+                "claude",
+                r#"{"session_id":"replacement"}"#,
+                CLIAgent::Claude,
+            ),
+            (
+                "claude",
+                r#"{"session_id":"replacement","cursor_version":"2026.10.01"}"#,
+                CLIAgent::Cursor,
+            ),
+        ] {
+            let mut state = test_state(true);
+            let mut sniffer = OscSniffer::new();
+            let old = r#"{"session_id":"old-cursor","cursor_version":"2026.10.01"}"#;
+            apply_signals(
+                &mut state,
+                sniffer.feed(&build_hook_sequence("claude", "session-start", old)),
+            );
+            apply_signals(
+                &mut state,
+                sniffer.feed(&build_hook_sequence(agent, "session-start", input)),
+            );
+            apply_signals(
+                &mut state,
+                sniffer.feed(&build_hook_sequence("claude", "session-end", old)),
+            );
+            assert_eq!(state.agent, Some(expected));
+            let session = state.agent_session.as_ref().unwrap();
+            assert_eq!(session.session_id.as_deref(), Some("replacement"));
+            assert_eq!(session.status, AgentStatus::Idle);
+        }
+    }
+
+    #[test]
     fn sentinel_events_drive_agent_session_state() {
         use crate::core::cli_agent::{AgentStatus, CLIAgent};
 
