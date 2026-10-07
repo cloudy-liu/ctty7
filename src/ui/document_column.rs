@@ -864,6 +864,177 @@ mod gpui_tests {
     }
 
     #[gpui::test]
+    fn diff_cards_and_rows_fill_the_content_width(cx: &mut TestAppContext) {
+        use crate::core::config::DiffViewMode;
+        use crate::terminal::git_diff::{
+            DiffLine, DiffSnapshot, DiffSource, FileDiff, FileStatus, Hunk, LineKind,
+        };
+        use crate::ui::diff_overlay::DiffLoad;
+        use std::sync::Arc;
+
+        let (app, mut vcx) = window(cx, 1600.);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.open_diff_overlay(
+                crate::ui::host_ops::HostId::LOCAL,
+                std::path::PathBuf::from("/no/such/tty7/repo"),
+                DiffSource::Worktree,
+                None,
+                window,
+                cx,
+            );
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            vcx.run_until_parked();
+            if app.update_in(&mut vcx, |app, _, _| {
+                !app.tabs[app.active].diff_overlay.as_ref().unwrap().loading
+            }) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "diff probe did not finish"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        let file = |path: &str, text: String, lines: u32| FileDiff {
+            path: path.into(),
+            old_path: None,
+            status: FileStatus::Modified,
+            added: lines,
+            removed: 0,
+            binary: false,
+            truncated: None,
+            hunks: vec![Hunk {
+                header: format!("@@ -0,0 +1,{lines} @@"),
+                lines: (1..=lines)
+                    .map(|no| DiffLine {
+                        kind: LineKind::Added,
+                        old_no: None,
+                        new_no: Some(no),
+                        text: text.clone(),
+                    })
+                    .collect(),
+            }],
+        };
+        let snap = Arc::new(DiffSnapshot {
+            source: DiffSource::Worktree,
+            files: vec![
+                file("short.rs", "".into(), 1),
+                file("long.rs", "long ".repeat(1000), 100),
+            ],
+            untracked: vec!["scratch.rs".into()],
+            untracked_total: 1,
+            ..Default::default()
+        });
+        app.update_in(&mut vcx, |app, _, cx| {
+            let overlay = app.tabs[app.active].diff_overlay.as_mut().unwrap();
+            overlay.load = DiffLoad::Ready(snap.clone());
+            overlay.preview = Some((
+                "scratch.rs".into(),
+                Some(Arc::new(file("scratch.rs", "x".into(), 100))),
+            ));
+            overlay.expanded.insert("short.rs".into(), true);
+            overlay.expanded.insert("long.rs".into(), true);
+            cx.notify();
+        });
+        for mode in [DiffViewMode::Unified, DiffViewMode::Split] {
+            app.update_in(&mut vcx, |app, _, cx| {
+                app.update_config(cx, |cfg| cfg.diff_view = mode)
+            });
+            for focus in [None, Some("short.rs"), Some("long.rs"), Some("scratch.rs")] {
+                app.update_in(&mut vcx, |app, _, cx| {
+                    app.tabs[app.active].diff_overlay.as_mut().unwrap().focus =
+                        focus.map(str::to_owned);
+                    cx.notify();
+                });
+                for (width, layout) in [
+                    (1600., DocumentLayout::Dock),
+                    (1100., DocumentLayout::Fill),
+                    (760., DocumentLayout::Dock),
+                    (1600., DocumentLayout::Dock),
+                ] {
+                    app.update_in(&mut vcx, |app, _, cx| app.set_document_layout(layout, cx));
+                    vcx.simulate_resize(size(px(width), px(900.)));
+                    vcx.run_until_parked();
+                    let scroll = vcx.debug_bounds("diff-scroll").unwrap();
+                    let panel = vcx.debug_bounds("diff-panel").unwrap();
+                    assert_eq!(
+                        scroll.size.width, panel.size.width,
+                        "scroll width in {mode:?} with {focus:?}"
+                    );
+                    let row = vcx.debug_bounds("diff-row").unwrap();
+                    let mut card_width = None;
+                    for selector in ["diff-card-0", "diff-card-1", "diff-preview-card"] {
+                        if let Some(card) = vcx.debug_bounds(selector) {
+                            assert_eq!(
+                                card.size.width,
+                                scroll.size.width - px(32.),
+                                "card width in {mode:?} with {focus:?}"
+                            );
+                            card_width = Some(card.size.width);
+                        }
+                    }
+                    assert_eq!(
+                        row.size.width,
+                        card_width.unwrap() - px(2.),
+                        "row width in {mode:?} with {focus:?}"
+                    );
+                    if mode == DiffViewMode::Split {
+                        let old = vcx.debug_bounds("diff-old-cell").unwrap();
+                        let new = vcx.debug_bounds("diff-new-cell").unwrap();
+                        assert!(
+                            (old.size.width - new.size.width).abs() <= px(1.),
+                            "split cells remain equal"
+                        );
+                        assert_eq!(old.size.width + new.size.width + px(1.), row.size.width);
+                    }
+                    if focus != Some("short.rs") {
+                        assert!(
+                            app.update_in(&mut vcx, |app, _, _| {
+                                app.tabs[app.active]
+                                    .diff_overlay
+                                    .as_ref()
+                                    .unwrap()
+                                    .scroll
+                                    .max_offset()
+                                    .y
+                                    > px(0.)
+                            }),
+                            "the long patch retains its scroll range"
+                        );
+                    }
+                }
+            }
+        }
+        // A collapsed focused card still fills the list, including after a
+        // refreshed patch replaces the snapshot that was initially displayed.
+        for expanded in [false, true] {
+            app.update_in(&mut vcx, |app, _, cx| {
+                let overlay = app.tabs[app.active].diff_overlay.as_mut().unwrap();
+                overlay.focus = Some("short.rs".into());
+                overlay.expanded.insert("short.rs".into(), expanded);
+                let mut refreshed = snap.as_ref().clone();
+                refreshed.files[0].hunks[0].lines[0].text = "refreshed".into();
+                overlay.load = DiffLoad::Ready(Arc::new(refreshed));
+                cx.notify();
+            });
+            vcx.run_until_parked();
+            let scroll = vcx.debug_bounds("diff-scroll").unwrap();
+            let card = vcx.debug_bounds("diff-card-0").unwrap();
+            assert_eq!(card.size.width, scroll.size.width - px(32.));
+            if expanded {
+                assert_eq!(
+                    vcx.debug_bounds("diff-row").unwrap().size.width,
+                    card.size.width - px(2.)
+                );
+            } else {
+                assert!(vcx.debug_bounds("diff-row").is_none());
+            }
+        }
+    }
+
+    #[gpui::test]
     fn compact_diff_button_preserves_the_focused_patch_and_switches_both_ways(
         cx: &mut TestAppContext,
     ) {
