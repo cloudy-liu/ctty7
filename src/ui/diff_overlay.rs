@@ -816,6 +816,7 @@ impl Tty7App {
                 .debug_selector(|| "diff-scroll".into())
                 .flex_1()
                 .min_h_0()
+                .w_full()
                 .overflow_y_scroll()
                 .track_scroll(scroll)
                 .child(list),
@@ -890,6 +891,7 @@ impl Tty7App {
                 .debug_selector(|| "diff-scroll".into())
                 .flex_1()
                 .min_h_0()
+                .w_full()
                 .overflow_y_scroll()
                 .track_scroll(scroll)
                 .child(list),
