@@ -29,7 +29,7 @@ use crate::ui::right_panel::info_chip;
 use crate::ui::rounding;
 use crate::ui::rounding::RoundedCorners as _;
 use crate::ui::scm::path::relative_time;
-use crate::ui::scm::status::{status_color, status_glyph};
+use crate::ui::scm::status::status_glyph;
 
 pub(crate) enum DiffLoad {
     Loading,
@@ -96,6 +96,65 @@ fn diff_overlay_background(
     match active {
         Some(bg) => crate::ui::theme::window_background_opaque(bg),
         None => fallback.alpha(1.0).into(),
+    }
+}
+
+// Use the immutable bundled reading theme, independent of the user's Markdown
+// theme choice and application preset status colors.
+struct DiffPalette {
+    background: Hsla,
+    foreground: Hsla,
+    header: Hsla,
+    muted: Hsla,
+    border: Hsla,
+    hunk: Hsla,
+    added: Hsla,
+    added_background: Hsla,
+    removed: Hsla,
+    removed_background: Hsla,
+    changed: Hsla,
+}
+
+fn diff_palette(cx: &gpui::App) -> DiffPalette {
+    let theme = crate::core::markdown_theme::builtin();
+    let p = theme.palette(cx.theme().mode.is_dark());
+    let color = crate::ui::markdown_preview::color;
+    let added = p
+        .syntax
+        .diff_added
+        .as_ref()
+        .expect("bundled GitHub additions");
+    let removed = p
+        .syntax
+        .diff_deleted
+        .as_ref()
+        .expect("bundled GitHub deletions");
+    DiffPalette {
+        background: color(p.background),
+        foreground: color(p.foreground),
+        header: color(p.code_background),
+        muted: color(p.muted),
+        border: color(p.border),
+        hunk: color(p.syntax.diff_hunk.expect("bundled GitHub hunk color")),
+        added: color(added.foreground),
+        added_background: color(
+            added
+                .background
+                .expect("bundled GitHub addition background"),
+        ),
+        removed: color(removed.foreground),
+        removed_background: color(
+            removed
+                .background
+                .expect("bundled GitHub deletion background"),
+        ),
+        changed: color(
+            p.syntax
+                .diff_changed
+                .as_ref()
+                .expect("bundled GitHub changes")
+                .foreground,
+        ),
     }
 }
 
@@ -428,6 +487,15 @@ impl Tty7App {
                 cx,
             ),
         };
+
+        let palette = diff_palette(cx);
+        let content = v_flex()
+            .flex_1()
+            .min_h_0()
+            .w_full()
+            .bg(palette.background)
+            .text_color(palette.foreground)
+            .child(content);
 
         let header = chrome
             .renders_own_header()
@@ -823,13 +891,14 @@ impl Tty7App {
     }
 
     fn diff_message(&self, text: &'static str, cx: &Context<Self>) -> AnyElement {
+        let palette = diff_palette(cx);
         div()
             .flex_1()
             .flex()
             .items_center()
             .justify_center()
             .text_sm()
-            .text_color(cx.theme().muted_foreground)
+            .text_color(palette.muted)
             .child(text)
             .into_any_element()
     }
@@ -843,6 +912,7 @@ impl Tty7App {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let stats = snap.stats();
+        let palette = diff_palette(cx);
         let mode = view_mode(cx);
         let oversized = focused.is_none() && stats.oversized;
         let mut list = v_flex().gap_3().p_4().w_full();
@@ -872,7 +942,7 @@ impl Tty7App {
                     .px_2p5()
                     .py_1p5()
                     .text_xs()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(palette.muted)
                     .child(t_plural(L10nKey::DiffMoreFiles, rest, &[])),
             );
         }
@@ -901,6 +971,7 @@ impl Tty7App {
         stats: &DiffStats,
         cx: &Context<Self>,
     ) -> AnyElement {
+        let palette = diff_palette(cx);
         let text = t_fmt(
             L10nKey::DiffOversizedNotice,
             &[("summary", &oversized_summary(snap, stats))],
@@ -911,10 +982,10 @@ impl Tty7App {
             .py_2()
             .rounded_md()
             .border_1()
-            .border_color(cx.theme().border)
-            .bg(cx.theme().secondary)
+            .border_color(palette.border)
+            .bg(palette.header)
             .text_xs()
-            .text_color(cx.theme().muted_foreground)
+            .text_color(palette.muted)
             .child(text)
             .into_any_element()
     }
@@ -926,11 +997,17 @@ impl Tty7App {
         expanded: bool,
         mode: DiffViewMode,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> gpui::Div {
+        let palette = diff_palette(cx);
         let expandable =
             !file.binary && (!file.hunks.is_empty() || file.truncated == Some(Truncation::Budget));
         let deco = deco_status(file.status);
-        let (glyph, glyph_color) = (status_glyph(deco), status_color(deco, cx));
+        let glyph = status_glyph(deco);
+        let glyph_color = match file.status {
+            FileStatus::Added => palette.added,
+            FileStatus::Deleted => palette.removed,
+            _ => palette.changed,
+        };
         let shown_path = match &file.old_path {
             Some(old) => format!("{old} → {}", file.path),
             None => file.path.clone(),
@@ -952,11 +1029,11 @@ impl Tty7App {
             .px_2p5()
             .py_1p5()
             .rounded_corners(header_corners)
-            .bg(cx.theme().secondary)
+            .bg(palette.header)
             .when(expandable, |h| {
                 let path = file.path.clone();
                 h.cursor_pointer()
-                    .hover(|s| s.bg(cx.theme().list_hover))
+                    .hover(|s| s.bg(palette.background))
                     .on_click(cx.listener(move |this, _, _window, cx| {
                         let active = this.active;
                         if let Some(overlay) = this
@@ -975,7 +1052,7 @@ impl Tty7App {
                             IconName::ChevronRight
                         })
                         .small()
-                        .text_color(cx.theme().muted_foreground),
+                        .text_color(palette.muted),
                     )
             })
             .child(
@@ -1001,7 +1078,7 @@ impl Tty7App {
                 div()
                     .flex_shrink_0()
                     .text_xs()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(palette.muted)
                     .child(t(L10nKey::Binary)),
             );
         }
@@ -1010,7 +1087,7 @@ impl Tty7App {
                 div()
                     .flex_shrink_0()
                     .text_xs()
-                    .text_color(cx.theme().success)
+                    .text_color(palette.added)
                     .child(format!("+{}", file.added)),
             );
         }
@@ -1019,7 +1096,7 @@ impl Tty7App {
                 div()
                     .flex_shrink_0()
                     .text_xs()
-                    .text_color(cx.theme().danger)
+                    .text_color(palette.removed)
                     .child(format!("−{}", file.removed)),
             );
         }
@@ -1027,7 +1104,9 @@ impl Tty7App {
         let mut card = v_flex()
             .w_full()
             .border_1()
-            .border_color(cx.theme().border)
+            .border_color(palette.border)
+            .bg(palette.background)
+            .text_color(palette.foreground)
             .rounded(rounding::CARD_RADIUS)
             .overflow_hidden()
             .child(header);
@@ -1059,10 +1138,10 @@ impl Tty7App {
                         .w_full()
                         .px_2()
                         .py_0p5()
-                        .bg(cx.theme().muted)
+                        .bg(palette.header)
                         .text_xs()
                         .font_family(self.font_family.clone())
-                        .text_color(cx.theme().muted_foreground)
+                        .text_color(palette.hunk)
                         .truncate()
                         .child(hunk.header.clone()),
                 );
@@ -1101,13 +1180,13 @@ impl Tty7App {
                         .px_2()
                         .py_1()
                         .text_xs()
-                        .text_color(cx.theme().muted_foreground)
+                        .text_color(palette.muted)
                         .child(note),
                 );
             }
             card = card.child(body);
         }
-        card.into_any_element()
+        card
     }
 
     /// Show the current arrangement and name the destination in the tooltip.
@@ -1151,7 +1230,8 @@ impl Tty7App {
             .into_any_element()
     }
 
-    fn diff_split_row(&self, row: &SplitRow, closes_card: bool, cx: &Context<Self>) -> AnyElement {
+    fn diff_split_row(&self, row: &SplitRow, closes_card: bool, cx: &Context<Self>) -> gpui::Div {
+        let palette = diff_palette(cx);
         let radius = if closes_card {
             rounding::inner_radius(rounding::CARD_RADIUS, rounding::HAIRLINE)
         } else {
@@ -1164,9 +1244,8 @@ impl Tty7App {
             .text_xs()
             .font_family(self.font_family.clone())
             .child(self.diff_split_cell(row.left.as_ref(), Side::Old, radius, cx))
-            .child(div().flex_shrink_0().w(px(1.)).bg(cx.theme().border))
+            .child(div().flex_shrink_0().w(px(1.)).bg(palette.border))
             .child(self.diff_split_cell(row.right.as_ref(), Side::New, radius, cx))
-            .into_any_element()
     }
 
     fn diff_split_cell(
@@ -1175,28 +1254,30 @@ impl Tty7App {
         side: Side,
         outer_radius: Pixels,
         cx: &Context<Self>,
-    ) -> AnyElement {
+    ) -> gpui::Div {
+        let palette = diff_palette(cx);
         let base = h_flex().flex_1().min_w_0().h_full().items_center();
         let base = match side {
             Side::Old => base.rounded_bl(outer_radius),
             Side::New => base.rounded_br(outer_radius),
         };
         let Some(cell) = cell else {
-            return base.bg(cx.theme().muted.opacity(0.3)).into_any_element();
+            return base.bg(palette.header);
         };
-        let (marker, tint) = match (cell.changed, side) {
-            (true, Side::Old) => ("−", Some(cx.theme().danger.opacity(0.12))),
-            (true, Side::New) => ("+", Some(cx.theme().success.opacity(0.12))),
-            (false, _) => (" ", None),
+        let (marker, foreground, background) = match (cell.changed, side) {
+            (true, Side::Old) => ("−", palette.removed, palette.removed_background),
+            (true, Side::New) => ("+", palette.added, palette.added_background),
+            (false, _) => (" ", palette.foreground, palette.background),
         };
-        base.when_some(tint, |row, bg| row.bg(bg))
+        base.bg(background)
+            .text_color(foreground)
             .child(
                 h_flex()
                     .flex_shrink_0()
                     .w(px(42.))
                     .justify_end()
                     .pr_1p5()
-                    .text_color(cx.theme().muted_foreground.opacity(0.7))
+                    .text_color(palette.muted)
                     .child(cell.no.map(|n| n.to_string()).unwrap_or_default()),
             )
             .child(
@@ -1206,14 +1287,13 @@ impl Tty7App {
                     .truncate()
                     .child(format!("{marker} {}", cell.text)),
             )
-            .into_any_element()
     }
 
     /// One line of the unified view.
     ///
     /// Every measurement it shares with [`Self::diff_split_cell`] is shared on
     /// purpose — the same 19px row, the same `text_xs` in the same family, and
-    /// above all the same `0.12` wash behind an addition and a removal. The two
+    /// the same GitHub colors for additions, deletions and context. The two
     /// views are one diff seen twice; a different green would read as a
     /// different thing.
     ///
@@ -1228,16 +1308,17 @@ impl Tty7App {
         row: &UnifiedRow,
         closes_card: bool,
         cx: &Context<Self>,
-    ) -> AnyElement {
+    ) -> gpui::Div {
+        let palette = diff_palette(cx);
         let radius = if closes_card {
             rounding::inner_radius(rounding::CARD_RADIUS, rounding::HAIRLINE)
         } else {
             px(0.)
         };
-        let (marker_color, tint) = match row.kind {
-            LineKind::Added => (cx.theme().success, Some(cx.theme().success.opacity(0.12))),
-            LineKind::Removed => (cx.theme().danger, Some(cx.theme().danger.opacity(0.12))),
-            LineKind::Context => (cx.theme().muted_foreground, None),
+        let (foreground, background) = match row.kind {
+            LineKind::Added => (palette.added, palette.added_background),
+            LineKind::Removed => (palette.removed, palette.removed_background),
+            LineKind::Context => (palette.foreground, palette.background),
         };
         let gutter = |no: Option<u32>| {
             h_flex()
@@ -1245,7 +1326,7 @@ impl Tty7App {
                 .w(px(34.))
                 .justify_end()
                 .pr_1p5()
-                .text_color(cx.theme().muted_foreground.opacity(0.7))
+                .text_color(palette.muted)
                 .child(no.map(|n| n.to_string()).unwrap_or_default())
         };
         h_flex()
@@ -1256,32 +1337,27 @@ impl Tty7App {
             .font_family(self.font_family.clone())
             .rounded_bl(radius)
             .rounded_br(radius)
-            .when_some(tint, |line, bg| line.bg(bg))
+            .bg(background)
+            .text_color(foreground)
             .child(gutter(row.old))
             .child(gutter(row.new))
             // The split view's centre rule, in the one place it still means the
             // same thing: everything left of it is a number, everything right
             // of it is the file.
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .w(px(1.))
-                    .h_full()
-                    .bg(cx.theme().border),
-            )
+            .child(div().flex_shrink_0().w(px(1.)).h_full().bg(palette.border))
             .child(
                 div()
                     .flex_shrink_0()
                     .w(px(12.))
                     .text_center()
-                    .text_color(marker_color)
+                    .text_color(foreground)
                     .child(unified_marker(row.kind)),
             )
             .child(div().flex_1().min_w_0().truncate().child(row.text.clone()))
-            .into_any_element()
     }
 
     fn diff_untracked_section(&self, snap: &DiffSnapshot, cx: &Context<Self>) -> AnyElement {
+        let palette = diff_palette(cx);
         let total = snap.untracked_count();
         let untracked = &snap.untracked[..snap.untracked.len().min(MAX_RENDERED_FILES)];
         let header_corners = rounding::stack_corners(
@@ -1293,7 +1369,9 @@ impl Tty7App {
         let mut section = v_flex()
             .w_full()
             .border_1()
-            .border_color(cx.theme().border)
+            .border_color(palette.border)
+            .bg(palette.background)
+            .text_color(palette.foreground)
             .rounded(rounding::CARD_RADIUS)
             .overflow_hidden()
             .child(
@@ -1302,9 +1380,9 @@ impl Tty7App {
                     .px_2p5()
                     .py_1p5()
                     .rounded_corners(header_corners)
-                    .bg(cx.theme().secondary)
+                    .bg(palette.header)
                     .text_xs()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(palette.muted)
                     .child(t_plural(L10nKey::DiffUntrackedHeader, total, &[])),
             );
         for (i, path) in untracked.iter().enumerate() {
@@ -1326,7 +1404,7 @@ impl Tty7App {
                     .text_xs()
                     .font_family(self.font_family.clone())
                     .cursor_pointer()
-                    .hover(|s| s.bg(cx.theme().secondary))
+                    .hover(|s| s.bg(palette.header))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         let Some((host, cwd, source)) = this
                             .tabs
@@ -1349,7 +1427,7 @@ impl Tty7App {
                         div()
                             .flex_shrink_0()
                             .font_weight(FontWeight::BOLD)
-                            .text_color(status_color(DecoStatus::Untracked, cx))
+                            .text_color(palette.added)
                             .child(status_glyph(DecoStatus::Untracked)),
                     )
                     .child(div().flex_1().min_w_0().truncate().child(path.clone())),
@@ -1363,7 +1441,7 @@ impl Tty7App {
                     .px_2p5()
                     .py_1()
                     .text_xs()
-                    .text_color(cx.theme().muted_foreground)
+                    .text_color(palette.muted)
                     .child(t_plural(L10nKey::DiffMoreUntracked, rest, &[])),
             );
         }
@@ -1390,7 +1468,7 @@ fn unified_marker(kind: LineKind) -> &'static str {
     }
 }
 
-/// The git status letter and colour every part of the app agrees on.
+/// The git status decoration shared across the app.
 ///
 /// `Copied` and `TypeChanged` have no decoration of their own — porcelain v2's
 /// index folds them the same way — so they take the nearest one rather than
@@ -2625,5 +2703,111 @@ mod render_idle_gpui_tests {
             "a settled overlay must stop re-reading its own diff"
         );
         let _ = std::fs::remove_dir_all(&root);
+    }
+}
+
+#[cfg(test)]
+mod github_theme_gpui_tests {
+    use super::*;
+    use crate::ui::app::test_window;
+    use gpui::{TestAppContext, point, size};
+    use gpui_component::{Theme, ThemeMode};
+
+    // Independent expectations from the approved GitHub reference colors.
+    #[gpui::test]
+    fn rendered_changes_use_github_colors_in_both_modes(cx: &mut TestAppContext) {
+        let (app, mut vcx) = test_window::harness(cx);
+        for (mode, added, added_bg, removed, removed_bg) in [
+            (ThemeMode::Light, 0x116329, 0xdafbe1, 0x82071e, 0xffebe9),
+            (ThemeMode::Dark, 0xaff5b4, 0x033a16, 0xffdcd7, 0x67060c),
+        ] {
+            vcx.update(|window, cx| Theme::change(mode, Some(window), cx));
+            for (kind, side, fg, bg) in [
+                (LineKind::Added, Side::New, added, added_bg),
+                (LineKind::Removed, Side::Old, removed, removed_bg),
+            ] {
+                let expected_fg = gpui::Hsla::from(gpui::rgb(fg));
+                let expected_bg = gpui::Fill::from(gpui::rgb(bg));
+                let mut unified = app.update_in(&mut vcx, |app, _, cx| {
+                    app.diff_unified_row(
+                        &UnifiedRow {
+                            kind,
+                            old: None,
+                            new: Some(2),
+                            text: "changed".into(),
+                        },
+                        false,
+                        cx,
+                    )
+                });
+                assert_eq!(unified.style().background, Some(expected_bg.clone()));
+                assert_eq!(unified.style().text.color, Some(expected_fg));
+                vcx.draw(point(px(0.), px(0.)), size(px(700.), px(19.)), |_, _| {
+                    unified
+                });
+                let mut split = app.update_in(&mut vcx, |app, _, cx| {
+                    app.diff_split_cell(
+                        Some(&SplitCell {
+                            no: Some(2),
+                            text: "changed".into(),
+                            changed: true,
+                        }),
+                        side,
+                        px(0.),
+                        cx,
+                    )
+                });
+                assert_eq!(split.style().background, Some(expected_bg));
+                assert_eq!(split.style().text.color, Some(expected_fg));
+                vcx.draw(point(px(0.), px(0.)), size(px(350.), px(19.)), |_, _| split);
+            }
+        }
+    }
+    #[gpui::test]
+    fn rendered_context_and_file_cards_share_an_opaque_github_palette(cx: &mut TestAppContext) {
+        let (app, mut vcx) = test_window::harness(cx);
+        for (mode, fg, bg, border) in [
+            (ThemeMode::Light, 0x1f2328, 0xffffff, 0xd1d9e0),
+            (ThemeMode::Dark, 0xf0f6fc, 0x0d1117, 0x3d444d),
+        ] {
+            vcx.update(|window, cx| {
+                Theme::change(mode, Some(window), cx);
+                // Unrelated custom-preset status colors must not affect reading.
+                let theme = Theme::global_mut(cx);
+                theme.success = gpui::rgb(0xff00ff).into();
+                theme.danger = gpui::rgb(0x00ffff).into();
+            });
+            let expected_fg = gpui::Hsla::from(gpui::rgb(fg));
+            let expected_bg = gpui::Fill::from(gpui::rgb(bg));
+            let mut context = app.update_in(&mut vcx, |app, _, cx| {
+                app.diff_unified_row(
+                    &UnifiedRow {
+                        kind: LineKind::Context,
+                        old: Some(1),
+                        new: Some(1),
+                        text: "keep".into(),
+                    },
+                    false,
+                    cx,
+                )
+            });
+            assert_eq!(context.style().background, Some(expected_bg.clone()));
+            assert_eq!(context.style().text.color, Some(expected_fg));
+            vcx.draw(point(px(0.), px(0.)), size(px(700.), px(19.)), |_, _| {
+                context
+            });
+            let file =
+                git_diff::synthesize_added("new.txt", b"new\n", &git_diff::DiffBudget::SINGLE_FILE);
+            for mode in [DiffViewMode::Unified, DiffViewMode::Split] {
+                let mut card = app.update_in(&mut vcx, |app, _, cx| {
+                    app.diff_file_card(0, &file, true, mode, cx)
+                });
+                assert_eq!(card.style().background, Some(expected_bg.clone()));
+                assert_eq!(card.style().text.color, Some(expected_fg));
+                assert_eq!(card.style().border_color, Some(gpui::rgb(border).into()));
+                // Interactive cards need a rendering view; the open-overlay
+                // mode-switch test draws these same cards in their real host.
+            }
+        }
     }
 }

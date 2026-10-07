@@ -692,6 +692,90 @@ mod gpui_tests {
     }
 
     #[gpui::test]
+    fn github_diff_mode_switch_keeps_the_open_patch_and_reading_position(cx: &mut TestAppContext) {
+        use crate::core::config::DiffViewMode;
+        use crate::terminal::git_diff::{self, DiffSnapshot, DiffSource};
+        use crate::ui::diff_overlay::{DiffLoad, DiffOverlayState};
+        use crate::ui::host_ops::HostId;
+        use gpui::{ScrollHandle, point};
+        use gpui_component::{Theme, ThemeMode};
+        use std::{collections::HashMap, path::PathBuf, sync::Arc};
+
+        let (app, mut vcx) = window(cx, 1600.);
+        let tracked = git_diff::synthesize_added(
+            "a.txt",
+            "line\n".repeat(120).as_bytes(),
+            &git_diff::DiffBudget::SINGLE_FILE,
+        );
+        let preview = Arc::new(git_diff::synthesize_added(
+            "new.txt",
+            "preview\n".repeat(120).as_bytes(),
+            &git_diff::DiffBudget::SINGLE_FILE,
+        ));
+        let source = DiffSource::commit("fixed-test-patch");
+        let snapshot = Arc::new(DiffSnapshot {
+            source: source.clone(),
+            files: vec![tracked],
+            untracked: vec!["new.txt".into()],
+            untracked_total: 1,
+            ..Default::default()
+        });
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            for path in ["a.txt", "new.txt"] {
+                let scroll = ScrollHandle::new();
+                let expanded =
+                    HashMap::from([("a.txt".into(), true), ("collapsed.txt".into(), false)]);
+                app.update_in(&mut vcx, |app, window, cx| {
+                    cx.global_mut::<Config>().diff_view = mode;
+                    let focus_handle = cx.focus_handle();
+                    window.focus(&focus_handle, cx);
+                    let active = app.active;
+                    app.tabs[active].overlay_top = OverlayTop::Diff;
+                    app.tabs[active].diff_overlay = Some(DiffOverlayState {
+                        host_id: HostId::LOCAL,
+                        cwd: PathBuf::from("/no/such/tty7/repo"),
+                        source: source.clone(),
+                        focus_handle,
+                        load: DiffLoad::Ready(Arc::clone(&snapshot)),
+                        loading: false,
+                        expanded: expanded.clone(),
+                        focus: Some(path.into()),
+                        preview: Some(("new.txt".into(), Some(Arc::clone(&preview)))),
+                        preview_loading: None,
+                        scroll: scroll.clone(),
+                        epoch: None,
+                    });
+                    cx.notify();
+                });
+                vcx.run_until_parked();
+                scroll.set_offset(point(px(0.), px(-120.)));
+                let before = scroll.offset();
+                assert_eq!(before.y, px(-120.), "the fixture must be scrollable");
+                for theme in [ThemeMode::Light, ThemeMode::Dark, ThemeMode::Light] {
+                    vcx.update(|window, cx| Theme::change(theme, Some(window), cx));
+                    vcx.run_until_parked();
+                    assert!(vcx.debug_bounds("diff-panel").is_some());
+                    app.update_in(&mut vcx, |app, window, _| {
+                        let overlay = app.tabs[app.active].diff_overlay.as_ref().unwrap();
+                        let DiffLoad::Ready(held) = &overlay.load else {
+                            panic!("patch was replaced")
+                        };
+                        assert!(Arc::ptr_eq(held, &snapshot));
+                        assert_eq!(overlay.focus.as_deref(), Some(path));
+                        assert_eq!(overlay.expanded, expanded);
+                        assert_eq!(overlay.scroll.offset(), before);
+                        assert!(overlay.focus_handle.is_focused(window));
+                        assert!(Arc::ptr_eq(
+                            overlay.preview.as_ref().unwrap().1.as_ref().unwrap(),
+                            &preview
+                        ));
+                    });
+                }
+            }
+        }
+    }
+
+    #[gpui::test]
     fn visible_fill_buttons_preserve_sidebars_and_restore_width(cx: &mut TestAppContext) {
         let (app, mut vcx) = window(cx, 1600.);
         vcx.update(|_, cx| {
