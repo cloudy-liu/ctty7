@@ -373,7 +373,9 @@ impl CLIAgent {
         let argv = &argv[argv.iter().take_while(|t| is_env_assignment(t)).count()..];
         let (program, args) = argv.split_first()?;
         let program = program.to_ascii_lowercase();
-        if Self::match_token(base_stem(&program)) == Some(self) {
+        if Self::match_token(base_stem(&program)) == Some(self)
+            || (self == Self::Cursor && base_stem(&program) == "agent")
+        {
             Some(args)
         } else if is_interpreter(base_stem(&program)) {
             let named = args.iter().position(|arg| {
@@ -477,7 +479,12 @@ impl CLIAgent {
             })
         };
         let argv = &argv[argv.iter().take_while(|t| is_env_assignment(t)).count()..];
-        let named = argv.iter().position(|t| names_self(t))?;
+        let named = argv.iter().enumerate().position(|(index, token)| {
+            names_self(token)
+                || (index == 0
+                    && self == Self::Cursor
+                    && base_stem(&token.to_ascii_lowercase()) == "agent")
+        })?;
         let mut tail: Vec<&str> = argv[named + 1..].iter().map(String::as_str).collect();
 
         if self == CLIAgent::Codex && matches!(tail.first(), Some(&"resume") | Some(&"fork")) {
@@ -723,6 +730,12 @@ impl CLIAgent {
             .and_then(|slug| CLIAgent::from_slug(slug))
         {
             return Some(agent);
+        }
+
+        // Cursor's standard launcher is generic enough to need a direct
+        // command match. Keep user mappings and interpreter-path guards.
+        if launcher_stem == "agent" {
+            return Some(CLIAgent::Cursor);
         }
 
         if is_interpreter(launcher_stem) {
@@ -1123,6 +1136,52 @@ mod tests {
                 .unstarted_command(&command_argv("goose session"))
                 .as_deref(),
             Some("goose session")
+        );
+    }
+
+    #[test]
+    fn cursor_standard_launcher_keeps_detection_and_restore_metadata() {
+        for launcher in [
+            "agent",
+            "agent.cmd",
+            r#"C:\Cursor\agent.exe"#,
+            "cursor-agent",
+        ] {
+            let command = format!("{launcher} --model grok-4.7");
+            let args = command_argv(&command);
+            assert_eq!(
+                CLIAgent::detect_from_command_with(&command, &HashMap::new()),
+                Some(CLIAgent::Cursor),
+                "{launcher}"
+            );
+            assert_eq!(
+                CLIAgent::Cursor.unstarted_command(&args).as_deref(),
+                Some("cursor-agent --model grok-4.7")
+            );
+            assert_eq!(
+                CLIAgent::Cursor
+                    .resume_command("cursor-session", Some(&args))
+                    .as_deref(),
+                Some("cursor-agent --model grok-4.7 --resume cursor-session")
+            );
+        }
+        let custom = HashMap::from([("agent".into(), "claude".into())]);
+        assert_eq!(
+            CLIAgent::detect_from_command_with("agent", &custom),
+            Some(CLIAgent::Claude),
+            "the generic launcher must respect an existing user mapping"
+        );
+        assert_eq!(
+            CLIAgent::detect_from_argv(&argv(&["node", "/project/agent/index.js"])),
+            None,
+            "a generic folder name does not identify Cursor"
+        );
+        assert_eq!(
+            CLIAgent::detect_from_image_path_with(
+                &std::path::PathBuf::from_iter(["project", "agent", "node.exe"]),
+                &HashMap::new(),
+            ),
+            None
         );
     }
 
