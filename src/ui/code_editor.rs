@@ -1207,8 +1207,9 @@ impl Tty7App {
                 // changes between docked and filled modes. The preview entity
                 // remains the same, so GPUI can reuse its measured tree until
                 // the preview notifies it about a real document or style change.
+                // The cache is a separate layout root and must occupy the viewport.
                 gpui::AnyView::from(reading)
-                    .cached(gpui::StyleRefinement::default())
+                    .cached(div().size_full().style().clone())
                     .into_any_element()
             }
             Some(f) => {

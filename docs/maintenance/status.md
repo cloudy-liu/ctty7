@@ -1,16 +1,17 @@
 # Project status
 
-Checked on 2026-10-06 against GitHub and the local checkout.
+Checked on 2026-10-08 against GitHub and the local checkout.
 This is a dated snapshot; query GitHub again before merging or preparing a release.
 
 ## Open work
 
 | Item | State | Remaining work |
 | --- | --- | --- |
-| Next official release | Not published | Select the release scope, prepare its version and English notes, then build and verify the draft assets before publication. Follow the [release runbook](release.md). |
+| v0.2.0 | Publication authorized; candidate verification in progress | Version, English notes, rewritten READMEs and native screenshots are prepared. Release PR CI, draft packages, checksum verification, and publication remain. See the [review record](../testing/release-v0.2.0.md). |
+| Issue #100, compact sidebar agent tags | Open on GitHub; implementation merged | PR #103 merged and child issue #101 closed. Native Windows checks and documentation updates are complete locally; close the parent when the release preparation merges. See [acceptance](../testing/sidebar-status-tags.md). |
 
-There are no open PRs or issues in `cloudy-liu/ctty7` at this check.
-PRs #90, #92 and #93 are merged.
+There are no open PRs in `cloudy-liu/ctty7` at this check. Issue #100 is the
+only open issue. PRs through #114 are merged.
 The component fork
 `cloudy-liu/gpui-component` has no open PRs; its four PRs are merged and its
 issue tracker is disabled.
@@ -24,6 +25,10 @@ issue tracker is disabled.
 | GitHub Markdown reading and v2 custom themes | PRs #88 and #91 merged; issue #85 closed as completed on 2026-10-06. |
 | Mermaid preview | PR #80 merged; issue #78 closed. Later GitHub reading fixes are included in #88 and #91. |
 | File-tree icons and spacing, current search match, document controls | PRs #82, #83, #87 and #72 merged; document-control issues #68–#70 closed. |
+| Compact uppercase sidebar tags | PR #103 merged; local native acceptance now covers light/dark, narrow widths, disabled text, status-only rows, and read results. |
+| Markdown theme cleanup, visible dotfiles, and preview switching performance | PRs #102, #104 and #105 merged. |
+| Diff width contract and GitHub reading colors | PRs #112 and #114 merged on 2026-10-07. Width regression coverage passes; new desktop acceptance and independent header/hunk/gutter color checks remain unrecorded. |
+| Cursor hook and session identity | PR #113 merged on 2026-10-07. Cursor attribution and stale-session regressions pass; native Windows startup acceptance remains unrecorded. |
 
 Markdown acceptance includes the recorded inspection of 24 native images:
 macOS and Linux, light and dark, wide and narrow, at three document sections.
@@ -44,7 +49,7 @@ these are verification gaps, not additional open GitHub tickets.
 
 ## Source and release state
 
-- Accepted GitHub Light, startup and documentation merges are included in `main` at `fb8fe6f2`; check GitHub for subsequent merges.
+- Fork `main` is at `8fcc511a`, including PRs #112, #113, and #114. Its [CI run](https://github.com/cloudy-liu/ctty7/actions/runs/37644303956) passed. The v0.2.0 preparation has separate [local verification](../testing/release-v0.2.0.md).
 - All nine [PR #90 CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/37444566340) passed on `73e99d52` before its merge.
 - All nine [PR #92 CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/37450774839) passed on `ffa76e55` before its merge. Local tests passed 2,985 cases with eight ignored.
 - All nine [PR #93 CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/37452292509) passed before the documentation merge.

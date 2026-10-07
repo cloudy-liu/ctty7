@@ -1,273 +1,127 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/logo.svg">
-  <source media="(prefers-color-scheme: light)" srcset="assets/logo.svg">
-  <img src="assets/logo.svg" alt="ctty7" height="120" />
-</picture>
-
-<h1>
-  <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=48&duration=3000&pause=1000&color=FF5FA2&center=true&vCenter=true&width=435&lines=ctty7" alt="ctty7" />
-</h1>
-
-<h3>A modern terminal workbench for AI-powered development</h3>
-
-<p>
-  <strong>Persistent sessions</strong> · <strong>Windows shell mastery</strong> · <strong>Coding agent awareness</strong> · <strong>Remote workspaces</strong>
+<p align="center" style="line-height: 24px;">
+  <img src="assets/logo.svg" alt="ctty7" width="120" height="120" style="margin: 0;" />
+  <br />
+  <br />
+  <img src="https://readme-typing-svg.demolab.com?font=JetBrains+Mono&weight=700&size=48&duration=3000&pause=1000&color=FF5FA2&center=true&vCenter=true&width=435&lines=ctty7" alt="ctty7" style="margin: 0;" />
 </p>
 
-<p>
-  <a href="https://github.com/cloudy-liu/ctty7/releases/latest">
-    <img src="https://img.shields.io/github/v/release/cloudy-liu/ctty7?style=for-the-badge&logo=github&color=FF5FA2&logoColor=white" alt="Download" />
-  </a>
-  <a href="https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml">
-    <img src="https://img.shields.io/github/actions/workflow/status/cloudy-liu/ctty7/ci.yml?style=for-the-badge&logo=githubactions&logoColor=white" alt="CI Status" />
-  </a>
-  <a href="LICENSE">
-    <img src="https://img.shields.io/badge/license-Apache--2.0-3FDD8C?style=for-the-badge" alt="License" />
-  </a>
-</p>
+A native terminal workbench for coding agents, project files, and persistent sessions.
 
-<p>
-  <a href="README.md">English</a> · <a href="README.zh-CN.md">简体中文</a>
-</p>
+[Download](https://github.com/cloudy-liu/ctty7/releases/latest) · [Release notes](docs/releases/v0.2.0.md) · [Documentation](docs/index.mdx) · [简体中文](README.zh-CN.md)
+
+[![Release](https://img.shields.io/github/v/release/cloudy-liu/ctty7)](https://github.com/cloudy-liu/ctty7/releases/latest)
+[![CI](https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml/badge.svg)](https://github.com/cloudy-liu/ctty7/actions/workflows/ci.yml)
+[![License](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
 
 </div>
 
-<br/>
+<img src="assets/screenshots/agents-light-dark.webp" alt="ctty7 in light and dark appearance with Claude Code in the terminal and coding-agent sessions in the sidebar" width="1280" />
 
-<div align="center">
-  <img src="assets/hero.webp" alt="ctty7 in action" width="100%" style="border-radius: 8px; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);" />
-</div>
+*Light and dark captures from the Windows v0.2.0 source build. Claude Code and Codex are open at their prompts; other sidebar states use sample hook events. [Screenshot details](assets/screenshots/README.md).*
 
-<br/>
+ctty7 is a Rust application rendered with GPUI. The background daemon keeps terminals running when you close a window. In the same workspace, you can monitor coding agents, browse files, edit source, read Markdown, and review Git changes. Local shells, WSL, and SSH workspaces share the interface.
 
-## 🚀 Why ctty7
+## Install
 
-ctty7 is built for developers who work with AI coding agents and need reliable terminal infrastructure. Whether you're running Claude Code, Codex, or Herdr-managed workflows, ctty7 keeps your sessions organized, your agent states visible, and your workspaces persistent across machines.
+Get a package from [GitHub Releases](https://github.com/cloudy-liu/ctty7/releases/latest).
 
-### ✨ What makes it different
+| Platform | Package | Start |
+| --- | --- | --- |
+| Windows x64 | `ctty7-*-windows-x86_64-setup.exe` | Run the installer; launch ctty7 from the Start menu. |
+| Windows x64, portable | `ctty7-*-windows-x86_64.zip` | Extract and run `tty7-app.exe`. |
+| macOS, Apple Silicon | `ctty7-*-macos-arm64.dmg` | Drag ctty7 into Applications. |
+| macOS, Intel | `ctty7-*-macos-x86_64.dmg` | Drag ctty7 into Applications. |
+| Linux x64 | `ctty7-*-linux-x86_64.AppImage` | Make it executable and run it. |
+| Linux x64, archive | `ctty7-*-linux-x86_64.tar.gz` | Extract and run `tty7-app`. |
 
-<table>
-<tr>
-<td width="50%">
+Each release includes `checksums.txt`. Windows packages are unsigned; macOS packages use ad hoc signing and are not notarized. Older 26.x installations need a [one-time manual migration](docs/maintenance/migration.md) to the 0.x line. Updates within the 0.x line use **Settings → About → Check now**.
 
-**🪟 First-class Windows shell support**
+The command remains `tty7`; executables and configuration directories keep their existing names.
 
-CMD and Cmder/Clink with prompt boundaries, working directory tracking, completion, ghost suggestions, and prompt editing. Native Up/Down history behavior preserved; fuzzy search reads PSReadLine and Clink history.
+## Find your way around
 
-</td>
-<td width="50%">
+The header has controls to create a tab and toggle the side panels. Below it, the workspace selector switches between saved workspaces. The sidebar groups sessions by repository and shows each tab's name, agent avatar, branch, and Git diff counts. Group names can be changed from their context menu.
 
-**🤖 Coding agent awareness**
+**Files** on the right opens the project tree, including dotfiles. The neighboring controls open workspace information and source control. Files, folders, editor headers, and changed-file lists use Symbols icons.
 
-Tabs and sidebar show agent states (working, blocked, done, idle) using hooks and screen detection. Herdr host recognition keeps the sheep avatar visible even when nested agents launch.
+Opening a document adds its own header with the filename, fill/restore control, and close button. Fill gives the document the central workspace while keeping both side panels available. Restore returns to the previous split width. Markdown's **Edit / Preview** switch is in the footer. Diff headers also have a button for split or unified layout.
 
-</td>
-</tr>
-<tr>
-<td width="50%">
+| Action | Windows / Linux | macOS |
+| --- | --- | --- |
+| New tab | `Ctrl+Shift+T` | `Cmd+T` |
+| Split right | `Ctrl+Shift+D` | `Cmd+D` |
+| Command palette | `Ctrl+Shift+P` | `Cmd+P` |
+| Toggle session sidebar | `Ctrl+Shift+B` | `Cmd+B` |
+| Toggle right panel | `Ctrl+Shift+J` | `Cmd+J` |
+| Settings | `Ctrl+,` | `Cmd+,` |
 
-**💾 Persistent workspaces**
+[All shortcuts](docs/reference/keyboard-shortcuts.mdx) can be customized in Settings.
 
-Background daemon owns your shells. Close the window, your sessions keep running. Reopen them across local terminals, WSL, and SSH with layouts intact.
+## See which agent needs you
 
-</td>
-<td width="50%">
+The avatar identifies the agent in the focused pane. A small symbol indicates its state, and the sidebar adds a compact tag beside the branch or working directory.
 
-**⚡ Built for productivity**
+| Tag | Meaning |
+| --- | --- |
+| `IDLE` | Waiting for your next prompt, including a finished result you have read. |
+| `RUN` | Working on a turn. |
+| `INPUT` | Waiting for your reply or permission. |
+| `DONE` | Finished this turn, with an unread result. |
+| No tag | No known state, or an ordinary shell. An agent with unknown status keeps its grey avatar symbol. |
 
-Split panes, renamable sidebar groups, theme-aware avatars, Git status views, configurable shortcuts, selectable prompts, and silent bell by default.
+Tags keep their English labels in every interface language. Hide them in **Settings → Window & Tabs → Show agent status text in sidebar** if you prefer symbols alone.
 
-</td>
-</tr>
-</table>
+Status comes from agent hooks and screen detection. Install supported hooks in **Settings → Agents**. The CLI commands `tty7 agents` and `tty7 wait` use hook reports; they do not include the GUI's screen detection.
 
-## 📦 Install
+When Herdr hosts nested agents in a pane, the tab keeps Herdr's purple sheep avatar. A separate ctty7 split shows its own agent when focused. Session restoration retains known conversation identities and resumes supported agents when possible; otherwise, it leaves a usable shell.
 
-<div align="center">
+[Status and notifications](docs/agents/status.mdx) · [Session restoration](docs/agents/sessions.mdx)
 
-**[⬇️ Download the latest release](https://github.com/cloudy-liu/ctty7/releases/latest)**
+## Read Markdown and edit source
 
-</div>
+Markdown files open in preview. GitHub is the built-in reading theme, with light and dark appearances, tables, task lists, alerts, links, images, and Mermaid diagrams. Diagram colors follow the reading palette. Switching to source and back uses the same buffer, including unsaved edits.
 
-| Platform | Package | Installation |
-|----------|---------|-------------|
-| **Windows** 🪟 | `ctty7-*-windows-x86_64-setup.exe` | Run installer, launch from Start menu |
-| Windows portable | `ctty7-*-windows-x86_64.zip` | Extract and run `tty7-app.exe` |
-| **macOS** 🍎 | `ctty7-*-macos-arm64.dmg` (Apple Silicon)<br>`ctty7-*-macos-x86_64.dmg` (Intel) | Drag to Applications |
-| **Linux** 🐧 | `ctty7-*-linux-x86_64.AppImage` | Make executable and run |
-| Linux archive | `ctty7-*-linux-x86_64.tar.gz` | Extract and run `tty7-app` |
+Install v2 YAML themes to change Markdown typography and colors. Valid edits reload automatically; an unavailable theme falls back to GitHub without discarding your saved selection. See [Markdown themes](docs/customization/markdown-themes.mdx) and [Mermaid support and limits](docs/mermaid-support.md).
 
-<details>
-<summary>📝 Installation notes</summary>
+Source colors follow the app's appearance: **GitHub Light** in light mode and **Atom One Dark** in dark mode. Source font, size, and line height can be configured separately from the terminal. Search gives the current match a stronger highlight.
 
-- Each release includes `checksums.txt` for verification
-- Windows builds are unsigned; your OS may require manual confirmation
-- macOS uses ad-hoc signing unless release credentials are configured
-- **Migrating from older versions?** See the [migration guide](docs/maintenance/migration.md)
+![GitHub Light source editor in ctty7](assets/screenshots/source-light.webp)
 
-</details>
+Try the [workspace walkthrough](docs/examples/workbench-tour.md) in the app. Markdown supports a documented HTML subset; it is not a full browser renderer.
 
-## 🎯 Quick start
+## Windows and remote workflows
 
-1. **Launch ctty7** and create a local terminal, or connect to WSL/SSH
-2. **Choose your shell** in Settings. Existing CMD/Cmder arguments like `cmd.exe /K init.bat` remain supported
-3. **Start your coding agent** in a pane. Install hooks in **Settings → Agents** to track status and notifications
-4. **Check for updates** in **Settings → About → Check now**. Updates are downloaded, verified, and applied explicitly
+The fork's Windows work includes CMD and Cmder/Clink prompt boundaries, directory reporting, completion, ghost suggestions, prompt editing, and native history. Existing custom launch arguments such as `cmd.exe /K init.bat` remain supported. Search reads PSReadLine and Clink history, and Windows paths can be selected as a single range.
 
-> 💡 The CLI command remains `tty7` (including `tty7 agents` and `tty7 wait`). No `ctty7` alias is installed.
+Modified Enter input works with programs that request ConPTY win32-input-mode. Function keys pass through to the terminal with their modifiers; bare F11 retains the fullscreen binding. Live theme changes keep terminal text readable, and the bell is off by default.
 
-## 🎨 Features in depth
+Windows packages include the Linux server used to bootstrap WSL. WSL resolves the account's login shell. Managed SSH workspaces include file browsing and transfers, while in-pane SSH detection keeps the tab's context aligned with the remote shell.
 
-<details>
-<summary><strong>🪟 Windows shell integration</strong></summary>
+[Shell integration](docs/reference/shell-integration.mdx) · [Remote workspaces](docs/remote/workspaces.mdx) · [SSH](docs/remote/ssh.mdx)
 
-ctty7 treats Windows shells as first-class citizens:
+## Configure and build
 
-- **Prompt editing** with Ctrl+A/E, word navigation, and inline editing
-- **Working directory tracking** for completion and status display
-- **Native history** with Up/Down preserved; fuzzy search reads PSReadLine/Clink
-- **Path selection** as single ranges (click-drag Windows paths without breaks)
-- **ConPTY win32-input-mode** support for programs that request modified Enter events
+Most options are in Settings. Configuration lives at `%APPDATA%\tty7\config.json` on Windows and `~/.config/tty7/config.json` on macOS/Linux. Override the directory with `TTY7_CONFIG_DIR` or `--config-dir`.
 
-</details>
+[Configuration reference](docs/reference/configuration.mdx) · [Themes](docs/customization/themes.mdx) · [Updates](docs/reference/updates.mdx)
 
-<details>
-<summary><strong>🤖 Agent state tracking</strong></summary>
-
-Know what your agents are doing at a glance:
-
-- **Visual states** in tabs and sidebar: working, blocked, done, idle
-- **Hook integration** for accurate status reporting (`tty7 agents`, `tty7 wait`)
-- **Herdr recognition** — the sheep avatar stays visible when Herdr spawns nested agents
-- **Session restoration** — agent identities survive daemon replacement, resuming conversations when possible
-
-</details>
-
-<details>
-<summary><strong>🌐 Remote workspaces</strong></summary>
-
-Work seamlessly across machines:
-
-- **Native SSH and WSL support** with in-pane detection and login shell resolution
-- **No separate downloads** — Windows packages include the Linux server for WSL bootstrap
-- **Consistent experience** across local and remote workspaces
-
-</details>
-
-<details>
-<summary><strong>📝 Markdown preview</strong></summary>
-
-Read and edit Markdown without leaving the terminal:
-
-- **Built-in preview** with switchable source editing
-- **Reading themes** — GitHub is the default; install your own v2 theme (light/dark aware)
-- **Mermaid diagrams** — render flowcharts, sequence diagrams, class diagrams, and more inline
-- **Theme integration** — diagrams automatically match your Markdown theme colors
-
-Available in source builds from `main`; the published v0.1.0 does not include
-Markdown preview. See [project status](docs/maintenance/status.md).
-
-</details>
-
-## ⚙️ Configuration
-
-Most settings are available in the GUI. Configuration files:
-
-- **Windows**: `%APPDATA%\tty7\config.json`
-- **macOS/Linux**: `~/.config/tty7/config.json`
-
-Override with `TTY7_CONFIG_DIR` environment variable or `--config-dir` flag.
-
-### 📚 Documentation
-
-<table>
-<tr>
-<td width="50%">
-
-**Getting Started**
-- [Installation and builds](docs/getting-started/installation.mdx)
-- [Configuration reference](docs/reference/configuration.mdx)
-- [Updates](docs/reference/updates.mdx)
-
-</td>
-<td width="50%">
-
-**Advanced**
-- [Agent status and notifications](docs/agents/status.mdx)
-- [Agent sessions](docs/agents/sessions.mdx)
-- [Remote workspaces](docs/remote/workspaces.mdx)
-
-</td>
-</tr>
-</table>
-
-## 🛠️ Development
-
-### Prerequisites
-
-- Stable Rust toolchain
-- **Windows**: MSVC C++ build tools, Windows SDK
-- **Linux**: X11/Wayland/font dev libraries ([details](docs/getting-started/installation.mdx#building-from-source))
-- **macOS**: Xcode command line tools
-
-### Build from source
+Use stable Rust. Windows needs MSVC C++ build tools and the Windows SDK; macOS needs Xcode command line tools. Linux needs the [documented system libraries](docs/getting-started/installation.mdx#building-from-source).
 
 ```sh
 git clone https://github.com/cloudy-liu/ctty7.git
 cd ctty7
 cargo build --locked
-cargo dev  # Uses .tty7-dev config instead of your main config
+cargo dev
 ```
 
-Before submitting changes:
+`cargo dev` uses the isolated `.tty7-dev` configuration directory. Before submitting changes, run `cargo fmt --all -- --check` and `cargo test --locked --workspace`. On Windows, the full test suite also needs Git for Windows' `usr/bin` utilities on the test process's PATH.
 
-```sh
-cargo fmt --check
-cargo test --locked --workspace
-```
+Issues and pull requests belong in [cloudy-liu/ctty7](https://github.com/cloudy-liu/ctty7); PRs target its `main` branch. See the [project status](docs/maintenance/status.md), [release runbook](docs/maintenance/release.md), and [historical fork changes](docs/maintenance/fork-history.md).
 
-### Project structure
+## Credits and license
 
-Rust crates, binaries, protocol identities, and data paths retain `tty7` naming for compatibility and to simplify future selective patch imports. Pull requests target this repository.
+ctty7 is maintained from [l0ng-ai/tty7](https://github.com/l0ng-ai/tty7), with fork-specific Windows, agent, editing, and release changes. Original copyright and attribution are retained. Licensed under [Apache-2.0](LICENSE).
 
-**Maintenance docs:**
-- [Project status and remaining work](docs/maintenance/status.md)
-- [Maintenance history](docs/maintenance/fork-history.md)
-- [Release runbook](docs/maintenance/release.md)
-
-## 🤝 Contributing
-
-Contributions are welcome! Please:
-
-1. Check [existing issues](https://github.com/cloudy-liu/ctty7/issues) before opening new ones
-2. Run tests and formatting checks before submitting PRs
-3. Target the `main` branch for all pull requests
-
-## 📄 License
-
-ctty7 is licensed under [Apache-2.0](LICENSE).
-
-## 🙏 Credits
-
-ctty7 originated from [tty7](https://github.com/l0ng-ai/tty7) and has evolved independently with extensive modifications to Windows integration, agent behavior, and workflow features. Original copyright and attribution are retained.
-
-File and folder icons are the [Symbols](https://github.com/miguelsolorio/vscode-symbols) icon theme by Miguel Solorio (MIT).
-
----
-
-<div align="center">
-
-<img src="https://img.shields.io/github/stars/cloudy-liu/ctty7?style=social" alt="GitHub stars" />
-<img src="https://img.shields.io/github/forks/cloudy-liu/ctty7?style=social" alt="GitHub forks" />
-
-<br/><br/>
-
-**[⬇️ Download ctty7](https://github.com/cloudy-liu/ctty7/releases/latest)** · **[🐛 Report Issue](https://github.com/cloudy-liu/ctty7/issues)** · **[📚 Documentation](docs/)**
-
-<br/>
-
-Made with ❤️ for AI-powered development
-
-</div>
+File and folder icons come from Miguel Solorio's [Symbols](https://github.com/miguelsolorio/vscode-symbols) theme under MIT. Bundled themes and other assets retain their notices in `assets/`.

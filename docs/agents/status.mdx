@@ -52,9 +52,8 @@ Hermes, Antigravity, Grok Build, Qwen Code and Kimi Code have manifests. When
 the screen shows clear evidence of a state, the screen wins; when it shows none,
 the hooks decide. The exception is Pi, Oh My Pi, Kimi Code and OpenCode, whose
 hooks cover the whole turn: once those report, they are trusted over the screen,
-as herdr trusts them. Some screens name no state at all — Codex sitting at its
-prompt is one — and read as unknown, as they do in herdr, until a hook says
-otherwise.
+as herdr trusts them. Codex's ready prompt is recognized as idle. When neither
+the screen nor a hook reports a state, the status stays unknown.
 
 The screen is read by the window showing the pane. `tty7 agents` and
 [`tty7 wait`](/agents/orchestration) still go by the hooks alone.

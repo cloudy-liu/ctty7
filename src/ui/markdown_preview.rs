@@ -11,7 +11,7 @@ use gpui::{
     relative, rems,
 };
 use gpui_component::{
-    ActiveTheme as _, ElementExt as _, IconName, Sizable as _, ThemeMode,
+    ActiveTheme as _, IconName, Sizable as _, ThemeMode,
     button::{Button, ButtonVariants as _},
     highlighter::{
         FontWeightContent, HighlightTheme, HighlightThemeStyle, SyntaxColors, ThemeStyle,
@@ -446,6 +446,47 @@ pub(crate) fn reading_style(
         }
     }
     style
+}
+
+/// The bundled GitHub palette uses `#f0f6fc` for dark-mode body text. That is
+/// faithful to github.com, but it is brighter than tty7's surrounding dark
+/// surfaces. Keep GitHub's semantic and syntax colors while borrowing the
+/// application's neutral foreground for the Markdown reading surface.
+fn align_dark_github_foreground(
+    entry: &Entry,
+    dark: bool,
+    foreground: Hsla,
+    style: &mut TextViewStyle,
+) {
+    if !dark || entry.theme.id != markdown_theme::DEFAULT_ID {
+        return;
+    }
+
+    let neutral = ThemeStyle::from(foreground);
+    style.code_block.text.color = Some(foreground);
+    style.inline_code_color = Some(foreground);
+    style.quote_code_color = Some(foreground);
+    style.table_header.text.color = Some(foreground);
+    style.alert.text.color = Some(foreground);
+    for alert in style.alerts.iter_mut().flatten() {
+        alert.container.text.color = Some(foreground);
+    }
+    for heading in &mut style.headings {
+        heading.text.color = Some(foreground);
+    }
+
+    let highlight = Arc::make_mut(&mut style.highlight_theme);
+    highlight.style.editor_foreground = Some(foreground);
+    highlight.style.syntax.variable = Some(neutral);
+    highlight.style.syntax.operator = Some(neutral);
+    highlight.style.syntax.punctuation = Some(neutral);
+    highlight.style.syntax.punctuation_bracket = Some(neutral);
+    highlight.style.syntax.punctuation_delimiter = Some(neutral);
+    highlight
+        .style
+        .syntax
+        .captures
+        .insert("github.rust.type".into(), neutral);
 }
 
 /// The source buffer owns all editable state. This entity retains only the
@@ -955,9 +996,14 @@ impl Render for MarkdownPreview {
             self.style_key = Some(key);
         }
         let palette = entry.theme.palette(dark);
-        // The user requested an integrated reading surface while retaining
-        // GitHub's text and element colors. Explicit custom paper colors remain
-        // part of the custom-theme contract.
+        let reading_foreground = if dark && entry.theme.id == markdown_theme::DEFAULT_ID {
+            cx.theme().foreground
+        } else {
+            color(palette.foreground)
+        };
+        align_dark_github_foreground(&entry, dark, reading_foreground, &mut self.style);
+        // The bundled theme shares the application's reading background.
+        // Custom themes retain their explicit background and paper colors.
         let reading_background: gpui::Background = if entry.theme.id == markdown_theme::DEFAULT_ID {
             cx.theme().tokens.background.into()
         } else {
@@ -1070,7 +1116,7 @@ impl Render for MarkdownPreview {
             .text_size(px(typography.font_size * scale))
             .line_height(relative(typography.line_height))
             .font_family(body_font)
-            .text_color(color(palette.foreground))
+            .text_color(reading_foreground)
             .bg(paper_background);
         card.style().text.font_fallbacks =
             Some(gpui::FontFallbacks::from_fonts(typography.fonts.clone()));
@@ -1093,7 +1139,7 @@ impl Render for MarkdownPreview {
             .child(text);
         let entity = cx.weak_entity();
         let scroll = self.scroll.clone();
-        crate::ui::scrollbar::with_vertical_scrollbar(
+        let scroll_area = crate::ui::scrollbar::with_vertical_scrollbar(
             "markdown-reading-scrollbar",
             div()
                 .id("markdown-reading")
@@ -1105,59 +1151,78 @@ impl Render for MarkdownPreview {
                 .p(px(outer))
                 .on_key_down(cx.listener(Self::on_key_down))
                 .child(card)
-                .on_prepaint(move |_, window, cx| {
-                    let _ = entity.update(cx, |this, cx| {
-                        // The helper canvas is a scrolling child. The handle
-                        // supplies the fixed viewport in window coordinates.
-                        let bounds = this.scroll.bounds();
-                        if this.width != bounds.size.width {
-                            this.width = bounds.size.width;
-                            this.restore_position = this.restore_position.or(this.last_position);
-                            cx.notify();
-                            return;
-                        }
-                        // An anchor requested while opening the file must wait
-                        // for its initial background parse and first layout.
-                        if this.is_loading(cx) {
-                            return;
-                        }
-                        if let Some(anchor) = this.pending_anchor.take() {
-                            this.restore_position = None;
-                            if anchor.is_empty() {
-                                this.scroll.set_offset(point(px(0.), px(0.)));
-                            } else if let Some(target) = this.text.read(cx).anchor_bounds(&anchor) {
-                                let offset = this.scroll.offset();
-                                let y = offset.y - (target.top() - bounds.top()) + px(12.);
-                                this.scroll.set_offset(point(
-                                    offset.x,
-                                    y.clamp(-this.scroll.max_offset().y, px(0.)),
-                                ));
-                            } else {
-                                window.push_notification(
-                                    format!("#{anchor}: {}", t(L10nKey::MarkdownAnchorMissing)),
-                                    cx,
-                                );
-                            }
-                            cx.notify();
-                            return;
-                        }
-                        if let Some((index, inside)) = this.restore_position.take() {
-                            if let Some(target) = this.text.read(cx).block_bounds(index) {
-                                let offset = this.scroll.offset();
-                                let y = offset.y + bounds.top() - inside - target.top();
-                                let y = y.clamp(-this.scroll.max_offset().y, px(0.));
-                                if (y - offset.y).abs() > px(0.1) {
-                                    this.scroll.set_offset(point(offset.x, y));
+                .child(
+                    gpui::canvas(
+                        move |_, window, cx| {
+                            let _ = entity.update(cx, |this, cx| {
+                                // Observe layout without adding a viewport-sized child
+                                // after the document. Read the viewport from the handle.
+                                let bounds = this.scroll.bounds();
+                                if this.width != bounds.size.width {
+                                    this.width = bounds.size.width;
+                                    this.restore_position =
+                                        this.restore_position.or(this.last_position);
                                     cx.notify();
                                     return;
                                 }
-                            }
-                        }
-                        this.last_position = this.text.read(cx).reading_position(bounds.top());
-                    });
-                }),
+                                // An anchor requested while opening the file must wait
+                                // for its initial background parse and first layout.
+                                if this.is_loading(cx) {
+                                    return;
+                                }
+                                if let Some(anchor) = this.pending_anchor.take() {
+                                    this.restore_position = None;
+                                    if anchor.is_empty() {
+                                        this.scroll.set_offset(point(px(0.), px(0.)));
+                                    } else if let Some(target) =
+                                        this.text.read(cx).anchor_bounds(&anchor)
+                                    {
+                                        let offset = this.scroll.offset();
+                                        let y = offset.y - (target.top() - bounds.top()) + px(12.);
+                                        this.scroll.set_offset(point(
+                                            offset.x,
+                                            y.clamp(-this.scroll.max_offset().y, px(0.)),
+                                        ));
+                                    } else {
+                                        window.push_notification(
+                                            format!(
+                                                "#{anchor}: {}",
+                                                t(L10nKey::MarkdownAnchorMissing)
+                                            ),
+                                            cx,
+                                        );
+                                    }
+                                    cx.notify();
+                                    return;
+                                }
+                                if let Some((index, inside)) = this.restore_position.take() {
+                                    if let Some(target) = this.text.read(cx).block_bounds(index) {
+                                        let offset = this.scroll.offset();
+                                        let y = offset.y + bounds.top() - inside - target.top();
+                                        let y = y.clamp(-this.scroll.max_offset().y, px(0.));
+                                        if (y - offset.y).abs() > px(0.1) {
+                                            this.scroll.set_offset(point(offset.x, y));
+                                            cx.notify();
+                                            return;
+                                        }
+                                    }
+                                }
+                                this.last_position =
+                                    this.text.read(cx).reading_position(bounds.top());
+                            });
+                        },
+                        |_, _, _, _| {},
+                    )
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size(px(0.)),
+                ),
             &scroll,
-        )
+        );
+        // Cached views lay out their contents as a root; provide the definite
+        // flex-column height required by the shared scrollbar wrapper.
+        div().flex().flex_col().size_full().child(scroll_area)
     }
 }
 
@@ -1403,6 +1468,105 @@ mod tests {
     }
 
     #[test]
+    fn github_dark_neutral_text_can_follow_the_application_foreground() {
+        let entry = Entry {
+            theme: markdown_theme::builtin(),
+            source: None,
+            revision: 0,
+        };
+        let foreground: Hsla = gpui::rgb(0xabb2bf).into();
+        let mut style = reading_style(&entry, true, 1., "Mono".into());
+
+        align_dark_github_foreground(&entry, true, foreground, &mut style);
+
+        assert_eq!(style.code_block.text.color, Some(foreground));
+        assert_eq!(style.inline_code_color, Some(foreground));
+        assert_eq!(style.quote_code_color, Some(foreground));
+        assert_eq!(style.table_header.text.color, Some(foreground));
+        assert_eq!(style.alert.text.color, Some(foreground));
+        assert!(
+            style
+                .alerts
+                .iter()
+                .flatten()
+                .all(|alert| { alert.container.text.color == Some(foreground) }),
+            "GitHub alert bodies must use the same neutral text as paragraphs"
+        );
+        assert!(
+            style
+                .headings
+                .iter()
+                .all(|heading| heading.text.color == Some(foreground))
+        );
+        assert_eq!(
+            style.highlight_theme.style.editor_foreground,
+            Some(foreground)
+        );
+        assert_eq!(
+            style.highlight_theme.style.syntax.variable,
+            Some(ThemeStyle::from(foreground))
+        );
+    }
+
+    #[test]
+    fn github_dark_rust_types_follow_neutral_text_without_changing_keywords() {
+        use gpui_component::highlighter::SyntaxHighlighter;
+
+        let entry = Entry {
+            theme: markdown_theme::builtin(),
+            source: None,
+            revision: 0,
+        };
+        let foreground: Hsla = gpui::rgb(0xabb2bf).into();
+        let mut style = reading_style(&entry, true, 1., "Mono".into());
+        align_dark_github_foreground(&entry, true, foreground, &mut style);
+        let source = "struct Widget;\nlet item: Widget;\n";
+        let mut highlighter = SyntaxHighlighter::new(&style.code_block_languages["rust"]);
+        highlighter.update(None, &source.into(), None);
+        let runs = highlighter.styles(&(0..source.len()), &style.highlight_theme);
+        for (word, expected) in [
+            ("Widget", foreground),
+            ("item", foreground),
+            (";", foreground),
+            ("struct", color(entry.theme.dark.syntax.keyword)),
+        ] {
+            for (offset, _) in source.match_indices(word) {
+                let actual = runs
+                    .iter()
+                    .find(|(range, _)| range.contains(&offset))
+                    .and_then(|(_, run)| run.color)
+                    .or(style.highlight_theme.style.editor_foreground);
+                assert_eq!(actual, Some(expected), "Rust token {word} at {offset}");
+            }
+        }
+    }
+
+    #[test]
+    fn github_dark_foreground_alignment_leaves_custom_themes_untouched() {
+        let theme = markdown_theme::parse(
+            "schema_version: 2\nid: custom\nname: Custom\nlight: {}\ndark: {}\n",
+        )
+        .unwrap();
+        let entry = Entry {
+            theme: Arc::new(theme),
+            source: None,
+            revision: 0,
+        };
+        let foreground: Hsla = gpui::rgb(0xabb2bf).into();
+        let before = reading_style(&entry, true, 1., "Mono".into());
+        let mut after = before.clone();
+
+        align_dark_github_foreground(&entry, true, foreground, &mut after);
+
+        assert_eq!(before.code_block.text.color, after.code_block.text.color);
+        assert_eq!(before.inline_code_color, after.inline_code_color);
+        assert_eq!(
+            before.highlight_theme.style.editor_foreground,
+            after.highlight_theme.style.editor_foreground
+        );
+    }
+
+    #[test]
     fn markdown_heading_fonts_are_optional_and_independent_of_body_and_code() {
         let yaml = "schema_version: 2\nid: fonts\nname: Fonts\nlight: {}\ndark: {}\ntypography:\n  fonts: [Body]\n  code_fonts: [Code]\n";
         for headings in [
@@ -1557,6 +1721,195 @@ mod tests {
             );
             std::thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    #[gpui::test]
+    fn github_dark_preview_tracks_the_terminal_foreground_after_theme_changes(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            init(Default::default(), cx);
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = app.tabs.len() - 1;
+            app.set_theme_follow_system(false, window, cx);
+            app.set_preset("one_dark_pro", window, cx);
+            app.editor_open_on_host(
+                DocumentsHost::new(906, "Foreground", None),
+                Path::new("/repo/docs/readme.md"),
+                window,
+                cx,
+            );
+        });
+        settle(&mut vcx, |cx| {
+            app.read_with(cx, |app, _| {
+                app.tab_code()
+                    .and_then(|code| code.active_file())
+                    .is_some_and(|file| file.reading.is_some())
+            })
+        });
+        let reading = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .clone()
+                .unwrap()
+        });
+        for (preset, expected) in [
+            ("one_dark_pro", 0xabb2bf),
+            ("dracula", 0xf8f8f2),
+            ("light", 0x1f2328),
+            ("one_dark_pro", 0xabb2bf),
+        ] {
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.set_preset(preset, window, cx)
+            });
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                window.refresh();
+                let _ = window.draw(cx);
+            });
+            reading.read_with(&vcx, |reading, cx| {
+                let expected = gpui::rgb(expected).into();
+                if cx.theme().mode.is_dark() {
+                    assert_eq!(cx.theme().foreground, expected);
+                }
+                assert_eq!(
+                    reading.style.code_block.text.color,
+                    Some(expected),
+                    "{preset}"
+                );
+                assert_eq!(
+                    reading.style.headings[0].text.color,
+                    Some(expected),
+                    "{preset}"
+                );
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn markdown_scroll_range_ends_at_the_last_block(cx: &mut TestAppContext) {
+        let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
+        vcx.simulate_resize(gpui::size(px(1400.), px(900.)));
+        let mut host = DocumentsHost::new(907, "Scroll bounds", None);
+        let content = format!(
+            "{}\n## End marker\n",
+            "Paragraph of reading text.\n\n".repeat(60)
+        );
+        Arc::get_mut(&mut host)
+            .unwrap()
+            .files
+            .insert("/repo/docs/readme.md".into(), content.into_bytes());
+        app.update_in(&mut vcx, |app, window, cx| {
+            init(Default::default(), cx);
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = app.tabs.len() - 1;
+            app.editor_open_on_host(host, Path::new("/repo/docs/readme.md"), window, cx);
+        });
+        settle(&mut vcx, |cx| {
+            app.read_with(cx, |app, cx| {
+                app.tab_code()
+                    .and_then(|code| code.active_file())
+                    .and_then(|file| file.reading.as_ref())
+                    .is_some_and(|reading| {
+                        reading
+                            .read(cx)
+                            .text
+                            .read(cx)
+                            .anchor_bounds("end-marker")
+                            .is_some()
+                    })
+            })
+        });
+        let reading = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .clone()
+                .unwrap()
+        });
+        for _ in 0..2 {
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        }
+        for layout in [
+            crate::core::config::DocumentLayout::Dock,
+            crate::core::config::DocumentLayout::Fill,
+        ] {
+            if layout == crate::core::config::DocumentLayout::Fill {
+                let button = vcx.debug_bounds("document-fill-toggle").unwrap();
+                vcx.simulate_click(button.center(), gpui::Modifiers::none());
+            }
+            vcx.simulate_keystrokes(if cfg!(target_os = "macos") {
+                "cmd-down"
+            } else {
+                "ctrl-end"
+            });
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            reading.read_with(&vcx, |reading, cx| {
+                let viewport = reading.scroll.bounds();
+                let end = reading.text.read(cx).anchor_bounds("end-marker").unwrap();
+                assert!(end.bottom() > viewport.top() && end.top() < viewport.bottom(),
+                    "document end must remain visible: end={end:?}, viewport={viewport:?}, offset={:?}, max={:?}",
+                    reading.scroll.offset(), reading.scroll.max_offset());
+                assert!(viewport.bottom() - end.bottom() < px(80.),
+                    "only document padding should follow the final block: end={end:?}, viewport={viewport:?}");
+            });
+            let viewport = reading.read_with(&vcx, |reading, _| reading.scroll.bounds());
+            let panel = vcx.debug_bounds("code-panel").unwrap();
+            assert!(
+                viewport.top() >= panel.top()
+                    && viewport.bottom() <= panel.bottom()
+                    && viewport.size.height > panel.size.height - px(90.),
+                "reading viewport must fit the visible panel: viewport={viewport:?}, panel={panel:?}"
+            );
+        }
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_toggle_preview(window, cx)
+        });
+        vcx.update(|_, cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string(
+                "## Short document\n".into(),
+            ));
+        });
+        vcx.simulate_keystrokes("secondary-a secondary-v");
+        vcx.run_until_parked();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_toggle_preview(window, cx)
+        });
+        settle(&mut vcx, |cx| {
+            reading.read_with(cx, |reading, cx| {
+                reading
+                    .text
+                    .read(cx)
+                    .anchor_bounds("short-document")
+                    .is_some()
+            })
+        });
+        reading.read_with(&vcx, |reading, _| {
+            assert_eq!(
+                reading.scroll.max_offset().y,
+                px(0.),
+                "a short document must not scroll"
+            );
+            assert_eq!(
+                reading.scroll.offset().y,
+                px(0.),
+                "shrinking content must clamp the old offset"
+            );
+        });
     }
 
     #[gpui::test]
