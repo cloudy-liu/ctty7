@@ -2933,6 +2933,13 @@ fn apply_agent_signals(
             continue;
         }
 
+        // A new session must start explicitly before it can replace a known
+        // owner. Delayed status hooks from the previous session cannot take
+        // its identity or conversation id back.
+        if event.kind != AgentEventKind::SessionStart && !same_session {
+            continue;
+        }
+
         if event.kind != AgentEventKind::SessionStart
             && st
                 .ended_agent
@@ -6409,7 +6416,7 @@ mod tests {
     }
 
     #[test]
-    fn cursor_shutdown_cannot_clear_a_replacement_session() {
+    fn cursor_late_hooks_cannot_replace_a_new_session() {
         use crate::core::agent_hooks::build_hook_sequence;
         use crate::core::cli_agent::{AgentStatus, CLIAgent};
 
@@ -6436,14 +6443,26 @@ mod tests {
                 &mut state,
                 sniffer.feed(&build_hook_sequence(agent, "session-start", input)),
             );
-            apply_signals(
-                &mut state,
-                sniffer.feed(&build_hook_sequence("claude", "session-end", old)),
-            );
-            assert_eq!(state.agent, Some(expected));
-            let session = state.agent_session.as_ref().unwrap();
-            assert_eq!(session.session_id.as_deref(), Some("replacement"));
-            assert_eq!(session.status, AgentStatus::Idle);
+            let (tx, rx) = mpsc::channel();
+            state.subscriber = Some(tx);
+            for event in ["stop", "tool-complete", "prompt-submit", "session-end"] {
+                apply_signals(
+                    &mut state,
+                    sniffer.feed(&build_hook_sequence("claude", event, old)),
+                );
+                assert_eq!(state.agent, Some(expected), "late {event}");
+                let session = state.agent_session.as_ref().unwrap();
+                assert_eq!(
+                    session.session_id.as_deref(),
+                    Some("replacement"),
+                    "late {event}"
+                );
+                assert_eq!(session.status, AgentStatus::Idle, "late {event}");
+                assert!(
+                    rx.try_recv().is_err(),
+                    "late {event} must not notify clients"
+                );
+            }
         }
     }
 
