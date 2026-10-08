@@ -23,11 +23,11 @@ fn render(content: &str) -> Option<String> {
             if mapping.is_empty() {
                 return None;
             }
-            let mut table = String::from("<table>\n");
+            let mut table = String::from("<table style=\"white-space: normal\">\n");
             for (key, value) in &mapping {
-                table.push_str("<tr><td><strong>");
+                table.push_str("<tr><th>");
                 table.push_str(&cell(key)?);
-                table.push_str("</strong></td><td>");
+                table.push_str("</th><td>");
                 table.push_str(&cell(value)?);
                 table.push_str("</td></tr>\n");
             }
@@ -69,10 +69,10 @@ mod tests {
             let content = content.replace('\n', newline);
             let processed = preprocess(&content);
             assert!(processed.starts_with(concat!(
-                "<table>\n",
-                "<tr><td><strong>name</strong></td><td>show-me</td></tr>\n",
-                "<tr><td><strong>description</strong></td><td>Show a diagram.</td></tr>\n",
-                "<tr><td><strong>disable-model-invocation</strong></td><td>true</td></tr>\n",
+                "<table style=\"white-space: normal\">\n",
+                "<tr><th>name</th><td>show-me</td></tr>\n",
+                "<tr><th>description</th><td>Show a diagram.</td></tr>\n",
+                "<tr><th>disable-model-invocation</th><td>true</td></tr>\n",
                 "</table>\n\n"
             )));
             assert!(processed.ends_with(&format!("{newline}# Body{newline}")));
@@ -82,7 +82,7 @@ mod tests {
     #[test]
     fn metadata_accepts_a_bom_trailing_spaces_and_an_eof_delimiter() {
         let content = "\u{feff}--- \r\nname: show-me\r\n---\t";
-        assert!(preprocess(content).starts_with("<table>\n"));
+        assert!(preprocess(content).starts_with("<table style=\"white-space: normal\">\n"));
         assert!(preprocess(content).ends_with("</table>\n\n"));
     }
 
@@ -95,8 +95,8 @@ mod tests {
             processed.contains("&lt;img src=\"https://example.invalid/image\"&gt; &amp; *literal*")
         );
         assert!(!processed.contains("<img"));
-        assert!(processed.contains("<strong>empty</strong></td><td>&#32;</td>"));
-        assert!(processed.contains("<strong>missing</strong></td><td>&#32;</td>"));
+        assert!(processed.contains("<th>empty</th><td>&#32;</td>"));
+        assert!(processed.contains("<th>missing</th><td>&#32;</td>"));
     }
 
     #[test]

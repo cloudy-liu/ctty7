@@ -1104,7 +1104,6 @@ impl Render for MarkdownPreview {
                 Button::new("copy-code")
                     .icon(IconName::Copy)
                     .ghost()
-                    .xsmall()
                     .text_color(copy_color)
                     .tooltip(t(L10nKey::EditorCopyCode))
                     .on_click(move |_, _, cx| {
@@ -2134,7 +2133,7 @@ mod tests {
         let text = reading.read_with(&vcx, |reading, _| reading.text.clone());
         text.update(&mut vcx, |text, cx| text.select_all(cx));
         let parsed = text.read_with(&vcx, |text, _| text.source());
-        assert!(parsed.starts_with("<table>\n"));
+        assert!(parsed.starts_with("<table style=\"white-space: normal\">\n"));
         assert!(parsed.contains("ctty7-mermaid://0"));
         let selected = text.read_with(&vcx, |text, _| text.selected_text());
         let first = reading.read_with(
