@@ -16,6 +16,8 @@ graph TD
 
 The diagram renders as an SVG in the native reading view. Its toolbar copies
 the original source or opens a larger viewer with zoom, pan and reset controls.
+Fences accept both LF and Windows CRLF line endings without changing the source
+buffer or the copied diagram code.
 
 ## Diagram types
 

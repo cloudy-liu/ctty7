@@ -10,6 +10,7 @@ pub mod explorer_context_menu;
 pub mod http;
 pub mod keychain;
 pub mod markdown_document;
+pub mod markdown_frontmatter;
 pub mod markdown_svg;
 pub mod markdown_theme;
 pub mod rate_meter;
