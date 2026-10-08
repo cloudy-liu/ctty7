@@ -67,6 +67,10 @@ fn agent_icon(path: &str) -> Option<&'static [u8]> {
         "icons/eye.svg" => include_bytes!("../../assets/icons/eye.svg"),
         "icons/search.svg" => include_bytes!("../../assets/icons/search.svg"),
         "icons/copy.svg" => include_bytes!("../../assets/icons/copy.svg"),
+        "icons/diagram-expand.svg" => include_bytes!("../../assets/icons/diagram-expand.svg"),
+        "icons/diagram-reset.svg" => include_bytes!("../../assets/icons/diagram-reset.svg"),
+        "icons/diagram-zoom-in.svg" => include_bytes!("../../assets/icons/diagram-zoom-in.svg"),
+        "icons/diagram-zoom-out.svg" => include_bytes!("../../assets/icons/diagram-zoom-out.svg"),
         "icons/folder.svg" => include_bytes!("../../assets/icons/folder.svg"),
         "icons/file.svg" => include_bytes!("../../assets/icons/file.svg"),
         "icons/circle-info.svg" => include_bytes!("../../assets/icons/circle-info.svg"),
@@ -310,5 +314,24 @@ mod tests {
             Assets.load("stock/icons/check.svg").unwrap(),
             Assets.load("icons/check.svg").unwrap(),
         );
+    }
+
+    #[test]
+    fn mermaid_control_icons_resolve_to_svg_artwork() {
+        for path in [
+            "icons/diagram-expand.svg",
+            "icons/diagram-reset.svg",
+            "icons/diagram-zoom-in.svg",
+            "icons/diagram-zoom-out.svg",
+        ] {
+            let bytes = Assets
+                .load(path)
+                .unwrap()
+                .expect("Mermaid control icon must be served");
+            let doc = resvg::usvg::roxmltree::Document::parse(std::str::from_utf8(&bytes).unwrap())
+                .unwrap();
+            assert_eq!(doc.root_element().tag_name().name(), "svg");
+            assert!(doc.root_element().children().any(|node| node.is_element()));
+        }
     }
 }
