@@ -2,8 +2,9 @@
 
 Checked on Windows on 2026-10-07 for cloudy-liu/ctty7#100. Implementation PR
 cloudy-liu/ctty7#103 is merged; its child issue cloudy-liu/ctty7#101 is closed.
-The parent issue remains open until this acceptance record and its documentation
-updates merge. The user authorized the release preparation on 2026-10-08.
+The parent issue closed when cloudy-liu/ctty7#115 merged this acceptance record
+and its documentation updates. The user authorized the release preparation
+on 2026-10-08.
 
 The production application was built from `b4f7b086` with the workspace version
 set to 0.2.0. Computer-use screenshots came from an isolated configuration and

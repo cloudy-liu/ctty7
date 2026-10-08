@@ -56,9 +56,9 @@ only, following the format in AGENTS.md:
 - no inherited capabilities presented as new, and no CI run IDs or checksum
   detail; link the one-time manual migration guide when it applies.
 
-Choose the next semantic version for the accepted scope. The next candidate is
-v0.2.0; its [local review record](../testing/release-v0.2.0.md) tracks approval
-and the remaining publication steps.
+Choose the next semantic version for the accepted scope. The current published
+release is v0.2.0; its [verification record](../testing/release-v0.2.0.md)
+documents the source, package checks, and completed publication.
 
 ## Build, verify, publish
 
@@ -81,8 +81,9 @@ and the remaining publication steps.
    and checksum has passed. Then explicitly publish it and set it as Latest;
    numerical sorting must not leave a historical 26.x release selected.
 6. Confirm `/releases/latest` points to the new tag and all update package URLs
-   resolve. Add a migration notice to the former latest Release. Do not edit
-   historical changelog entries to make them describe ctty7 retroactively.
+   resolve. Add a migration notice to the former latest Release when users need
+   a manual installation to change release lines. Do not edit historical
+   changelog entries to make them describe ctty7 retroactively.
 
 Until publication, rollback is a normal code revert. Once published, do not
 move the tag or replace released binaries: issue the next patch release.
