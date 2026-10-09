@@ -95,14 +95,14 @@ impl StatusIndicator {
     /// for, for a mark that has to bring its own.
     pub const DARK_SURFACE: u32 = 0x1E1E2E;
 
-    /// The short uppercase tag before a sidebar row's branch or working directory.
+    /// The short lowercase tag before a sidebar row's branch or working directory.
     /// Missing status has no text; the tab avatar still carries its neutral mark.
     pub fn sidebar_tag(self) -> Option<&'static str> {
         Some(match self {
-            StatusIndicator::Blocked => "INPUT",
-            StatusIndicator::Working => "RUN",
-            StatusIndicator::Done => "DONE",
-            StatusIndicator::Idle => "IDLE",
+            StatusIndicator::Blocked => "input",
+            StatusIndicator::Working => "run",
+            StatusIndicator::Done => "done",
+            StatusIndicator::Idle => "idle",
             StatusIndicator::Unknown => return None,
         })
     }
@@ -178,14 +178,14 @@ mod tests {
     }
 
     #[test]
-    fn the_sidebar_omits_unknown_text_but_shows_short_uppercase_tags() {
+    fn the_sidebar_omits_unknown_text_but_shows_short_lowercase_tags() {
         let tags: Vec<_> = StatusIndicator::ALL
             .iter()
             .map(|s| s.sidebar_tag())
             .collect();
         assert_eq!(
             tags,
-            [Some("INPUT"), Some("RUN"), Some("DONE"), Some("IDLE"), None]
+            [Some("input"), Some("run"), Some("done"), Some("idle"), None]
         );
     }
 }

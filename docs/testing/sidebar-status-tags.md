@@ -1,5 +1,27 @@
 # Compact sidebar status acceptance
 
+## Lowercase capsules, 2026-10-09
+
+The current revision uses `idle`, `run`, `input`, and `done` capsules with full
+rounding, semibold text, a 24% state-colour fill, and a thin outline. Light
+appearance uses deeper text in the same hue. Width measurement includes the
+semibold glyphs, padding, and outline.
+
+![Native lowercase capsule acceptance crops](images/sidebar-status-capsules-native.webp)
+
+These Windows captures came from the local 0.2.1 debug build, using separate
+light and dark configurations and sample hook events. The sidebar crops are
+enlarged 2x; captions sit outside the application pixels. Both appearances show
+all four capsules at the minimum 180 logical-pixel width, alongside an elided
+long branch and intact `+12` / `−10` counts. The ordinary shell has no capsule.
+
+`cargo fmt --all -- --check`, `cargo test --locked --workspace`, and
+`cargo build --locked --workspace --features gpui/test-support` passed. The
+existing tag-mapping assertion now expects lowercase labels. Native captures
+for this revision were taken on Windows only.
+
+## Original compact tags, 2026-10-07
+
 Checked on Windows on 2026-10-07 for cloudy-liu/ctty7#100. Implementation PR
 cloudy-liu/ctty7#103 is merged; its child issue cloudy-liu/ctty7#101 is closed.
 The parent issue closed when cloudy-liu/ctty7#115 merged this acceptance record

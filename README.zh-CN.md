@@ -31,7 +31,7 @@ ctty7 完整保留这些，把重心放在日常使用真正需要的地方：Wi
 
 **Windows shell 是一等公民。** 原生 CMD 和 Cmder/Clink 获得提示符边界、工作目录上报、补全、灰色建议和行内编辑；Up/Down 保留 shell 原生历史，模糊搜索读取 PSReadLine 与 Clink 历史文件。Windows 路径可以作为整体选中；带修饰的 Enter 会送达请求 ConPTY win32-input-mode 的程序，而不是直接提交整行。[Shell 集成](docs/reference/shell-integration.mdx)
 
-**一眼看清哪个 Agent 需要你。** 侧栏行用紧凑的 IDLE、RUN、INPUT、DONE 标签标出状态：谁在干活、谁在等你、谁的结果还没读，一眼可辨。已知对话在重启和 daemon 替换后仍能恢复：Claude Code 和 Codex 续上原会话；身份无法识别时，恢复流程留下可用的 shell，而不是弹出会话选择器。Agent 识别沿 Windows 进程树进行，提示符助手和 MCP 子进程不会被误认成前台 Agent；头像跟随主题。[Agent 状态](docs/agents/status.mdx) · [会话恢复](docs/agents/sessions.mdx)
+**一眼看清哪个 Agent 需要你。** 侧栏行用紧凑的 idle、run、input、done 胶囊标签标出状态：谁在干活、谁在等你、谁的结果还没读，一眼可辨。已知对话在重启和 daemon 替换后仍能恢复：Claude Code 和 Codex 续上原会话；身份无法识别时，恢复流程留下可用的 shell，而不是弹出会话选择器。Agent 识别沿 Windows 进程树进行，提示符助手和 MCP 子进程不会被误认成前台 Agent；头像跟随主题。[Agent 状态](docs/agents/status.mdx) · [会话恢复](docs/agents/sessions.mdx)
 
 **在同一个窗口里阅读和编辑。** Markdown 以 GitHub 风格预览打开，支持 Mermaid 图表和可安装的 v2 主题，与源码编辑共用同一缓冲区。源码配色跟随深浅模式，浅色 GitHub Light、深色 Atom One Dark，字体、字号独立设置。文件树和编辑器标题使用 Symbols 图标，文档可以填满和还原，diff 可以切换并排与统一布局。[Markdown 主题](docs/customization/markdown-themes.mdx)
 
