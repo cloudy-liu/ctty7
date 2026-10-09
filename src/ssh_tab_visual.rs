@@ -185,6 +185,17 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 }).unwrap();
                 eprintln!("NATIVE_SSH_TABS_READY");
                 cx.background_executor().timer(Duration::from_secs(12)).await;
+                // The platform input handler owns the focused terminal. Release
+                // it while the window can still draw, before GPUI checks leaks.
+                cx.update_window(handle.into(), |_, window, cx| {
+                    window.blur();
+                    window.refresh();
+                    let _ = window.draw(cx);
+                    window.remove_window();
+                }).unwrap();
+                drop(views);
+                drop(owner);
+                cx.background_executor().timer(Duration::from_millis(100)).await;
                 cx.update(|cx| cx.quit());
             }).detach();
         });
