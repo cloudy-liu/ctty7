@@ -1,6 +1,7 @@
 use std::io::Read as _;
 use std::ops::ControlFlow;
 use std::time::Duration;
+use ureq::tls::{RootCerts, TlsConfig};
 
 use super::AssetFetcher;
 use super::proxy;
@@ -28,6 +29,14 @@ pub struct HttpsFetcher {
 impl HttpsFetcher {
     pub fn new(manual_proxy: Option<&str>) -> Self {
         let mut builder = ureq::Agent::config_builder()
+            // Some machines trust CAs absent from ureq's default Mozilla
+            // roots. Keep verification enabled and let the platform apply
+            // its certificate policy.
+            .tls_config(
+                TlsConfig::builder()
+                    .root_certs(RootCerts::PlatformVerifier)
+                    .build(),
+            )
             .timeout_global(Some(DOWNLOAD_TIMEOUT))
             .timeout_connect(Some(CONNECT_TIMEOUT))
             .user_agent(concat!("tty7/", env!("CARGO_PKG_VERSION")));
@@ -156,8 +165,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn the_agent_builds() {
-        let _ = HttpsFetcher::default();
+    fn release_downloads_use_system_trust_without_disabling_verification() {
+        for proxy in [None, Some("http://127.0.0.1:7890")] {
+            let fetcher = HttpsFetcher::new(proxy);
+            let tls = fetcher.agent.config().tls_config();
+            assert!(
+                matches!(tls.root_certs(), ureq::tls::RootCerts::PlatformVerifier),
+                "release downloads must trust OS-managed CAs: {tls:?}"
+            );
+            assert!(
+                !tls.disable_verification(),
+                "server certificates must be verified"
+            );
+        }
     }
 
     #[test]
