@@ -10,6 +10,7 @@ use reqwest_client::ReqwestClient;
 use smol::future::FutureExt as _;
 use smol::io::AsyncReadExt as _;
 use tty7_core::daemon::install::download::CANCELLED;
+use tty7_core::daemon::install::proxy::{self, Proxy};
 
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(15 * 60);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
@@ -17,11 +18,9 @@ const CANCEL_POLL: Duration = Duration::from_millis(100);
 const MAX_CHECKSUM_BYTES: usize = 1024 * 1024;
 const MAX_ASSET_BYTES: usize = 128 * 1024 * 1024;
 
-async fn client(manual_proxy: Option<&str>) -> Result<ReqwestClient> {
-    // Resolve once, as HttpsFetcher does, and apply its bypass rules to every
-    // redirect. Disable reqwest's own proxy discovery so it cannot override
-    // the manual > system > environment order or a bypass decision.
-    let proxy = tty7_core::daemon::install::proxy::resolve("https://github.com", manual_proxy);
+async fn client(proxy: Option<&Proxy>) -> Result<ReqwestClient> {
+    // Configure only this request's selected route. Automatic proxy discovery
+    // and redirects must not override the caller's selection or bypass rule.
     let mut builder = reqwest::Client::builder()
         .no_proxy()
         .connect_timeout(CONNECT_TIMEOUT)
@@ -31,9 +30,9 @@ async fn client(manual_proxy: Option<&str>) -> Result<ReqwestClient> {
         let mut proxy_url =
             reqwest::Url::parse(&proxy.uri().to_string()).context("parsing the update proxy")?;
         if proxy_url.scheme().starts_with("socks") {
-            // reqwest's custom proxy callback silently treats a conversion
-            // error as no proxy. Resolve SOCKS hosts here, where failure and
-            // cancellation stop the attempt, then give it a numeric address.
+            // Resolve only proxies the request actually needs, inside its
+            // cancellation and timeout budgets. Numeric addresses keep
+            // reqwest's synchronous SOCKS conversion from resolving again.
             let host = proxy_url
                 .host_str()
                 .context("the update proxy has no host")?;
@@ -57,13 +56,9 @@ async fn client(manual_proxy: Option<&str>) -> Result<ReqwestClient> {
                 bail!("the SOCKS update proxy has an invalid host");
             }
         }
-        // Validate before installing the callback. Its only remaining
-        // decision is whether the existing bypass rule matches this URL.
-        reqwest::Proxy::all(proxy_url.as_str()).context("configuring the update proxy")?;
-        builder = builder.proxy(reqwest::Proxy::custom(move |url| {
-            let uri = url.as_str().parse().ok()?;
-            (!proxy.is_no_proxy(&uri)).then(|| proxy_url.to_string())
-        }));
+        builder = builder.proxy(
+            reqwest::Proxy::all(proxy_url.as_str()).context("configuring the update proxy")?,
+        );
     }
     Ok(builder
         .build()
@@ -83,16 +78,28 @@ pub(super) fn fetch(
     let progress = Cell::new((0, None));
     smol::block_on(
         async {
-            let client = client(manual_proxy).await?;
-            let checksums = download(&client, checksums_url, MAX_CHECKSUM_BYTES, &|_, _| {})
-                .await
-                .context("downloading checksums.txt")?;
+            // Keep the existing manual > system > environment selection for
+            // the attempt; each request below applies its bypass rules.
+            let proxy = proxy::resolve("https://github.com", manual_proxy);
+            let checksums = download(
+                proxy.as_ref(),
+                checksums_url,
+                MAX_CHECKSUM_BYTES,
+                &|_, _| {},
+            )
+            .await
+            .context("downloading checksums.txt")?;
             if on_progress(0, None).is_break() {
                 bail!(CANCELLED);
             }
-            let archive = download(&client, asset_url, MAX_ASSET_BYTES, &|received, total| {
-                progress.set((received, total));
-            })
+            let archive = download(
+                proxy.as_ref(),
+                asset_url,
+                MAX_ASSET_BYTES,
+                &|received, total| {
+                    progress.set((received, total));
+                },
+            )
             .await
             .context("downloading the update package")?;
             if on_progress(progress.get().0, progress.get().1).is_break() {
@@ -113,16 +120,39 @@ pub(super) fn fetch(
 }
 
 async fn download(
-    client: &ReqwestClient,
+    proxy: Option<&Proxy>,
     url: &str,
     limit: usize,
     progress: &dyn Fn(u64, Option<u64>),
 ) -> Result<Vec<u8>> {
     async {
-        let request = Request::get(url)
-            .follow_redirects(RedirectPolicy::FollowLimit(10))
-            .body(AsyncBody::default())?;
-        let mut response = client.send(request).await?;
+        let mut url = reqwest::Url::parse(url).context("parsing the release URL")?;
+        let mut redirects = 0;
+        let mut response = loop {
+            let uri = url
+                .as_str()
+                .parse()
+                .context("parsing the release request URL")?;
+            let route = proxy.filter(|proxy| !proxy.is_no_proxy(&uri));
+            let client = client(route).await?;
+            let request = Request::get(url.as_str())
+                .follow_redirects(RedirectPolicy::NoFollow)
+                .body(AsyncBody::default())?;
+            let response = client.send(request).await?;
+            if matches!(response.status().as_u16(), 301 | 302 | 303 | 307 | 308)
+                && let Some(location) = response.headers().get("location")
+            {
+                if redirects == 10 {
+                    bail!("the release server returned too many redirects");
+                }
+                url = url
+                    .join(location.to_str().context("reading the release redirect")?)
+                    .context("parsing the release redirect")?;
+                redirects += 1;
+                continue;
+            }
+            break response;
+        };
         if !response.status().is_success() {
             bail!(
                 "the release server returned HTTP {}",
@@ -215,6 +245,10 @@ mod tests {
         )
         .unwrap();
         stream.write_all(body).unwrap();
+    }
+
+    fn redirect(stream: &mut TcpStream, location: &str) {
+        write!(stream, "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n").unwrap();
     }
 
     #[derive(Clone, Copy)]
@@ -388,6 +422,127 @@ mod tests {
     }
 
     #[test]
+    fn an_unresolvable_bypassed_proxy_does_not_block_the_download() {
+        let (listener, endpoint) = listener();
+        let selected_proxy = Proxy::builder(proxy::ProxyProtocol::Socks5)
+            .host("unresolvable.proxy.invalid")
+            .port(1080)
+            .no_proxy("127.0.0.1")
+            .build()
+            .unwrap();
+        let (done_tx, done_rx) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            loop {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    stream.set_nonblocking(false).unwrap();
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .unwrap();
+                    request(&stream);
+                    respond(&mut stream, b"direct package");
+                    return;
+                }
+                if done_rx.try_recv().is_ok() {
+                    return;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let result = smol::block_on(download(Some(&selected_proxy), &endpoint, 1024, &|_, _| {}));
+        let _ = done_tx.send(());
+        server.join().unwrap();
+        assert_eq!(result.unwrap(), b"direct package");
+    }
+
+    #[test]
+    fn a_redirect_to_a_non_bypassed_host_requires_the_configured_proxy() {
+        let (listener, endpoint) = listener();
+        let location = format!(
+            "http://localhost:{}/package",
+            listener.local_addr().unwrap().port()
+        );
+        let selected_proxy = Proxy::builder(proxy::ProxyProtocol::Socks5)
+            .host("unresolvable.proxy.invalid")
+            .port(1080)
+            .no_proxy("127.0.0.1")
+            .build()
+            .unwrap();
+        let (done_tx, done_rx) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            let mut first = accept(&listener);
+            request(&first);
+            redirect(&mut first, &location);
+            loop {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    );
+                    return true;
+                }
+                if done_rx.try_recv().is_ok() {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let result = smol::block_on(download(Some(&selected_proxy), &endpoint, 1024, &|_, _| {}));
+        let _ = done_tx.send(());
+        assert!(
+            !server.join().unwrap(),
+            "the redirect bypassed a required proxy"
+        );
+        assert!(format!("{:#}", result.unwrap_err()).contains("SOCKS update proxy"));
+    }
+
+    #[test]
+    fn a_redirect_can_switch_from_the_proxy_to_a_bypassed_host() {
+        let (proxy_listener, _) = listener();
+        let (direct_listener, endpoint) = listener();
+        let selected_proxy = Proxy::builder(proxy::ProxyProtocol::Http)
+            .host("127.0.0.1")
+            .port(proxy_listener.local_addr().unwrap().port())
+            .no_proxy("127.0.0.1")
+            .build()
+            .unwrap();
+        let server = std::thread::spawn(move || {
+            let mut proxied = accept(&proxy_listener);
+            assert!(request(&proxied).starts_with("GET http://update.test/start "));
+            redirect(&mut proxied, &endpoint);
+            let mut direct = accept(&direct_listener);
+            assert!(request(&direct).starts_with("GET / HTTP/1.1"));
+            respond(&mut direct, b"redirected package");
+        });
+        let result = smol::block_on(download(
+            Some(&selected_proxy),
+            "http://update.test/start",
+            1024,
+            &|_, _| {},
+        ));
+        server.join().unwrap();
+        assert_eq!(result.unwrap(), b"redirected package");
+    }
+
+    #[test]
+    fn relative_redirect_loops_stop_at_the_limit() {
+        let (listener, endpoint) = listener();
+        let server = std::thread::spawn(move || {
+            for _ in 0..=10 {
+                let mut stream = accept(&listener);
+                request(&stream);
+                redirect(&mut stream, "/again");
+            }
+        });
+        let result = smol::block_on(download(None, &endpoint, 1024, &|_, _| {}));
+        server.join().unwrap();
+        assert!(
+            result
+                .unwrap_err()
+                .to_string()
+                .contains("too many redirects")
+        );
+    }
+
+    #[test]
     fn completed_downloads_preserve_bytes_and_report_asset_progress() {
         let (listener, proxy) = listener();
         let server = std::thread::spawn(move || {
@@ -433,7 +588,7 @@ mod tests {
                 }
             });
             let error = smol::block_on(download(
-                &smol::block_on(client(Some(&proxy))).unwrap(),
+                proxy::resolve("https://github.com", Some(&proxy)).as_ref(),
                 "http://update.test/package.zip",
                 4,
                 &|_, _| {},

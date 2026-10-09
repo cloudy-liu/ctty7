@@ -45,8 +45,10 @@ environment settings and applies bypass rules to redirects. TLS uses the
 existing platform verifier. Packages retain the 128 MiB limit; the checksum
 manifest is limited to 1 MiB.
 
-SOCKS proxy resolution has a cancellable 30-second limit. A failed configured
-proxy stops the download instead of falling back to a direct connection.
+Each request and redirect applies the selected proxy's bypass rules before
+resolving it. SOCKS proxy resolution has a cancellable 30-second limit. An
+unavailable required proxy stops the download; an unused bypassed proxy
+cannot block a direct download. Redirects have a ten-hop limit.
 
 Verification subprocesses receive the same cancellation predicate. They run
 in Windows jobs or Unix process groups, with stdout and stderr redirected
@@ -88,6 +90,9 @@ without changing their behavior so the tests could call those paths.
   still allowed relaunch; a cancelled verifier's record lacked its failure;
   and an unresolved SOCKS proxy caused a direct request. Their tests now
   cover conservative process observation, recovery records, and proxy failure.
+- A follow-up regression caught resolution of an unused bypassed proxy.
+  Coverage includes bypassed downloads, redirects in both routing directions,
+  and relative redirect loops.
 
 Run the desktop update and updater suites:
 
