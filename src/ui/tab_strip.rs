@@ -1187,14 +1187,12 @@ impl Tty7App {
         let badge = indicator.map(|i| Self::status_badge(i, size, surface));
         match avatar {
             TabAvatar::Ssh => base
-                .rounded(px(size * 0.2))
-                .border_1()
-                .border_color(cx.theme().muted_foreground.opacity(0.65))
-                .text_size(px((size * 0.4).max(8.)))
-                .font_weight(FontWeight::SEMIBOLD)
-                .line_height(relative(1.))
-                .text_color(cx.theme().foreground.opacity(0.8))
-                .child("SSH")
+                .child(
+                    gpui::svg()
+                        .path("icons/ssh.svg")
+                        .size(px((size * 0.78).min(16.)))
+                        .text_color(cx.theme().foreground.opacity(0.8)),
+                )
                 .tooltip(|window, cx| {
                     gpui_component::tooltip::Tooltip::new("SSH").build(window, cx)
                 })

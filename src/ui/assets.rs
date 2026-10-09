@@ -43,6 +43,7 @@ fn agent_icon(path: &str) -> Option<&'static [u8]> {
             include_bytes!("../../assets/markdown-themes/OCTICONS-LICENSE")
         }
         "icons/terminal.svg" => include_bytes!("../../assets/icons/terminal.svg"),
+        "icons/ssh.svg" => include_bytes!("../../assets/icons/ssh.svg"),
         "icons/git-branch.svg" => include_bytes!("../../assets/icons/git-branch.svg"),
         // Deliberately not `refresh.svg`: the panel header already carries a
         // refresh tile, and the same glyph meaning two different things one row
