@@ -2856,6 +2856,7 @@ impl Tty7App {
                         tab.avatar,
                         tab.indicator,
                         ROW_AVATAR,
+                        false,
                         cx,
                     ))
                     .child(

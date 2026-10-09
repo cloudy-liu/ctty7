@@ -22,7 +22,7 @@ use crate::ui::reorder::{self, Reorder, Surface};
 use crate::ui::right_panel::RESIZE_HANDLE_WIDTH;
 use crate::ui::tab_strip::{
     DragTab, REORDER_SLIDE_MS, TabAvatar, abbreviate_home, elide_keep_edges, elide_label,
-    elide_path_keep_tail, measure_text, strip_host_prefix,
+    elide_path_keep_tail, has_ssh_badge, measure_text, strip_host_prefix,
 };
 
 pub(crate) const MIN_SIDEBAR_WIDTH: f32 = 180.;
@@ -292,6 +292,7 @@ impl Tty7App {
                 let agent_badge = tab.focused_agent_badge(Some(window), cx);
                 let agent = agent_badge.agent;
                 let avatar = TabAvatar::choose(agent, tab.foreground_app(Some(window), cx));
+                let ssh = has_ssh_badge(tab.remote_context(Some(window), cx).map(|r| r.kind));
                 let agent_indicator = agent_badge.indicator();
                 let git_cwd = diff_click_cwd(
                     cx.global::<Config>(),
@@ -376,7 +377,16 @@ impl Tty7App {
                         (shown, Some(full))
                     } else {
                         let (raw_title, home) = tab.leaf_title_and_home(Some(window), cx);
-                        let title = strip_host_prefix(raw_title.trim());
+                        let remote = raw_title
+                            .trim()
+                            .is_empty()
+                            .then(|| tab.remote_context(Some(window), cx))
+                            .flatten();
+                        let title = if raw_title.trim().is_empty() {
+                            crate::ui::app::title_or_ssh_target(&raw_title, remote.as_ref())
+                        } else {
+                            strip_host_prefix(raw_title.trim())
+                        };
                         let raw = abbreviate_home(title, home.as_deref());
                         if raw.trim().is_empty() {
                             // Nothing to expand: the row is naming an unnamed
@@ -782,7 +792,14 @@ impl Tty7App {
                         cx.stop_propagation();
                         this.activate(i, window, cx);
                     }))
-                    .child(self.tab_avatar(("sidebar-avatar", i), avatar, agent_indicator, 22., cx))
+                    .child(self.tab_avatar(
+                        ("sidebar-avatar", i),
+                        avatar,
+                        agent_indicator,
+                        22.,
+                        ssh,
+                        cx,
+                    ))
                     .child(label_region)
                     .when(show_badges && badge_pos < 9, |row| {
                         row.child(
@@ -1284,8 +1301,8 @@ impl Tty7App {
     }
 
     /// What the sidebar row hid: the full title, the full branch and diff
-    /// counts, the working directory, and the remote host the avatar only
-    /// dots. `None` when the row showed everything — a card would add noise,
+    /// counts, the working directory, and the target behind the SSH marker.
+    /// `None` when the row showed everything — a card would add noise,
     /// not information. The host is included even for an untruncated row,
     /// because the title strips the `user@host:` prefix the avatar cannot
     /// spell out.
@@ -1322,11 +1339,10 @@ impl Tty7App {
         // The host is read off the same leaf the title and cwd came from; a
         // split tab whose panes sit on different machines would otherwise
         // name whichever one happens to be first.
-        if let Some(target) = tab.pane.focused_or_first(window, cx).and_then(|leaf| {
-            leaf.read(cx)
-                .remote_context()
-                .map(|r| SharedString::from(r.target.clone()))
-        }) {
+        if let Some(target) = tab
+            .remote_context(Some(window), cx)
+            .map(|r| SharedString::from(r.target))
+        {
             info.host = Some(target);
         }
         (info.title.is_some() || info.branch.is_some() || info.cwd.is_some() || info.host.is_some())

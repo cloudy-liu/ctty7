@@ -503,6 +503,23 @@ fn badge_for_focused_pane(
         .unwrap_or_default()
 }
 
+pub(crate) fn title_or_ssh_target<'a>(
+    title: &'a str,
+    remote: Option<&'a RemoteContext>,
+) -> &'a str {
+    if title.trim().is_empty()
+        && let Some(remote) = remote
+        && matches!(
+            remote.kind,
+            crate::daemon::protocol::RemoteKind::Ssh
+                | crate::daemon::protocol::RemoteKind::NativeSsh
+        )
+    {
+        return &remote.target;
+    }
+    title
+}
+
 impl Tab {
     pub(crate) fn new(pane: Pane) -> Self {
         Self {
@@ -590,6 +607,15 @@ impl Tab {
     ) -> Option<crate::core::foreground_app::ForegroundApp> {
         self.title_leaf(window, cx)
             .and_then(|leaf| leaf.read(cx).foreground_app())
+    }
+
+    pub(crate) fn remote_context(
+        &self,
+        window: Option<&Window>,
+        cx: &App,
+    ) -> Option<RemoteContext> {
+        self.title_leaf(window, cx)
+            .and_then(|leaf| leaf.read(cx).remote_context())
     }
 
     pub(crate) fn leaf_title(&self, window: Option<&Window>, cx: &App) -> String {
@@ -8870,9 +8896,42 @@ mod tests {
         TabAgentSession, badge_for_focused_pane, clear_window_override_values, close_prompt,
         document_column_px, join_shell_args, leaf_shares_the_window_daemon, most_urgent_agent_row,
         mru_order, pane_free_for, parse_ssh_connect_input, parse_ssh_option_words, side_panel_max,
-        split_shell_args, strip_band, wd_path_saveable,
+        split_shell_args, strip_band, title_or_ssh_target, wd_path_saveable,
     };
     use gpui::{Edges, point, px, size};
+
+    #[test]
+    fn ssh_connection_names_only_fill_an_empty_title() {
+        use crate::daemon::protocol::{RemoteContext, RemoteKind};
+
+        for kind in [RemoteKind::Ssh, RemoteKind::NativeSsh] {
+            let remote = RemoteContext {
+                kind,
+                argv: vec!["ssh".into(), "prod-web".into()],
+                target: "prod-web".into(),
+            };
+            assert_eq!(title_or_ssh_target("", Some(&remote)), "prod-web");
+            assert_eq!(title_or_ssh_target("  ", Some(&remote)), "prod-web");
+            assert_eq!(
+                title_or_ssh_target("Fix login", Some(&remote)),
+                "Fix login",
+                "a terminal title keeps the original title slot"
+            );
+        }
+        let wsl = RemoteContext {
+            kind: RemoteKind::Wsl,
+            argv: vec!["wsl".into()],
+            target: "Ubuntu".into(),
+        };
+        assert_eq!(title_or_ssh_target("", Some(&wsl)), "");
+        assert_eq!(title_or_ssh_target("", None), "");
+        let ipv6 = RemoteContext {
+            kind: RemoteKind::Ssh,
+            argv: vec!["ssh".into(), "deploy@2001:db8::1".into()],
+            target: "deploy@2001:db8::1".into(),
+        };
+        assert_eq!(title_or_ssh_target("", Some(&ipv6)), "deploy@2001:db8::1");
+    }
 
     #[test]
     fn the_agent_icon_and_status_come_from_the_same_most_urgent_pane() {
@@ -9796,6 +9855,116 @@ mod tests {
         assert!(split_shell_args("-c \"echo hi").is_err());
         assert!(split_shell_args("--name 'tty7").is_err());
         assert!(split_shell_args("\"a\\\"").is_err());
+    }
+}
+
+#[cfg(test)]
+mod ssh_tab_gpui_tests {
+    use super::*;
+    use crate::core::cli_agent::CLIAgent;
+    use crate::daemon::protocol::{DaemonMsg, RemoteKind};
+    use crate::ui::tab_strip::TabAvatar;
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn ssh_tab_identity_follows_the_remembered_split_and_clears_on_exit(cx: &mut TestAppContext) {
+        let (app, mut vcx) = test_window::harness(cx);
+        let (local, remote, _local_daemon, mut daemon) =
+            app.update_in(&mut vcx, |app, window, cx| {
+                let (local, local_daemon) = crate::terminal::view::quiet_test_pane(1, window, cx);
+                let (remote, daemon) = crate::terminal::view::quiet_test_pane(2, window, cx);
+                let mut pane = Pane::leaf(PaneSlot::Ready(local.clone()));
+                assert!(pane.split_leaf(
+                    local.entity_id(),
+                    Axis::Horizontal,
+                    false,
+                    PaneSlot::Ready(remote.clone()),
+                ));
+                app.tabs.push(Tab::new(pane));
+                (local, remote, local_daemon, daemon)
+            });
+        DaemonMsg::RemoteContext(Some(RemoteContext {
+            kind: RemoteKind::Ssh,
+            argv: vec!["ssh".into(), "deploy@2001:db8::1".into()],
+            target: "deploy@2001:db8::1".into(),
+        }))
+        .encode(&mut daemon)
+        .unwrap();
+        DaemonMsg::Agent(Some(CLIAgent::Codex))
+            .encode(&mut daemon)
+            .unwrap();
+        for _ in 0..200 {
+            if remote.read_with(&vcx, |view, _| {
+                view.remote_context().is_some() && view.agent() == Some(CLIAgent::Codex)
+            }) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        app.update_in(&mut vcx, |app, window, cx| {
+            let tab = &mut app.tabs[0];
+            tab.last_focused = Some(remote.entity_id());
+            assert_eq!(
+                tab.remote_context(None, cx).unwrap().target,
+                "deploy@2001:db8::1"
+            );
+            assert_eq!(
+                tab.focused_agent_badge(None, cx).agent,
+                Some(CLIAgent::Codex)
+            );
+            assert!(crate::ui::tab_strip::has_ssh_badge(
+                tab.remote_context(None, cx).map(|r| r.kind)
+            ));
+            assert_eq!(
+                TabAvatar::choose(tab.focused_agent_badge(None, cx).agent, None),
+                TabAvatar::Agent(CLIAgent::Codex),
+                "the SSH corner badge must keep the detected Agent as the main icon"
+            );
+            remote.update(cx, |view, _| view.title.clear());
+            assert_eq!(
+                app.tab_label(&app.tabs[0], 0, None, cx),
+                "deploy@2001:db8::1"
+            );
+            assert_eq!(
+                app.tab_title_tooltip(&app.tabs[0], 0, None, cx).as_deref(),
+                Some("deploy@2001:db8::1")
+            );
+            app.tabs[0].name = Some("My deployment".into());
+            assert_eq!(app.tab_label(&app.tabs[0], 0, None, cx), "My deployment");
+            assert!(app.tab_title_tooltip(&app.tabs[0], 0, None, cx).is_none());
+            // An inactive split must use its remembered leaf, rather than
+            // borrowing the first pane's connection or agent.
+            app.tabs[0].last_focused = Some(local.entity_id());
+            assert!(app.tabs[0].remote_context(None, cx).is_none());
+            assert!(!crate::ui::tab_strip::has_ssh_badge(
+                app.tabs[0].remote_context(None, cx).map(|r| r.kind)
+            ));
+            assert!(app.tabs[0].focused_agent_badge(None, cx).agent.is_none());
+            let focus = remote.read(cx).focus_handle.clone();
+            window.focus(&focus, cx);
+            assert_eq!(
+                app.tabs[0].remote_context(Some(window), cx).unwrap().target,
+                "deploy@2001:db8::1"
+            );
+        });
+        DaemonMsg::RemoteContext(None).encode(&mut daemon).unwrap();
+        DaemonMsg::Agent(None).encode(&mut daemon).unwrap();
+        for _ in 0..200 {
+            if remote.read_with(&vcx, |view, _| {
+                view.remote_context().is_none() && view.agent().is_none()
+            }) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        app.update_in(&mut vcx, |app, window, cx| {
+            let tab = &app.tabs[0];
+            let kind = tab.remote_context(Some(window), cx).map(|r| r.kind);
+            let agent = tab.focused_agent_badge(Some(window), cx).agent;
+            assert!(!crate::ui::tab_strip::has_ssh_badge(kind));
+            assert_eq!(TabAvatar::choose(agent, None), TabAvatar::Terminal);
+            assert_eq!(app.tab_label(tab, 0, Some(window), cx), "My deployment");
+        });
     }
 }
 

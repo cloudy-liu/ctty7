@@ -8837,7 +8837,7 @@ mod tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "markdown-visual-tests"))]
 pub(crate) fn quiet_test_pane(
     pane_id: u64,
     window: &mut Window,
@@ -8848,7 +8848,7 @@ pub(crate) fn quiet_test_pane(
     (view, daemon_side)
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "markdown-visual-tests"))]
 pub(crate) fn quiet_test_shell_parts(
     pane_id: u64,
 ) -> (ShellParts, crate::daemon::transport::Stream) {
