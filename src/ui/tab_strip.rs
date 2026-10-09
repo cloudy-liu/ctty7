@@ -17,7 +17,7 @@ use crate::core::actions::{
 };
 use crate::core::config::RightPanelTab;
 use crate::core::shells::DetectedShell;
-use crate::daemon::protocol::ShellSpec;
+use crate::daemon::protocol::{RemoteKind, ShellSpec};
 use crate::ui::app::{SpawnWhere, TILE_GLYPH, TILE_SIZE, Tab, Tty7App, tile_trailing_inset};
 use crate::ui::hints::tab_badge_label;
 use crate::ui::i18n::{L10nKey, t, t_fmt};
@@ -36,12 +36,20 @@ const KEEP_SEGMENTS: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TabAvatar {
+    Ssh,
     Agent(crate::core::cli_agent::CLIAgent),
     App(crate::core::foreground_app::ForegroundApp),
     Terminal,
 }
 
 impl TabAvatar {
+    pub(crate) fn with_remote(self, kind: Option<RemoteKind>) -> Self {
+        match kind {
+            Some(RemoteKind::Ssh | RemoteKind::NativeSsh) => Self::Ssh,
+            _ => self,
+        }
+    }
+
     pub(crate) fn choose(
         agent: Option<crate::core::cli_agent::CLIAgent>,
         app: Option<crate::core::foreground_app::ForegroundApp>,
@@ -1176,6 +1184,19 @@ impl Tty7App {
         let surface = cx.theme().sidebar;
         let badge = indicator.map(|i| Self::status_badge(i, size, surface));
         match avatar {
+            TabAvatar::Ssh => base
+                .rounded(px(size * 0.2))
+                .border_1()
+                .border_color(cx.theme().muted_foreground.opacity(0.65))
+                .text_size(px((size * 0.4).max(8.)))
+                .font_weight(FontWeight::SEMIBOLD)
+                .line_height(relative(1.))
+                .text_color(cx.theme().foreground.opacity(0.8))
+                .child("SSH")
+                .tooltip(|window, cx| {
+                    gpui_component::tooltip::Tooltip::new("SSH").build(window, cx)
+                })
+                .into_any_element(),
             TabAvatar::Agent(agent) => {
                 // Which agent this is, and what it wants, were carried entirely
                 // by a brand hue and a small symbol. Say it in words too.
@@ -1609,7 +1630,8 @@ impl Tty7App {
             let full_title = self.tab_title_tooltip(tab, i, Some(window), cx);
             let agent_badge = tab.focused_agent_badge(Some(window), cx);
             let agent = agent_badge.agent;
-            let avatar = TabAvatar::choose(agent, tab.foreground_app(Some(window), cx));
+            let avatar = TabAvatar::choose(agent, tab.foreground_app(Some(window), cx))
+                .with_remote(tab.remote_context(Some(window), cx).map(|r| r.kind));
             let agent_indicator = agent_badge.indicator();
 
             let rename_input = self
@@ -1722,6 +1744,17 @@ impl Tty7App {
                     chip.child(self.tab_avatar(("tab-avatar", i), avatar, agent_indicator, 18., cx))
                 })
                 .child(label_region)
+                .when(avatar == TabAvatar::Ssh, |chip| {
+                    chip.when_some(agent, |chip, agent| {
+                        chip.child(self.tab_avatar(
+                            ("tab-ssh-agent", i),
+                            TabAvatar::Agent(agent),
+                            agent_indicator,
+                            16.,
+                            cx,
+                        ))
+                    })
+                })
                 .when(show_badges && i < 9, |chip| {
                     chip.child(
                         div()
@@ -1928,6 +1961,33 @@ mod tests {
         assert_eq!(
             super::TabAvatar::choose(None, Some(ForegroundApp::Herdr)),
             super::TabAvatar::App(ForegroundApp::Herdr)
+        );
+    }
+
+    #[test]
+    fn ssh_avatar_tracks_both_connection_kinds_and_returns_to_local_identity() {
+        use crate::core::cli_agent::CLIAgent;
+        use crate::core::foreground_app::ForegroundApp;
+        use crate::daemon::protocol::RemoteKind;
+
+        let local = super::TabAvatar::choose(Some(CLIAgent::Codex), None);
+        for kind in [RemoteKind::Ssh, RemoteKind::NativeSsh] {
+            assert_eq!(local.with_remote(Some(kind)), super::TabAvatar::Ssh);
+            assert_eq!(
+                super::TabAvatar::Terminal.with_remote(Some(kind)),
+                super::TabAvatar::Ssh,
+                "SSH has an identity even without a detected agent"
+            );
+            assert_eq!(
+                super::TabAvatar::App(ForegroundApp::Herdr).with_remote(Some(kind)),
+                super::TabAvatar::Ssh
+            );
+        }
+        assert_eq!(local.with_remote(None), local, "leaving SSH restores Codex");
+        assert_eq!(local.with_remote(Some(RemoteKind::Wsl)), local);
+        assert_eq!(
+            super::TabAvatar::Terminal.with_remote(None),
+            super::TabAvatar::Terminal
         );
     }
 
