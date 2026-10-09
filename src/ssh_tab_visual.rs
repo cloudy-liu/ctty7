@@ -26,6 +26,7 @@ use crate::{
 struct Options {
     sidebar: bool,
     output: PathBuf,
+    hold_seconds: Option<u64>,
 }
 
 struct Fixture {
@@ -184,7 +185,9 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     let _ = &options.output;
                 }).unwrap();
                 eprintln!("NATIVE_SSH_TABS_READY");
-                cx.background_executor().timer(Duration::from_secs(12)).await;
+                cx.background_executor()
+                    .timer(Duration::from_secs(options.hold_seconds.unwrap_or(12)))
+                    .await;
                 // The platform input handler owns the focused terminal. Release
                 // it while the window can still draw, before GPUI checks leaks.
                 cx.update_window(handle.into(), |_, window, cx| {
