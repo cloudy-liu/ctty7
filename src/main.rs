@@ -7,6 +7,8 @@ mod core;
 mod daemon;
 #[cfg(feature = "markdown-visual-tests")]
 mod markdown_visual;
+#[cfg(feature = "markdown-visual-tests")]
+mod ssh_tab_visual;
 mod terminal;
 mod ui;
 
@@ -525,6 +527,12 @@ fn main() {
     }
 
     apply_config_dir_arg(&args);
+
+    #[cfg(feature = "markdown-visual-tests")]
+    if let Some(index) = args.iter().position(|arg| arg == "--ssh-tab-visual") {
+        ssh_tab_visual::run(args.get(index + 1).expect("SSH tab fixture options path"));
+        return;
+    }
 
     #[cfg(feature = "markdown-visual-tests")]
     if let Some(index) = args.iter().position(|arg| arg == "--markdown-visual") {

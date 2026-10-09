@@ -174,6 +174,29 @@ jobs:
           path: native-markdown-*/
           if-no-files-found: error
 
+      - name: Capture native SSH tabs before and after
+        if: runner.os == 'Linux' && github.event_name == 'pull_request'
+        timeout-minutes: 15
+        env:
+          LIBGL_ALWAYS_SOFTWARE: '1'
+          SSH_TABS_BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          binary="$GITHUB_WORKSPACE/target/${{ matrix.target }}/debug/tty7-app"
+          xvfb-run -a -s '-screen 0 1800x1200x24' python3 scripts/ssh-tabs-native-visual.py capture "$binary" native-ssh-tabs --phase after
+          git fetch --no-tags origin "$SSH_TABS_BASE"
+          git worktree add --detach ../ssh-tab-before "$SSH_TABS_BASE"
+          python3 scripts/ssh-tabs-native-visual.py prepare-before ../ssh-tab-before
+          cargo build --locked --features markdown-visual-tests --bin tty7-app --target ${{ matrix.target }} --target-dir "$GITHUB_WORKSPACE/target" --manifest-path ../ssh-tab-before/Cargo.toml
+          xvfb-run -a -s '-screen 0 1800x1200x24' python3 scripts/ssh-tabs-native-visual.py capture "$binary" native-ssh-tabs --phase before --repository ../ssh-tab-before
+
+      - name: Upload native SSH tab comparison
+        if: always() && runner.os == 'Linux' && github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-ssh-tabs-before-after
+          path: native-ssh-tabs/
+          if-no-files-found: error
+
       # There is deliberately no post-mortem step here, and that is worth
       # recording, because an earlier version of this file had one: on failure it
       # dumped the process table to find the surviving test binary.
