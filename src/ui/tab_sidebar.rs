@@ -52,7 +52,7 @@ mod row_metrics {
     pub(super) const META_GAP: f32 = 6.;
     /// The branch icon.
     pub(super) const BRANCH_ICON: f32 = 11.;
-    /// Status tags use smaller type than the metadata, at medium weight.
+    /// Status tags use smaller type than the metadata, at semibold weight.
     pub(super) const STATUS_REM: f32 = 0.6875;
     /// Horizontal padding on each side of the status tag.
     pub(super) const STATUS_PAD: f32 = 5.;
@@ -229,6 +229,11 @@ impl Tty7App {
             weight: FontWeight::MEDIUM,
             ..font.clone()
         };
+        let status_font = gpui::Font {
+            weight: FontWeight::SEMIBOLD,
+            ..font.clone()
+        };
+        let dark_sidebar = crate::ui::presets::surface_is_dark(cx.theme().sidebar);
         let rem = window.rem_size().as_f32();
         let rendered = |ix: &usize| !visible_by_section[*ix].is_empty();
         let repo_slots: Vec<usize> = (0..sections.len())
@@ -321,23 +326,28 @@ impl Tty7App {
                 };
                 let status_size = row_metrics::STATUS_REM * rem;
                 let status_w = status_tag.map_or(0., |(tag, _)| {
-                    measure_text(&window.text_system(), &title_font_active, status_size, tag)
+                    measure_text(&window.text_system(), &status_font, status_size, tag)
                         + 2. * row_metrics::STATUS_PAD
                         + 0.375 * rem // The following gap_1p5 scales with the UI font size.
                 });
                 let status_lead = || {
                     status_tag.map(|(tag, colour)| {
+                        let mut ink = gpui::Hsla::from(colour);
+                        // Latte's yellow and green need deeper ink on a light fill.
+                        if !dark_sidebar {
+                            ink.l *= 0.5;
+                        }
                         div()
                             .id(("sidebar-status", i))
                             .flex_shrink_0()
                             .text_size(px(status_size))
-                            .font_weight(FontWeight::MEDIUM)
+                            .font_weight(FontWeight::SEMIBOLD)
                             .line_height(gpui::relative(1.2))
                             .px(px(row_metrics::STATUS_PAD))
                             .py(px(1.))
                             .rounded(px(4.))
-                            .text_color(colour)
-                            .bg(colour.opacity(0.12))
+                            .text_color(ink)
+                            .bg(colour.opacity(0.24))
                             .child(tag)
                     })
                 };

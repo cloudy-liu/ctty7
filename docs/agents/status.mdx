@@ -77,16 +77,17 @@ colours:
 
 A finished turn keeps its check until you look at the pane, then reads as idle.
 
-A sidebar row also shows a compact tag at the start of its second line, using
-the same state colour over a faint fill. The labels stay uppercase and in
+A sidebar row also shows a compact rounded tag at the start of its second line,
+using the same state colour with a stronger fill. Semibold text
+uses deeper ink in light themes. The labels stay lowercase and in
 English whatever the interface language:
 
 | Tag | Meaning |
 |---|---|
-| **IDLE** | Waiting for your next prompt, or a finished result you have read |
-| **RUN** | Working on a turn |
-| **INPUT** | Needs your reply or permission |
-| **DONE** | Finished this turn, with an unread result |
+| **idle** | Waiting for your next prompt, or a finished result you have read |
+| **run** | Working on a turn |
+| **input** | Needs your reply or permission |
+| **done** | Finished this turn, with an unread result |
 
 A gap separates the tag from the branch or working directory. Unknown status
 adds no tag; the tab avatar keeps its grey status symbol and hover explanation.
