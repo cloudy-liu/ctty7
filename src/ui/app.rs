@@ -9912,6 +9912,14 @@ mod ssh_tab_gpui_tests {
                 tab.focused_agent_badge(None, cx).agent,
                 Some(CLIAgent::Codex)
             );
+            assert!(crate::ui::tab_strip::has_ssh_badge(
+                tab.remote_context(None, cx).map(|r| r.kind)
+            ));
+            assert_eq!(
+                TabAvatar::choose(tab.focused_agent_badge(None, cx).agent, None),
+                TabAvatar::Agent(CLIAgent::Codex),
+                "the SSH corner badge must keep the detected Agent as the main icon"
+            );
             remote.update(cx, |view, _| view.title.clear());
             assert_eq!(
                 app.tab_label(&app.tabs[0], 0, None, cx),
@@ -9928,6 +9936,9 @@ mod ssh_tab_gpui_tests {
             // borrowing the first pane's connection or agent.
             app.tabs[0].last_focused = Some(local.entity_id());
             assert!(app.tabs[0].remote_context(None, cx).is_none());
+            assert!(!crate::ui::tab_strip::has_ssh_badge(
+                app.tabs[0].remote_context(None, cx).map(|r| r.kind)
+            ));
             assert!(app.tabs[0].focused_agent_badge(None, cx).agent.is_none());
             let focus = remote.read(cx).focus_handle.clone();
             window.focus(&focus, cx);
@@ -9950,10 +9961,8 @@ mod ssh_tab_gpui_tests {
             let tab = &app.tabs[0];
             let kind = tab.remote_context(Some(window), cx).map(|r| r.kind);
             let agent = tab.focused_agent_badge(Some(window), cx).agent;
-            assert_eq!(
-                TabAvatar::choose(agent, None).with_remote(kind),
-                TabAvatar::Terminal
-            );
+            assert!(!crate::ui::tab_strip::has_ssh_badge(kind));
+            assert_eq!(TabAvatar::choose(agent, None), TabAvatar::Terminal);
             assert_eq!(app.tab_label(tab, 0, Some(window), cx), "My deployment");
         });
     }

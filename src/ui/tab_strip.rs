@@ -38,20 +38,12 @@ const KEEP_SEGMENTS: usize = 3;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TabAvatar {
-    Ssh,
     Agent(crate::core::cli_agent::CLIAgent),
     App(crate::core::foreground_app::ForegroundApp),
     Terminal,
 }
 
 impl TabAvatar {
-    pub(crate) fn with_remote(self, kind: Option<RemoteKind>) -> Self {
-        match kind {
-            Some(RemoteKind::Ssh | RemoteKind::NativeSsh) => Self::Ssh,
-            _ => self,
-        }
-    }
-
     pub(crate) fn choose(
         agent: Option<crate::core::cli_agent::CLIAgent>,
         app: Option<crate::core::foreground_app::ForegroundApp>,
@@ -62,6 +54,10 @@ impl TabAvatar {
             (None, None) => Self::Terminal,
         }
     }
+}
+
+pub(crate) fn has_ssh_badge(kind: Option<RemoteKind>) -> bool {
+    matches!(kind, Some(RemoteKind::Ssh | RemoteKind::NativeSsh))
 }
 
 /// Builds a launch specification without recomputing argument ownership locally.
@@ -1172,10 +1168,12 @@ impl Tty7App {
         avatar: TabAvatar,
         indicator: Option<crate::ui::status_indicator::StatusIndicator>,
         size: f32,
+        ssh: bool,
         cx: &App,
     ) -> gpui::AnyElement {
         let base = div()
             .id(id)
+            .relative()
             .flex_shrink_0()
             .size(px(size))
             .flex()
@@ -1185,60 +1183,71 @@ impl Tty7App {
         // window material, and the logo would show through the disc.
         let surface = cx.theme().sidebar;
         let badge = indicator.map(|i| Self::status_badge(i, size, surface));
-        match avatar {
-            TabAvatar::Ssh => base
-                .child(
-                    gpui::svg()
-                        .path("icons/ssh.svg")
-                        .size(px((size * 0.78).min(16.)))
-                        .text_color(cx.theme().foreground.opacity(0.8)),
-                )
-                .tooltip(|window, cx| {
-                    gpui_component::tooltip::Tooltip::new("SSH").build(window, cx)
-                })
-                .into_any_element(),
-            TabAvatar::Agent(agent) => {
-                // Which agent this is, and what it wants, were carried entirely
-                // by a brand hue and a small symbol. Say it in words too.
-                let tip = match indicator {
-                    Some(state) => format!("{} — {}", agent.display_name(), state.label()),
-                    None => agent.display_name().to_string(),
-                };
-                base.relative()
-                    .child(
-                        gpui::svg()
-                            .path(agent.icon_path())
-                            .size(px(size * 0.78))
-                            .text_color(gpui::rgb(
-                                cx.global::<crate::ui::presets::AgentIcons>().ink(agent),
-                            )),
-                    )
-                    .when_some(badge, |b, badge| b.child(badge))
-                    .tooltip(move |window, cx| {
-                        gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
-                    })
-                    .into_any_element()
+        let tooltip = match avatar {
+            TabAvatar::Agent(agent) => Some(match indicator {
+                Some(state) => format!("{} — {}", agent.display_name(), state.label()),
+                None => agent.display_name().to_string(),
+            }),
+            TabAvatar::App(crate::core::foreground_app::ForegroundApp::Herdr) => {
+                Some("Herdr".to_owned())
             }
-            TabAvatar::App(crate::core::foreground_app::ForegroundApp::Herdr) => base
-                .relative()
-                .child(gpui::img("icons/herdr.svg").size(px(size)).rounded_full())
-                .when_some(badge, |b, badge| b.child(badge))
-                .tooltip(|window, cx| {
-                    gpui_component::tooltip::Tooltip::new("Herdr").build(window, cx)
-                })
-                .into_any_element(),
-            TabAvatar::Terminal => base
-                .relative()
-                .rounded_full()
-                .bg(cx.theme().muted)
+            TabAvatar::Terminal => None,
+        };
+        let tooltip = match (tooltip, ssh) {
+            (Some(tip), true) => Some(format!("{tip} · SSH")),
+            (None, true) => Some("SSH".to_owned()),
+            (tip, false) => tip,
+        };
+        let avatar = match avatar {
+            TabAvatar::Agent(agent) => base
                 .child(
                     gpui::svg()
-                        .path("icons/terminal.svg")
-                        .size(px(size * 0.56))
-                        .text_color(cx.theme().foreground.opacity(0.65)),
+                        .path(agent.icon_path())
+                        .size(px(size * 0.78))
+                        .text_color(gpui::rgb(
+                            cx.global::<crate::ui::presets::AgentIcons>().ink(agent),
+                        )),
                 )
-                .into_any_element(),
-        }
+                .when_some(badge, |b, badge| b.child(badge)),
+            TabAvatar::App(crate::core::foreground_app::ForegroundApp::Herdr) => base
+                .child(gpui::img("icons/herdr.svg").size(px(size)).rounded_full())
+                .when_some(badge, |b, badge| b.child(badge)),
+            TabAvatar::Terminal => base.rounded_full().bg(cx.theme().muted).child(
+                gpui::svg()
+                    .path("icons/terminal.svg")
+                    .size(px(size * 0.56))
+                    .text_color(cx.theme().foreground.opacity(0.65)),
+            ),
+        };
+        avatar
+            .when(ssh, |avatar| {
+                avatar.child(
+                    div()
+                        .absolute()
+                        .right(px(-5.))
+                        .top(px(-4.))
+                        .w(px(18.))
+                        .h(px(10.))
+                        .rounded(px(2.))
+                        .border_1()
+                        .border_color(cx.theme().muted_foreground.opacity(0.45))
+                        .bg(surface)
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_size(px(7.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .line_height(relative(1.))
+                        .text_color(cx.theme().foreground.opacity(0.85))
+                        .child("SSH"),
+                )
+            })
+            .when_some(tooltip, |avatar, tip| {
+                avatar.tooltip(move |window, cx| {
+                    gpui_component::tooltip::Tooltip::new(tip.clone()).build(window, cx)
+                })
+            })
+            .into_any_element()
     }
 
     /// The full title behind a shortened one, for the row to name on hover.
@@ -1643,8 +1652,8 @@ impl Tty7App {
             let full_title = self.tab_title_tooltip(tab, i, Some(window), cx);
             let agent_badge = tab.focused_agent_badge(Some(window), cx);
             let agent = agent_badge.agent;
-            let avatar = TabAvatar::choose(agent, tab.foreground_app(Some(window), cx))
-                .with_remote(tab.remote_context(Some(window), cx).map(|r| r.kind));
+            let avatar = TabAvatar::choose(agent, tab.foreground_app(Some(window), cx));
+            let ssh = has_ssh_badge(tab.remote_context(Some(window), cx).map(|r| r.kind));
             let agent_indicator = agent_badge.indicator();
 
             let rename_input = self
@@ -1753,21 +1762,17 @@ impl Tty7App {
                         this.activate(i, window, cx);
                     }
                 }))
-                .when(avatar != TabAvatar::Terminal, |chip| {
-                    chip.child(self.tab_avatar(("tab-avatar", i), avatar, agent_indicator, 18., cx))
+                .when(avatar != TabAvatar::Terminal || ssh, |chip| {
+                    chip.child(self.tab_avatar(
+                        ("tab-avatar", i),
+                        avatar,
+                        agent_indicator,
+                        18.,
+                        ssh,
+                        cx,
+                    ))
                 })
                 .child(label_region)
-                .when(avatar == TabAvatar::Ssh, |chip| {
-                    chip.when_some(agent, |chip, agent| {
-                        chip.child(self.tab_avatar(
-                            ("tab-ssh-agent", i),
-                            TabAvatar::Agent(agent),
-                            agent_indicator,
-                            16.,
-                            cx,
-                        ))
-                    })
-                })
                 .when(show_badges && i < 9, |chip| {
                     chip.child(
                         div()
@@ -1978,30 +1983,14 @@ mod tests {
     }
 
     #[test]
-    fn ssh_avatar_tracks_both_connection_kinds_and_returns_to_local_identity() {
-        use crate::core::cli_agent::CLIAgent;
-        use crate::core::foreground_app::ForegroundApp;
+    fn ssh_badge_tracks_both_connection_kinds_and_clears_for_local_and_wsl() {
         use crate::daemon::protocol::RemoteKind;
 
-        let local = super::TabAvatar::choose(Some(CLIAgent::Codex), None);
         for kind in [RemoteKind::Ssh, RemoteKind::NativeSsh] {
-            assert_eq!(local.with_remote(Some(kind)), super::TabAvatar::Ssh);
-            assert_eq!(
-                super::TabAvatar::Terminal.with_remote(Some(kind)),
-                super::TabAvatar::Ssh,
-                "SSH has an identity even without a detected agent"
-            );
-            assert_eq!(
-                super::TabAvatar::App(ForegroundApp::Herdr).with_remote(Some(kind)),
-                super::TabAvatar::Ssh
-            );
+            assert!(super::has_ssh_badge(Some(kind)));
         }
-        assert_eq!(local.with_remote(None), local, "leaving SSH restores Codex");
-        assert_eq!(local.with_remote(Some(RemoteKind::Wsl)), local);
-        assert_eq!(
-            super::TabAvatar::Terminal.with_remote(None),
-            super::TabAvatar::Terminal
-        );
+        assert!(!super::has_ssh_badge(None), "leaving SSH clears its badge");
+        assert!(!super::has_ssh_badge(Some(RemoteKind::Wsl)));
     }
 
     #[test]

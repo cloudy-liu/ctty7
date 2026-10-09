@@ -22,7 +22,7 @@ use crate::ui::reorder::{self, Reorder, Surface};
 use crate::ui::right_panel::RESIZE_HANDLE_WIDTH;
 use crate::ui::tab_strip::{
     DragTab, REORDER_SLIDE_MS, TabAvatar, abbreviate_home, elide_keep_edges, elide_label,
-    elide_path_keep_tail, measure_text, strip_host_prefix,
+    elide_path_keep_tail, has_ssh_badge, measure_text, strip_host_prefix,
 };
 
 pub(crate) const MIN_SIDEBAR_WIDTH: f32 = 180.;
@@ -44,8 +44,6 @@ mod row_metrics {
     pub(super) const ROW_PAD: f32 = 8.;
     /// The avatar handed to `tab_avatar`.
     pub(super) const AVATAR: f32 = 22.;
-    /// The detected agent beside an SSH tab's title.
-    pub(super) const SSH_AGENT_AVATAR: f32 = 16.;
     /// `gap_2` between the row's children.
     pub(super) const GAP: f32 = 8.;
     /// The ⌘N badge, when one is shown.
@@ -288,8 +286,8 @@ impl Tty7App {
                 let is_active = i == active;
                 let agent_badge = tab.focused_agent_badge(Some(window), cx);
                 let agent = agent_badge.agent;
-                let avatar = TabAvatar::choose(agent, tab.foreground_app(Some(window), cx))
-                    .with_remote(tab.remote_context(Some(window), cx).map(|r| r.kind));
+                let avatar = TabAvatar::choose(agent, tab.foreground_app(Some(window), cx));
+                let ssh = has_ssh_badge(tab.remote_context(Some(window), cx).map(|r| r.kind));
                 let agent_indicator = agent_badge.indicator();
                 let git_cwd = diff_click_cwd(
                     cx.global::<Config>(),
@@ -306,13 +304,7 @@ impl Tty7App {
                 };
                 // Elision is measured against this budget so the label and
                 // branch never wrap or overflow into CSS truncation.
-                let ssh_agent_extra = if avatar == TabAvatar::Ssh && agent.is_some() {
-                    row_metrics::SSH_AGENT_AVATAR + row_metrics::GAP
-                } else {
-                    0.
-                };
-                let label_avail =
-                    (row_metrics::text_budget(width) - badge_extra - ssh_agent_extra).max(48.);
+                let label_avail = (row_metrics::text_budget(width) - badge_extra).max(48.);
                 let title_size = 0.875 * rem;
                 let meta_size = 0.75 * rem;
                 let title_font = if is_active { &title_font_active } else { &font };
@@ -790,19 +782,15 @@ impl Tty7App {
                         cx.stop_propagation();
                         this.activate(i, window, cx);
                     }))
-                    .child(self.tab_avatar(("sidebar-avatar", i), avatar, agent_indicator, 22., cx))
+                    .child(self.tab_avatar(
+                        ("sidebar-avatar", i),
+                        avatar,
+                        agent_indicator,
+                        22.,
+                        ssh,
+                        cx,
+                    ))
                     .child(label_region)
-                    .when(avatar == TabAvatar::Ssh, |row| {
-                        row.when_some(agent, |row, agent| {
-                            row.child(self.tab_avatar(
-                                ("sidebar-ssh-agent", i),
-                                TabAvatar::Agent(agent),
-                                agent_indicator,
-                                row_metrics::SSH_AGENT_AVATAR,
-                                cx,
-                            ))
-                        })
-                    })
                     .when(show_badges && badge_pos < 9, |row| {
                         row.child(
                             div()
