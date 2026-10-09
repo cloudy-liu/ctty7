@@ -1,36 +1,45 @@
-//! Mermaid diagram rendering for the Markdown preview.
-//!
-//! Diagrams are rendered to SVG by the pure-Rust `merman` renderer. The
-//! GitHub uses Mermaid's default/dark diagram themes; custom YAML themes
-//! supply semantic colors from their reading palette.
+//! Mermaid diagram rendering and native viewport controls.
 
+use crate::core::markdown_theme::{Color, Theme};
+use crate::ui::i18n::{L10nKey, t};
+use gpui::{
+    App, AvailableSpace, Context, ImageSource, MouseButton, ObjectFit, Pixels, Point, Render,
+    SharedString, StyledImage as _, Window, canvas, div, img, point, prelude::*, px,
+};
+use gpui_component::{
+    ActiveTheme as _, Icon, IconName, WindowExt as _,
+    button::{Button, ButtonVariants as _},
+};
 use merman::render::{
     HeadlessRenderer, HostThemeAppearance, HostThemeOutput, HostThemeProfile, HostThemeRoles,
     HostThemeRootBackground,
 };
 
-use crate::core::markdown_theme::{Color, Theme};
+pub(super) fn aspect_ratio(svg: &str) -> f32 {
+    let ratio = || {
+        let doc = resvg::usvg::roxmltree::Document::parse(svg).ok()?;
+        let mut values = doc
+            .root_element()
+            .attribute("viewBox")?
+            .split(|c: char| c.is_whitespace() || c == ',')
+            .filter(|s| !s.is_empty());
+        let width: f32 = values.nth(2)?.parse().ok()?;
+        let height: f32 = values.next()?.parse().ok()?;
+        let ratio = width / height;
+        (width > 0. && height > 0. && ratio.is_finite() && ratio > 0.).then_some(ratio)
+    };
+    ratio().unwrap_or(2.)
+}
 
-use crate::ui::i18n::{L10nKey, t};
-use gpui::{
-    App, Context, ImageSource, ObjectFit, Render, ScrollHandle, StyledImage as _, Window, div, img,
-    point, prelude::*, px,
-};
-use gpui_component::{
-    ActiveTheme as _, IconName, Sizable as _, WindowExt as _,
-    button::{Button, ButtonVariants as _},
-};
-
-pub(super) fn open_diagram(image: ImageSource, window: &mut Window, cx: &mut App) {
-    let width = (window.viewport_size().width * 0.8).min(px(1100.));
-    let height = window.viewport_size().height * 0.6;
-    let viewer = cx.new(|_| DiagramViewer {
-        image,
-        zoom: 1.,
-        width: width - px(48.),
-        height,
-        scroll: ScrollHandle::default(),
-    });
+fn open_diagram(
+    image: ImageSource,
+    code: SharedString,
+    aspect: f32,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let width = (window.viewport_size().width * 0.95).min(px(1300.));
+    let viewer = cx.new(|_| DiagramViewer::new(image, code, aspect, true));
     window.open_dialog(cx, move |dialog, _, _| {
         let viewer = viewer.clone();
         dialog
@@ -40,85 +49,289 @@ pub(super) fn open_diagram(image: ImageSource, window: &mut Window, cx: &mut App
     });
 }
 
-struct DiagramViewer {
+pub(super) struct DiagramViewer {
     image: ImageSource,
+    code: SharedString,
+    aspect: f32,
+    expanded: bool,
     zoom: f32,
-    width: gpui::Pixels,
-    height: gpui::Pixels,
-    scroll: ScrollHandle,
+    pan: Point<Pixels>,
+    width: Pixels,
+    natural_width: Pixels,
+    height: Pixels,
+    drag: Option<Point<Pixels>>,
+}
+
+impl DiagramViewer {
+    pub(super) fn new(image: ImageSource, code: SharedString, aspect: f32, expanded: bool) -> Self {
+        Self {
+            image,
+            code,
+            aspect,
+            expanded,
+            zoom: 1.,
+            pan: point(px(0.), px(0.)),
+            width: px(0.),
+            natural_width: px(0.),
+            height: px(0.),
+            drag: None,
+        }
+    }
+
+    fn pan_by(&mut self, delta: Point<Pixels>) {
+        self.pan = point(
+            (self.pan.x + delta.x).clamp(-self.width * self.zoom / 2., self.width * self.zoom / 2.),
+            (self.pan.y + delta.y)
+                .clamp(-self.height * self.zoom / 2., self.height * self.zoom / 2.),
+        );
+    }
+
+    fn control(id: &'static str, icon: impl Into<Icon>, label: &'static str, cx: &App) -> Button {
+        let theme = super::markdown_preview::current(cx).theme;
+        let palette = theme.palette(cx.theme().mode.is_dark());
+        Button::new(id)
+            .debug_selector(move || id.into())
+            .icon(icon)
+            .ghost()
+            .border_1()
+            .bg(super::markdown_preview::color(palette.code_background))
+            .border_color(super::markdown_preview::color(palette.border))
+            .text_color(super::markdown_preview::color(palette.muted))
+            .tooltip(label)
+    }
 }
 
 impl Render for DiagramViewer {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let mut controls = div()
-            .flex()
-            .gap_1()
-            .child(
-                Button::new("diagram-zoom-out")
-                    .icon(IconName::Minus)
-                    .ghost()
-                    .xsmall()
-                    .tooltip(t(L10nKey::MarkdownZoomOut))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.zoom = (this.zoom / 1.25).max(0.25);
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("diagram-zoom-in")
-                    .icon(IconName::Plus)
-                    .ghost()
-                    .xsmall()
-                    .tooltip(t(L10nKey::MarkdownZoomIn))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.zoom = (this.zoom * 1.25).min(8.);
-                        cx.notify();
-                    })),
-            )
-            .child(
-                Button::new("diagram-reset")
-                    .icon(IconName::Undo)
-                    .ghost()
-                    .xsmall()
-                    .tooltip(t(L10nKey::Reset))
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.zoom = 1.;
-                        this.scroll.set_offset(point(px(0.), px(0.)));
-                        cx.notify();
-                    })),
-            );
-        for (id, icon, x, y) in [
-            ("diagram-pan-left", IconName::ArrowLeft, 64., 0.),
-            ("diagram-pan-right", IconName::ArrowRight, -64., 0.),
-            ("diagram-pan-up", IconName::ArrowUp, 0., 64.),
-            ("diagram-pan-down", IconName::ArrowDown, 0., -64.),
-        ] {
-            controls = controls.child(Button::new(id).icon(icon).ghost().xsmall().on_click(
-                cx.listener(move |this, _, _, cx| {
-                    let offset = this.scroll.offset();
-                    let max = this.scroll.max_offset();
-                    this.scroll.set_offset(point(
-                        (offset.x + px(x)).clamp(-max.x, px(0.)),
-                        (offset.y + px(y)).clamp(-max.y, px(0.)),
-                    ));
-                    cx.notify();
-                }),
-            ));
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let scale = window.rem_size() / px(16.);
+        if self.natural_width == px(0.) {
+            let mut probe = img(self.image.clone()).into_any_element();
+            self.natural_width = probe
+                .layout_as_root(AvailableSpace::min_size(), window, cx)
+                .width;
         }
-        div().flex().flex_col().gap_2().child(controls).child(
-            div()
-                .id("diagram-viewport")
-                .w_full()
-                .h(self.height)
-                .overflow_scroll()
-                .track_scroll(&self.scroll)
-                .bg(cx.theme().tokens.background)
-                .child(
-                    img(self.image.clone())
-                        .w(self.width * self.zoom)
-                        .object_fit(ObjectFit::Contain),
-                ),
+        let width = if self.width > px(0.) {
+            self.width
+        } else {
+            window.viewport_size().width - px(64.)
+        };
+        let available = (width - px(120. * scale)).max(px(64. * scale));
+        let image_width = if self.natural_width > px(0.) && !self.expanded {
+            available.min(self.natural_width)
+        } else {
+            available
+        };
+        self.height = if self.expanded {
+            window.viewport_size().height * 0.65
+        } else {
+            (image_width / self.aspect).clamp(px(200. * scale), px(600. * scale))
+        };
+        let controls = [
+            (
+                "diagram-pan-up",
+                IconName::ChevronUp,
+                L10nKey::MarkdownPanUp,
+                0.,
+                64.,
+            ),
+            (
+                "diagram-pan-left",
+                IconName::ChevronLeft,
+                L10nKey::MarkdownPanLeft,
+                64.,
+                0.,
+            ),
+            (
+                "diagram-pan-right",
+                IconName::ChevronRight,
+                L10nKey::MarkdownPanRight,
+                -64.,
+                0.,
+            ),
+            (
+                "diagram-pan-down",
+                IconName::ChevronDown,
+                L10nKey::MarkdownPanDown,
+                0.,
+                -64.,
+            ),
+        ]
+        .map(|(id, icon, label, x, y)| {
+            Self::control(id, icon, t(label), cx).on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.pan_by(point(px(x * scale), px(y * scale)));
+                cx.notify();
+            }))
+        });
+        let [up, left, right, down] = controls;
+        let zoom_in = Self::control(
+            "diagram-zoom-in",
+            Icon::default().path("icons/diagram-zoom-in.svg"),
+            t(L10nKey::MarkdownZoomIn),
+            cx,
         )
+        .on_click(cx.listener(|this, _, _, cx| {
+            cx.stop_propagation();
+            this.zoom = (this.zoom * 1.25).min(8.);
+            this.pan_by(point(px(0.), px(0.)));
+            cx.notify();
+        }));
+        let zoom_out = Self::control(
+            "diagram-zoom-out",
+            Icon::default().path("icons/diagram-zoom-out.svg"),
+            t(L10nKey::MarkdownZoomOut),
+            cx,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            cx.stop_propagation();
+            this.zoom = (this.zoom / 1.25).max(0.25);
+            this.pan_by(point(px(0.), px(0.)));
+            cx.notify();
+        }));
+        let reset = Self::control(
+            "diagram-reset",
+            Icon::default().path("icons/diagram-reset.svg"),
+            t(L10nKey::Reset),
+            cx,
+        )
+        .on_click(cx.listener(|this, _, _, cx| {
+            cx.stop_propagation();
+            this.zoom = 1.;
+            this.pan = point(px(0.), px(0.));
+            cx.notify();
+        }));
+        let toolbar = div()
+            .flex()
+            .gap_2()
+            .when(!self.expanded, |el| {
+                el.child(
+                    Self::control(
+                        "expand-diagram",
+                        Icon::default().path("icons/diagram-expand.svg"),
+                        t(L10nKey::MarkdownExpandDiagram),
+                        cx,
+                    )
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        cx.stop_propagation();
+                        open_diagram(
+                            this.image.clone(),
+                            this.code.clone(),
+                            this.aspect,
+                            window,
+                            cx,
+                        );
+                    })),
+                )
+            })
+            .child(
+                Self::control(
+                    "copy-diagram",
+                    IconName::Copy,
+                    t(L10nKey::EditorCopyCode),
+                    cx,
+                )
+                .on_click(cx.listener(|this, _, _, cx| {
+                    cx.stop_propagation();
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(this.code.to_string()));
+                })),
+            );
+        let owner = cx.weak_entity();
+        div()
+            .id("diagram-viewport")
+            .debug_selector(|| "diagram-viewport".into())
+            .relative()
+            .w_full()
+            .h(self.height)
+            .overflow_hidden()
+            .when(self.expanded, |el| el.bg(cx.theme().tokens.background))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, event: &gpui::MouseDownEvent, _, cx| {
+                    cx.stop_propagation();
+                    this.drag = Some(event.position);
+                }),
+            )
+            .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
+                if event.pressed_button != Some(MouseButton::Left) {
+                    this.drag = None;
+                    return;
+                }
+                if let Some(previous) = this.drag {
+                    this.drag = Some(event.position);
+                    this.pan_by(event.position - previous);
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
+            .on_mouse_up(
+                MouseButton::Left,
+                cx.listener(|this, _, _, _| this.drag = None),
+            )
+            .child(
+                div()
+                    .id("diagram-content")
+                    .debug_selector(|| "diagram-content".into())
+                    .absolute()
+                    .left(self.pan.x + image_width * (1. - self.zoom) / 2.)
+                    .top(self.pan.y + self.height * (1. - self.zoom) / 2.)
+                    .w(image_width * self.zoom)
+                    .h(self.height * self.zoom)
+                    .child(
+                        img(self.image.clone())
+                            .size_full()
+                            .object_fit(ObjectFit::Contain),
+                    ),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .top_2()
+                    .right_2()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(toolbar),
+            )
+            .child(
+                div()
+                    .absolute()
+                    .bottom_2()
+                    .right_2()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(
+                        div()
+                            .flex()
+                            .gap_1()
+                            .child(div().w_8())
+                            .child(up)
+                            .child(zoom_in),
+                    )
+                    .child(div().flex().gap_1().child(left).child(reset).child(right))
+                    .child(
+                        div()
+                            .flex()
+                            .gap_1()
+                            .child(div().w_8())
+                            .child(down)
+                            .child(zoom_out),
+                    ),
+            )
+            .child(
+                canvas(
+                    move |bounds, _, cx| {
+                        let _ = owner.update(cx, |this, cx| {
+                            if this.width != bounds.size.width {
+                                this.width = bounds.size.width;
+                                cx.notify();
+                            }
+                        });
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
+            )
     }
 }
 

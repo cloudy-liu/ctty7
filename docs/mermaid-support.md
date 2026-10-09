@@ -135,3 +135,11 @@ listed in [project status](maintenance/status.md).
 - Show a live preview while editing Mermaid source.
 - Add diagram-specific theme overrides.
 - Highlight errors with line numbers.
+
+## Viewer controls
+
+Expand and source Copy appear at the upper right. Directional movement, Reset,
+and zoom controls appear at the lower right, both inline and in the larger
+viewer. Drag the diagram to move it; Reset restores its initial fit and
+position. Controls follow the active Markdown palette and retain the original
+source when copying.

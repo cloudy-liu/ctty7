@@ -36,7 +36,7 @@ struct Fixture {
 }
 
 impl Render for Fixture {
-    fn render(&mut self, window: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         window.set_rem_size(px(16. * self.scale));
         div()
             .flex()
@@ -44,6 +44,7 @@ impl Render for Fixture {
             .h(window.viewport_size().height)
             .overflow_hidden()
             .child(self.reading.clone())
+            .children(Root::render_dialog_layer(window, cx))
     }
 }
 

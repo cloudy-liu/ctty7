@@ -18,8 +18,8 @@ use gpui_component::{
     },
     input::InputState,
     text::{
-        AlertStyle, InlineCodeStyle, KeyboardStyle, LinkUnderline, TaskCheckboxStyle, TextView,
-        TextViewState, TextViewStyle,
+        AlertStyle, InlineCodeStyle, KeyboardStyle, LinkUnderline, MarkdownExtensions,
+        MarkdownNode, TaskCheckboxStyle, TextView, TextViewState, TextViewStyle,
     },
 };
 
@@ -40,7 +40,27 @@ fn extensions() -> gpui_component::text::MarkdownExtensions {
     static EXTENSIONS: std::sync::OnceLock<gpui_component::text::MarkdownExtensions> =
         std::sync::OnceLock::new();
     EXTENSIONS
-        .get_or_init(|| gpui_component::text::MarkdownExtensions::default().github_alerts())
+        .get_or_init(|| {
+            MarkdownExtensions::default()
+                .github_alerts()
+                .block_parser(|node, cx| {
+                    use gpui_component::text::markdown_ast::Node;
+                    let Node::Paragraph(paragraph) = node else {
+                        return None;
+                    };
+                    let [Node::Image(image)] = paragraph.children.as_slice() else {
+                        return None;
+                    };
+                    if !image.url.starts_with("ctty7-mermaid://") {
+                        return None;
+                    }
+                    Some(
+                        MarkdownNode::new("mermaid-diagram", image.url.clone())
+                            .text("Mermaid diagram")
+                            .markdown(cx.node_source(node).unwrap_or_default()),
+                    )
+                })
+        })
         .clone()
 }
 
@@ -499,6 +519,8 @@ pub(crate) struct MarkdownPreview {
     app: gpui::WeakEntity<Tty7App>,
     images: HashMap<PathBuf, TextViewImageSource>,
     diagrams: HashMap<String, TextViewImageSource>,
+    diagram_views: HashMap<String, Entity<crate::ui::markdown_mermaid::DiagramViewer>>,
+    reading_extensions: MarkdownExtensions,
     image_bytes: usize,
     pending_anchor: Option<String>,
     last_position: Option<(usize, Pixels)>,
@@ -537,12 +559,26 @@ impl MarkdownPreview {
         } else {
             reading_content.into_owned()
         };
+        let owner = cx.weak_entity();
+        let reading_extensions =
+            extensions().block_renderer("mermaid-diagram", move |node, _, cx| {
+                let viewer = owner
+                    .update(cx, |this, cx| this.diagram_view(node, cx))
+                    .ok()
+                    .flatten();
+                let loading = viewer.is_none();
+                div()
+                    .w_full()
+                    .when(loading, |el| el.child("Mermaid diagram …"))
+                    .children(viewer)
+            });
         let text = cx.new(|cx| {
             // Use the component's streaming parser for the initial document.
             // Parsing markdown-rs on the UI thread delays the click response;
             // this reading pane owns its scroll extent and can reflow when the
             // background parse lands (unlike an item measured by an outer list).
-            let mut text = TextViewState::markdown_with_extensions("", extensions(), cx);
+            let mut text =
+                TextViewState::markdown_with_extensions("", reading_extensions.clone(), cx);
             text.push_str(&processed_content, cx);
             text
         });
@@ -565,6 +601,8 @@ impl MarkdownPreview {
             app,
             images: HashMap::new(),
             diagrams: HashMap::new(),
+            diagram_views: HashMap::new(),
+            reading_extensions,
             image_bytes: 0,
             pending_anchor: None,
             last_position: None,
@@ -584,6 +622,38 @@ impl MarkdownPreview {
         };
         this.start_diagrams(content, cx);
         this
+    }
+
+    fn diagram_view(
+        &mut self,
+        node: &MarkdownNode,
+        cx: &mut Context<Self>,
+    ) -> Option<Entity<crate::ui::markdown_mermaid::DiagramViewer>> {
+        let url = node.data::<String>()?;
+        if let Some(viewer) = self.diagram_views.get(url) {
+            return Some(viewer.clone());
+        }
+        let TextViewImageSource::Ready(image) = self.diagrams.get(url)?.clone() else {
+            return None;
+        };
+        let aspect = match &image {
+            gpui::ImageSource::Image(data) => {
+                crate::ui::markdown_mermaid::aspect_ratio(&String::from_utf8_lossy(&data.bytes))
+            }
+            _ => 2.,
+        };
+        let index = url
+            .strip_prefix("ctty7-mermaid://")?
+            .parse::<usize>()
+            .ok()?;
+        let source = self.source.read(cx).text().to_string();
+        let code = Self::mermaid_fences().captures_iter(&source).nth(index)?[1]
+            .to_owned()
+            .into();
+        let viewer =
+            cx.new(|_| crate::ui::markdown_mermaid::DiagramViewer::new(image, code, aspect, false));
+        self.diagram_views.insert(url.clone(), viewer.clone());
+        Some(viewer)
     }
 
     pub(crate) fn sync(&mut self, revision: u64, cx: &mut Context<Self>) {
@@ -779,6 +849,7 @@ impl MarkdownPreview {
         let content = markdown_frontmatter::preprocess(&content).into_owned();
         self.diagram_generation = self.diagram_generation.wrapping_add(1);
         self.diagram_task.take();
+        self.diagram_views.clear();
         let (processed, count) = if self.mermaid_enabled {
             Self::mermaid_placeholders(&content)
         } else {
@@ -792,8 +863,10 @@ impl MarkdownPreview {
         self.diagrams = (0..count)
             .map(|i| (format!("ctty7-mermaid://{i}"), TextViewImageSource::Loading))
             .collect();
-        self.text
-            .update(cx, |text, cx| text.set_text(&processed, cx));
+        self.text.update(cx, |text, cx| {
+            text.set_text(&processed, cx);
+            cx.notify();
+        });
         if count == 0 {
             return;
         }
@@ -825,8 +898,10 @@ impl MarkdownPreview {
                         )
                     })
                     .collect();
-                this.text
-                    .update(cx, |text, cx| text.set_text(&processed, cx));
+                this.text.update(cx, |text, cx| {
+                    text.set_text(&processed, cx);
+                    cx.notify();
+                });
                 cx.notify();
             });
         }));
@@ -1033,9 +1108,8 @@ impl Render for MarkdownPreview {
         let copy_color = color(palette.muted);
         let link_owner = cx.weak_entity();
         let image_owner = cx.weak_entity();
-        let diagram_owner = cx.weak_entity();
         let text = TextView::new(&self.text)
-            .markdown_extensions(extensions())
+            .markdown_extensions(self.reading_extensions.clone())
             .selectable(true)
             .style(self.style.clone())
             .on_link(move |url, window, cx| {
@@ -1045,59 +1119,6 @@ impl Render for MarkdownPreview {
                 image_owner
                     .update(cx, |this, cx| this.image_source(url, cx))
                     .unwrap_or(TextViewImageSource::Failed("document closed".into()))
-            })
-            .image_actions(move |url, _, cx| {
-                diagram_owner
-                    .update(cx, |this, cx| {
-                        let TextViewImageSource::Ready(image) = this.diagrams.get(url.as_ref())?
-                        else {
-                            return None;
-                        };
-                        let index: usize = url.strip_prefix("ctty7-mermaid://")?.parse().ok()?;
-                        let content = this.source.read(cx).text().to_string();
-                        let code: SharedString =
-                            Self::mermaid_fences().captures_iter(&content).nth(index)?[1]
-                                .to_owned()
-                                .into();
-                        let expanded_image = image.clone();
-                        Some(
-                            div()
-                                .flex()
-                                .gap_1()
-                                .child(
-                                    Button::new("expand-diagram")
-                                        .icon(IconName::Maximize)
-                                        .ghost()
-                                        .xsmall()
-                                        .text_color(copy_color)
-                                        .tooltip(t(L10nKey::MarkdownExpandDiagram))
-                                        .on_click(move |_, window, cx| {
-                                            cx.stop_propagation();
-                                            crate::ui::markdown_mermaid::open_diagram(
-                                                expanded_image.clone(),
-                                                window,
-                                                cx,
-                                            );
-                                        }),
-                                )
-                                .child(
-                                    Button::new("copy-diagram")
-                                        .icon(IconName::Copy)
-                                        .ghost()
-                                        .xsmall()
-                                        .text_color(copy_color)
-                                        .tooltip(t(L10nKey::EditorCopyCode))
-                                        .on_click(move |_, _, cx| {
-                                            cx.stop_propagation();
-                                            cx.write_to_clipboard(gpui::ClipboardItem::new_string(
-                                                code.to_string(),
-                                            ));
-                                        }),
-                                ),
-                        )
-                    })
-                    .ok()
-                    .flatten()
             })
             .code_block_actions(move |block, _, _| {
                 let code = block.code();
@@ -2368,5 +2389,68 @@ mod tests {
                 .count(),
             1
         );
+    }
+    #[gpui::test]
+    fn inline_mermaid_controls_zoom_pan_reset_and_copy(cx: &mut TestAppContext) {
+        let (app, _owner_window) = crate::ui::app::test_window::harness(cx);
+        cx.update(|cx| init(Default::default(), cx));
+        let code = "flowchart LR\n A --> B\n";
+        let content = format!("# Controls\n\nWords to select.\n\n```mermaid\n{code}```\n");
+        let window = cx.add_window(|window, cx| {
+            let source = cx.new(|cx| {
+                let mut source = InputState::new(window, cx).multi_line(true);
+                source.set_value(content, window, cx);
+                source
+            });
+            let reading = cx.new(|cx| {
+                MarkdownPreview::new(
+                    source,
+                    tty7_core::host::local::LocalHost::new(),
+                    PathBuf::from("/repo/controls.md"),
+                    app.downgrade(),
+                    true,
+                    cx,
+                )
+            });
+            gpui_component::Root::new(reading, window, cx)
+        });
+        window
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.simulate_resize(gpui::size(px(1000.), px(800.)));
+        settle(&mut vcx, |cx| cx.debug_bounds("diagram-zoom-in").is_some());
+        let zoom = vcx
+            .debug_bounds("diagram-zoom-in")
+            .expect("inline diagrams need zoom controls");
+        let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
+        let expand = vcx.debug_bounds("expand-diagram").unwrap();
+        assert!(zoom.size.width >= px(32.) && zoom.size.height >= px(32.));
+        assert!(zoom.center().y > viewport.center().y && expand.center().y < viewport.center().y);
+        let fit = vcx.debug_bounds("diagram-content").unwrap();
+        vcx.simulate_click(zoom.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let enlarged = vcx.debug_bounds("diagram-content").unwrap();
+        assert!(enlarged.size.width > fit.size.width);
+        let right = vcx.debug_bounds("diagram-pan-right").unwrap();
+        vcx.simulate_click(right.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(vcx.debug_bounds("diagram-content").unwrap().left() < enlarged.left());
+        let reset = vcx.debug_bounds("diagram-reset").unwrap();
+        vcx.simulate_click(reset.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(vcx.debug_bounds("diagram-content").unwrap(), fit);
+        let copy = vcx.debug_bounds("copy-diagram").unwrap();
+        vcx.simulate_click(copy.center(), gpui::Modifiers::none());
+        vcx.update(|_, cx| assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), code));
     }
 }
