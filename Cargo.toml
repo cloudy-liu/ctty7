@@ -294,10 +294,10 @@ version = "0.2.0"
 # that, since a path dependency can't resolve on CI.
 #
 # `tree-sitter-languages` compiles the grammars the code editor highlights with.
-gpui-component = { git = "https://github.com/cloudy-liu/gpui-component", rev = "87c76bd70cd9cb988e6503503e71dd73abad03c5", version = "0.5.2", features = [
+gpui-component = { git = "https://github.com/cloudy-liu/gpui-component", rev = "e35384ce1a842d02adfbd7c515195947145972e6", version = "0.5.2", features = [
     "tree-sitter-languages",
 ] }
-gpui-component-assets = { git = "https://github.com/cloudy-liu/gpui-component", rev = "87c76bd70cd9cb988e6503503e71dd73abad03c5", version = "0.5.1" }
+gpui-component-assets = { git = "https://github.com/cloudy-liu/gpui-component", rev = "e35384ce1a842d02adfbd7c515195947145972e6", version = "0.5.1" }
 
 gpui = { git = "https://github.com/zed-industries/zed", rev = "1d217ee39d381ac101b7cf49d3d22451ac1093fe" }
 # Base features are cross-platform (`font-kit`, `runtime_shaders` only map to the

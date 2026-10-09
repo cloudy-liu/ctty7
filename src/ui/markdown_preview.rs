@@ -26,6 +26,7 @@ use gpui_component::{
 use crate::core::markdown_document::{self, Target};
 use crate::core::{
     config::Config,
+    markdown_frontmatter,
     markdown_theme::{self, Color, Entry, Registry, Snapshot, Theme},
 };
 use crate::ui::i18n::{L10nKey, t};
@@ -530,10 +531,11 @@ impl MarkdownPreview {
         cx: &mut Context<Self>,
     ) -> Self {
         let content = source.read(cx).text().to_string();
+        let reading_content = markdown_frontmatter::preprocess(&content);
         let processed_content = if mermaid_enabled {
-            Self::mermaid_placeholders(&content).0
+            Self::mermaid_placeholders(&reading_content).0
         } else {
-            content.clone()
+            reading_content.into_owned()
         };
         let text = cx.new(|cx| {
             // Use the component's streaming parser for the initial document.
@@ -755,7 +757,7 @@ impl MarkdownPreview {
     /// code block, followed by an HTML comment carrying the error.
     fn mermaid_fences() -> &'static regex::Regex {
         static MERMAID_FENCE: LazyLock<regex::Regex> = LazyLock::new(|| {
-            regex::Regex::new(r"(?m)^```mermaid[ \t]*\n([\s\S]*?)^```")
+            regex::Regex::new(r"(?m)^```mermaid[ \t]*\r?\n([\s\S]*?)^```")
                 .expect("mermaid fence regex is valid")
         });
         &MERMAID_FENCE
@@ -774,6 +776,7 @@ impl MarkdownPreview {
     }
 
     fn start_diagrams(&mut self, content: String, cx: &mut Context<Self>) {
+        let content = markdown_frontmatter::preprocess(&content).into_owned();
         self.diagram_generation = self.diagram_generation.wrapping_add(1);
         self.diagram_task.take();
         let (processed, count) = if self.mermaid_enabled {
@@ -1101,7 +1104,6 @@ impl Render for MarkdownPreview {
                 Button::new("copy-code")
                     .icon(IconName::Copy)
                     .ghost()
-                    .xsmall()
                     .text_color(copy_color)
                     .tooltip(t(L10nKey::EditorCopyCode))
                     .on_click(move |_, _, cx| {
@@ -1241,6 +1243,104 @@ mod tests {
         time::{Duration, Instant},
     };
     use tty7_core::host::{self, Host, HostId, Meta};
+
+    #[test]
+    fn markdown_mermaid_crlf_fences_reach_the_renderer() {
+        let content = "```mermaid\r\nsequenceDiagram\r\n    participant User\r\n    participant UI\r\n    participant Daemon\r\n    User->>UI: choose command\r\n    UI->>Daemon: send expanded prompt\r\n    Daemon-->>UI: stream result\r\n```\r\n";
+        let (placeholder, count) = MarkdownPreview::mermaid_placeholders(content);
+        assert_eq!(
+            count, 1,
+            "Windows line endings must not hide Mermaid fences"
+        );
+        let (processed, diagrams) =
+            MarkdownPreview::preprocess_mermaid(content, &markdown_theme::builtin(), false);
+        assert_eq!(processed, placeholder);
+        let svg = &diagrams["ctty7-mermaid://0"];
+        assert!(svg.contains("<svg"));
+        assert!(svg.contains("choose command"));
+        assert!(svg.contains("stream result"));
+    }
+
+    #[test]
+    fn markdown_mermaid_invalid_crlf_source_remains_a_code_block() {
+        let content = "```mermaid\r\nnot-a-diagram\r\n```\r\n";
+        let (processed, diagrams) =
+            MarkdownPreview::preprocess_mermaid(content, &markdown_theme::builtin(), false);
+        assert!(diagrams.is_empty());
+        assert!(processed.starts_with("```mermaid\nnot-a-diagram\r\n```"));
+        assert!(processed.contains("Mermaid render error:"));
+        assert!(!processed.contains("ctty7-mermaid://"));
+    }
+
+    #[gpui::test]
+    fn markdown_skill_frontmatter_is_a_metadata_table(cx: &mut TestAppContext) {
+        let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
+        let content = "---\nname: show-me\ndescription: Show a diagram.\ndisable-model-invocation: true\n---\n\nBody.\n";
+        for (mermaid_enabled, newline) in
+            [(false, "\n"), (true, "\n"), (false, "\r\n"), (true, "\r\n")]
+        {
+            let content = content.replace('\n', newline);
+            let source = vcx.update(|window, cx| {
+                cx.new(|cx| {
+                    let mut source = InputState::new(window, cx).multi_line(true);
+                    source.set_value(&content, window, cx);
+                    source
+                })
+            });
+            let reading = vcx.new(|cx| {
+                MarkdownPreview::new(
+                    source.clone(),
+                    tty7_core::host::local::LocalHost::new(),
+                    PathBuf::from("/repo/SKILL.md"),
+                    app.downgrade(),
+                    mermaid_enabled,
+                    cx,
+                )
+            });
+            let text = reading.read_with(&vcx, |reading, _| reading.text.clone());
+            settle(&mut vcx, |cx| {
+                text.update(cx, |text, cx| text.select_all(cx));
+                !text
+                    .read_with(cx, |text, _| text.selected_text())
+                    .is_empty()
+            });
+            text.update(&mut vcx, |text, cx| text.select_all(cx));
+            let selected = text.read_with(&vcx, |text, _| text.selected_text());
+            assert!(
+                selected.starts_with(
+                    "name show-me\ndescription Show a diagram.\ndisable-model-invocation true\n"
+                ),
+                "frontmatter must copy as table rows, not a heading: {selected:?}"
+            );
+            assert_eq!(
+                source.read_with(&vcx, |source, _| source.text().to_string()),
+                content
+            );
+            let edited = content.replace("show-me", "updated");
+            source.update_in(&mut vcx, |source, window, cx| {
+                source.set_value(&edited, window, cx)
+            });
+            reading.update(&mut vcx, |reading, cx| reading.sync(1, cx));
+            text.update(&mut vcx, |text, cx| text.select_all(cx));
+            assert!(
+                text.read_with(&vcx, |text, _| text.selected_text())
+                    .starts_with("name updated\n")
+            );
+            assert_eq!(
+                source.read_with(&vcx, |source, _| source.text().to_string()),
+                edited
+            );
+            source.update_in(&mut vcx, |source, window, cx| {
+                source.set_value("# Body only\n", window, cx)
+            });
+            reading.update(&mut vcx, |reading, cx| reading.sync(2, cx));
+            text.update(&mut vcx, |text, cx| text.select_all(cx));
+            assert_eq!(
+                text.read_with(&vcx, |text, _| text.selected_text()).trim(),
+                "Body only"
+            );
+        }
+    }
 
     #[test]
     fn reading_code_matches_live_github_token_styles() {
@@ -2001,7 +2101,7 @@ mod tests {
         cx: &mut TestAppContext,
     ) {
         let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
-        let content = "# Diagram\n\nWords to select.\n\n```mermaid\nflowchart LR\n A --> B\n```\n";
+        let content = "---\r\nname: show-me\r\n---\r\n\r\n# Diagram\r\n\r\nWords to select.\r\n\r\n```mermaid\r\nflowchart LR\r\n A --> B\r\n```\r\n";
         let mut host = DocumentsHost::new(905, "Diagram", None);
         Arc::get_mut(&mut host)
             .unwrap()
@@ -2033,6 +2133,7 @@ mod tests {
         let text = reading.read_with(&vcx, |reading, _| reading.text.clone());
         text.update(&mut vcx, |text, cx| text.select_all(cx));
         let parsed = text.read_with(&vcx, |text, _| text.source());
+        assert!(parsed.starts_with("<table style=\"white-space: normal\">\n"));
         assert!(parsed.contains("ctty7-mermaid://0"));
         let selected = text.read_with(&vcx, |text, _| text.selected_text());
         let first = reading.read_with(
