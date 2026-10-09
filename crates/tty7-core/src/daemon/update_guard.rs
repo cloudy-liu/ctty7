@@ -139,6 +139,78 @@ fn process_alive(pid: u32) -> bool {
 mod tests {
     use super::*;
 
+    #[test]
+    #[ignore = "child process fixture, invoked by the inaccessible-holder test"]
+    fn inaccessible_process_fixture() {
+        std::thread::sleep(Duration::from_secs(10));
+    }
+
+    #[test]
+    fn an_inaccessible_holder_is_not_mistaken_for_an_exited_process() {
+        use std::mem::{size_of, zeroed};
+        use std::os::windows::io::AsRawHandle as _;
+        use std::os::windows::process::CommandExt as _;
+        use std::process::{Child, Command, Stdio};
+        use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, GetLastError};
+        use windows_sys::Win32::Security::{
+            ACL, ACL_REVISION, DACL_SECURITY_INFORMATION, InitializeAcl,
+            InitializeSecurityDescriptor, SECURITY_DESCRIPTOR, SetKernelObjectSecurity,
+            SetSecurityDescriptorDacl,
+        };
+        use windows_sys::Win32::System::Threading::{
+            CREATE_NO_WINDOW, OpenProcess, PROCESS_SYNCHRONIZE,
+        };
+
+        struct Fixture(Child);
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        let child = Fixture(
+            Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "daemon::update_guard::tests::inaccessible_process_fixture",
+                    "--ignored",
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .unwrap(),
+        );
+        // Deny new observations of this dedicated child. The existing Child
+        // handle retains its rights, so cleanup can always stop the fixture.
+        let mut acl: ACL = unsafe { zeroed() };
+        let mut descriptor: SECURITY_DESCRIPTOR = unsafe { zeroed() };
+        let descriptor = (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast();
+        unsafe {
+            assert_ne!(
+                InitializeAcl(&mut acl, size_of::<ACL>() as u32, ACL_REVISION),
+                0
+            );
+            assert_ne!(InitializeSecurityDescriptor(descriptor, 1), 0);
+            assert_ne!(SetSecurityDescriptorDacl(descriptor, 1, &acl, 0), 0);
+            assert_ne!(
+                SetKernelObjectSecurity(
+                    child.0.as_raw_handle(),
+                    DACL_SECURITY_INFORMATION,
+                    descriptor
+                ),
+                0
+            );
+            assert!(OpenProcess(PROCESS_SYNCHRONIZE, 0, child.0.id()).is_null());
+            assert_eq!(GetLastError(), ERROR_ACCESS_DENIED);
+        }
+        assert!(
+            process_alive(child.0.id()),
+            "access denied does not confirm that the installer has exited"
+        );
+    }
+
     fn pin_config_dir() {
         let dir = std::env::temp_dir().join(format!("tty7-covtest-{}", std::process::id()));
         std::fs::create_dir_all(&dir).ok();

@@ -17,7 +17,7 @@ const CANCEL_POLL: Duration = Duration::from_millis(100);
 const MAX_CHECKSUM_BYTES: usize = 1024 * 1024;
 const MAX_ASSET_BYTES: usize = 128 * 1024 * 1024;
 
-fn client(manual_proxy: Option<&str>) -> Result<ReqwestClient> {
+async fn client(manual_proxy: Option<&str>) -> Result<ReqwestClient> {
     // Resolve once, as HttpsFetcher does, and apply its bypass rules to every
     // redirect. Disable reqwest's own proxy discovery so it cannot override
     // the manual > system > environment order or a bypass decision.
@@ -28,9 +28,41 @@ fn client(manual_proxy: Option<&str>) -> Result<ReqwestClient> {
         .user_agent(concat!("tty7/", env!("CARGO_PKG_VERSION")))
         .use_preconfigured_tls(http_client_tls::tls_config());
     if let Some(proxy) = proxy {
+        let mut proxy_url =
+            reqwest::Url::parse(&proxy.uri().to_string()).context("parsing the update proxy")?;
+        if proxy_url.scheme().starts_with("socks") {
+            // reqwest's custom proxy callback silently treats a conversion
+            // error as no proxy. Resolve SOCKS hosts here, where failure and
+            // cancellation stop the attempt, then give it a numeric address.
+            let host = proxy_url
+                .host_str()
+                .context("the update proxy has no host")?;
+            let address = smol::net::resolve((
+                host.trim_matches(['[', ']']),
+                proxy_url.port().unwrap_or(1080),
+            ))
+            .or(async {
+                smol::Timer::after(CONNECT_TIMEOUT).await;
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::TimedOut,
+                    "resolving the update proxy timed out",
+                ))
+            })
+            .await
+            .context("resolving the SOCKS update proxy")?
+            .into_iter()
+            .next()
+            .context("the SOCKS update proxy resolved to no addresses")?;
+            if proxy_url.set_ip_host(address.ip()).is_err() {
+                bail!("the SOCKS update proxy has an invalid host");
+            }
+        }
+        // Validate before installing the callback. Its only remaining
+        // decision is whether the existing bypass rule matches this URL.
+        reqwest::Proxy::all(proxy_url.as_str()).context("configuring the update proxy")?;
         builder = builder.proxy(reqwest::Proxy::custom(move |url| {
             let uri = url.as_str().parse().ok()?;
-            (!proxy.is_no_proxy(&uri)).then(|| proxy.uri().to_string())
+            (!proxy.is_no_proxy(&uri)).then(|| proxy_url.to_string())
         }));
     }
     Ok(builder
@@ -48,10 +80,10 @@ pub(super) fn fetch(
     if on_progress(0, None).is_break() {
         bail!(CANCELLED);
     }
-    let client = client(manual_proxy)?;
     let progress = Cell::new((0, None));
     smol::block_on(
         async {
+            let client = client(manual_proxy).await?;
             let checksums = download(&client, checksums_url, MAX_CHECKSUM_BYTES, &|_, _| {})
                 .await
                 .context("downloading checksums.txt")?;
@@ -324,6 +356,38 @@ mod tests {
     }
 
     #[test]
+    fn an_unresolved_socks_proxy_never_falls_back_to_a_direct_request() {
+        let (listener, endpoint) = listener();
+        let (done_tx, done_rx) = mpsc::channel();
+        let server = std::thread::spawn(move || {
+            loop {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    );
+                    return true;
+                }
+                if done_rx.try_recv().is_ok() {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let result = fetch(
+            Some("socks5://unresolvable.proxy.invalid:1080"),
+            &format!("{endpoint}/checksums.txt"),
+            &format!("{endpoint}/package.zip"),
+            &|_, _| ControlFlow::Continue(()),
+        );
+        let _ = done_tx.send(());
+        assert!(
+            !server.join().unwrap(),
+            "a failed configured proxy must not cause a direct request"
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
     fn completed_downloads_preserve_bytes_and_report_asset_progress() {
         let (listener, proxy) = listener();
         let server = std::thread::spawn(move || {
@@ -369,7 +433,7 @@ mod tests {
                 }
             });
             let error = smol::block_on(download(
-                &client(Some(&proxy)).unwrap(),
+                &smol::block_on(client(Some(&proxy))).unwrap(),
                 "http://update.test/package.zip",
                 4,
                 &|_, _| {},

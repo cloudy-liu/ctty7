@@ -29,12 +29,18 @@ impl fmt::Display for Failure {
 
 impl std::error::Error for Failure {}
 
-impl From<io::Error> for Failure {
-    fn from(error: io::Error) -> Self {
+impl From<String> for Failure {
+    fn from(detail: String) -> Self {
         Self {
-            detail: error.to_string(),
+            detail,
             running_pid: None,
         }
+    }
+}
+
+impl From<io::Error> for Failure {
+    fn from(error: io::Error) -> Self {
+        error.to_string().into()
     }
 }
 

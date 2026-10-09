@@ -20,9 +20,33 @@ mod update_process;
 #[path = "updater/parent.rs"]
 mod parent;
 
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn run_checked(
+    command: &mut std::process::Command,
+    context: &str,
+) -> Result<std::process::Output, update_process::Failure> {
+    let output = update_process::run(command, update_process::VERIFY_TIMEOUT, &|| false).map_err(
+        |mut error| {
+            error.detail = format!("{context}: {error}");
+            error
+        },
+    )?;
+    if output.status.success() {
+        Ok(output)
+    } else {
+        Err(format!(
+            "{context}: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )
+        .into())
+    }
+}
+
 #[cfg(target_os = "macos")]
 mod macos {
     use super::parent::wait_for_exit;
+    use super::run_checked;
+    use super::update_process::Failure;
     use std::fs::{self, OpenOptions};
     use std::io::Write as _;
     use std::path::{Path, PathBuf};
@@ -48,8 +72,11 @@ mod macos {
                 let expected_version = next_string(&mut args)?;
                 reject_extra(args)?;
                 verify_archive(&archive, &checksums, &asset_name)?;
-                let replacement = extract_archive(&archive, &stage)?;
-                verify_update(&current, &replacement, &expected_version)
+                extract_archive(&archive, &stage)
+                    .and_then(|replacement| {
+                        verify_update(&current, &replacement, &expected_version)
+                    })
+                    .map_err(|error| super::replacement::record_verification_error(&stage, error))
             }
             "install" => {
                 let parent_pid = next_string(&mut args)?
@@ -198,24 +225,8 @@ mod macos {
         }
         log_line(&plan.log, "re-verifying staged tty7 update");
         let verification = verify_archive(&plan.archive, &plan.checksums, &plan.asset_name)
+            .map_err(Failure::from)
             .and_then(|()| verify_update(&plan.current, &replacement, &plan.expected_version));
-        if let Err(error) = verification {
-            log_line(&plan.log, &error);
-            let _ = super::update_stage::remove_stage(&plan.stage);
-            let result = Err(error);
-            // The outcome lands before the old app does: the relaunched GUI
-            // merges it at startup, and a write afterward races that merge
-            // (#540).
-            report_outcome(
-                plan.result_file.as_deref(),
-                &plan.log,
-                &plan.expected_version,
-                &result,
-            );
-            let _ = launch_app(&plan.current);
-            return result;
-        }
-        log_line(&plan.log, &format!("replacing {}", plan.current.display()));
         let report = |result: &Result<(), String>| {
             report_outcome(
                 plan.result_file.as_deref(),
@@ -224,6 +235,17 @@ mod macos {
                 result,
             );
         };
+        if let Err(error) = verification {
+            return super::replacement::verification_failed(
+                &plan.current,
+                &plan.stage,
+                error,
+                &launch_app,
+                &report,
+            )
+            .inspect_err(|error| log_line(&plan.log, error));
+        }
+        log_line(&plan.log, &format!("replacing {}", plan.current.display()));
         replace_and_relaunch(&plan.current, &replacement, &plan.stage, launch_app, report)
             .inspect_err(|error| log_line(&plan.log, error))
     }
@@ -237,7 +259,7 @@ mod macos {
             .map_err(|error| error.to_string())
     }
 
-    fn extract_archive(archive: &Path, stage: &Path) -> Result<PathBuf, String> {
+    fn extract_archive(archive: &Path, stage: &Path) -> Result<PathBuf, Failure> {
         let unpacked = stage.join("unpacked");
         fs::create_dir(&unpacked)
             .map_err(|error| format!("creating {}: {error}", unpacked.display()))?;
@@ -256,20 +278,22 @@ mod macos {
         current: &Path,
         replacement: &Path,
         expected_version: &str,
-    ) -> Result<(), String> {
+    ) -> Result<(), Failure> {
         let executable = replacement.join("Contents/MacOS/tty7-app");
         let updater = replacement.join("Contents/MacOS/tty7-updater");
         if !replacement.is_dir() || !executable.is_file() || !updater.is_file() {
             return Err(
                 "the staged bundle is missing tty7-app or tty7-updater under Contents/MacOS"
-                    .to_string(),
+                    .to_string()
+                    .into(),
             );
         }
         let actual_version = bundle_version(replacement)?;
         if actual_version != expected_version {
             return Err(format!(
                 "the staged app reports version {actual_version}, expected {expected_version}"
-            ));
+            )
+            .into());
         }
         run_checked(
             Command::new("/usr/bin/codesign")
@@ -283,26 +307,19 @@ mod macos {
             return Err(format!(
                 "the staged app has a different designated requirement: current \
                  {current_requirement:?}, staged {replacement_requirement:?}"
-            ));
+            )
+            .into());
         }
         Ok(())
     }
 
-    fn bundle_version(app: &Path) -> Result<String, String> {
-        let output = super::update_process::run(
+    fn bundle_version(app: &Path) -> Result<String, Failure> {
+        let output = run_checked(
             Command::new("/usr/libexec/PlistBuddy")
                 .args(["-c", "Print :CFBundleShortVersionString"])
                 .arg(app.join("Contents/Info.plist")),
-            super::update_process::VERIFY_TIMEOUT,
-            &|| false,
-        )
-        .map_err(|error| format!("reading the staged app version: {error}"))?;
-        if !output.status.success() {
-            return Err(format!(
-                "reading the staged app version: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
+            "reading the staged app version",
+        )?;
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
 
@@ -327,32 +344,22 @@ mod macos {
             .find_map(|line| line.strip_prefix("designated => ").map(str::to_string))
     }
 
-    fn signing_requirement(app: &Path) -> Result<String, String> {
-        let output = super::update_process::run(
+    fn signing_requirement(app: &Path) -> Result<String, Failure> {
+        let output = run_checked(
             Command::new("/usr/bin/codesign")
                 .args(["-d", "-r-"])
                 .arg(app),
-            super::update_process::VERIFY_TIMEOUT,
-            &|| false,
-        )
-        .map_err(|error| {
-            format!(
-                "reading the code-signing requirement for {}: {error}",
-                app.display()
-            )
-        })?;
-        if !output.status.success() {
-            return Err(format!(
-                "reading the code-signing requirement for {}: {}",
-                app.display(),
-                String::from_utf8_lossy(&output.stderr).trim()
-            ));
-        }
+            &format!("reading the code-signing requirement for {}", app.display()),
+        )?;
         designated_requirement(
             &String::from_utf8_lossy(&output.stdout),
             &String::from_utf8_lossy(&output.stderr),
         )
-        .ok_or_else(|| "codesign did not report a designated requirement".to_string())
+        .ok_or_else(|| {
+            "codesign did not report a designated requirement"
+                .to_string()
+                .into()
+        })
     }
 
     fn replace_and_relaunch(
@@ -393,27 +400,6 @@ mod macos {
             Some(status) => Err(format!(
                 "the relaunched app exited immediately with {status}"
             )),
-        }
-    }
-
-    fn run_checked(command: &mut Command, context: &str) -> Result<(), String> {
-        let output =
-            super::update_process::run(command, super::update_process::VERIFY_TIMEOUT, &|| false)
-                .map_err(|error| {
-                if let Some(pid) = error.running_pid
-                    && let Some(stage) = command.get_current_dir()
-                {
-                    let _ = super::update_stage::mark_running_process(stage, pid);
-                }
-                format!("{context}: {error}")
-            })?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(format!(
-                "{context}: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ))
         }
     }
 
@@ -568,7 +554,7 @@ mod macos {
 
             let error = verify_update(&current, &replacement, "1.0.0").unwrap_err();
             assert!(
-                error.contains("missing tty7-app or tty7-updater"),
+                error.detail.contains("missing tty7-app or tty7-updater"),
                 "{error}"
             );
         }
@@ -634,6 +620,8 @@ mod macos {
 #[cfg(target_os = "linux")]
 mod linux {
     use super::parent::wait_for_exit;
+    use super::run_checked;
+    use super::update_process::Failure;
     use std::fs::{self, OpenOptions};
     use std::io::{Read as _, Write as _};
     use std::os::unix::fs::PermissionsExt as _;
@@ -673,6 +661,7 @@ mod linux {
                 reject_extra(args)?;
                 verify_archive(&archive, &checksums, &asset_name)?;
                 verify_update(&archive, &stage, &expected_version)
+                    .map_err(|error| super::replacement::record_verification_error(&stage, error))
             }
             "install" => {
                 let parent_pid = next_string(&mut args)?
@@ -824,24 +813,8 @@ mod linux {
         }
         log_line(&plan.log, "re-verifying the staged tty7 update");
         let verification = verify_archive(&plan.archive, &plan.checksums, &plan.asset_name)
+            .map_err(Failure::from)
             .and_then(|()| verify_update(&plan.archive, &plan.stage, &plan.expected_version));
-        if let Err(error) = verification {
-            log_line(&plan.log, &error);
-            let _ = super::update_stage::remove_stage(&plan.stage);
-            let result = Err(error);
-            // The outcome lands before the old app does: the relaunched GUI
-            // merges it at startup, and a write afterward races that merge
-            // (#540).
-            report_outcome(
-                plan.result_file.as_deref(),
-                &plan.log,
-                &plan.expected_version,
-                &result,
-            );
-            let _ = launch_app(&plan.current);
-            return result;
-        }
-        log_line(&plan.log, &format!("replacing {}", plan.current.display()));
         let report = |result: &Result<(), String>| {
             report_outcome(
                 plan.result_file.as_deref(),
@@ -850,6 +823,17 @@ mod linux {
                 result,
             );
         };
+        if let Err(error) = verification {
+            return super::replacement::verification_failed(
+                &plan.current,
+                &plan.stage,
+                error,
+                &launch_app,
+                &report,
+            )
+            .inspect_err(|error| log_line(&plan.log, error));
+        }
+        log_line(&plan.log, &format!("replacing {}", plan.current.display()));
         replace_and_relaunch(
             &plan.current,
             &plan.archive,
@@ -877,9 +861,9 @@ mod linux {
     /// the release's checksums.txt; from there, running the image's own
     /// `--appimage-extract` is running the released code, which is exactly
     /// what the swap is about to do anyway.
-    fn verify_update(staged: &Path, stage: &Path, expected_version: &str) -> Result<(), String> {
+    fn verify_update(staged: &Path, stage: &Path, expected_version: &str) -> Result<(), Failure> {
         if !is_appimage(&read_header(staged)?) {
-            return Err(format!("{} is not a type-2 AppImage", staged.display()));
+            return Err(format!("{} is not a type-2 AppImage", staged.display()).into());
         }
         // Downloaded bytes land without the execute bit; extraction needs the
         // runtime to run. The definitive mode is set again at swap time, taken
@@ -894,7 +878,8 @@ mod linux {
         if actual != expected_version {
             return Err(format!(
                 "the staged AppImage reports version {actual}, expected {expected_version}"
-            ));
+            )
+            .into());
         }
         extract_entry(staged, stage, BUNDLED_UPDATER)?;
         Ok(())
@@ -940,7 +925,7 @@ mod linux {
     /// with it. The runtime exits zero even when nothing matched, which is
     /// why the answer is the extracted file's existence rather than the
     /// exit status.
-    fn extract_entry(appimage: &Path, stage: &Path, entry: &str) -> Result<PathBuf, String> {
+    fn extract_entry(appimage: &Path, stage: &Path, entry: &str) -> Result<PathBuf, Failure> {
         // Anchored before the spawn: exec resolves a relative program path
         // against the child's working directory, which the line below moves —
         // a hand-run `tty7-updater verify ./pkg.AppImage …` would otherwise
@@ -956,7 +941,7 @@ mod linux {
         )?;
         let extracted = stage.join("squashfs-root").join(entry);
         if !extracted.is_file() {
-            return Err(format!("the staged AppImage carries no {entry}"));
+            return Err(format!("the staged AppImage carries no {entry}").into());
         }
         Ok(extracted)
     }
@@ -1032,27 +1017,6 @@ mod linux {
             Some(status) => Err(format!(
                 "the relaunched app exited immediately with {status}"
             )),
-        }
-    }
-
-    fn run_checked(command: &mut Command, context: &str) -> Result<(), String> {
-        let output =
-            super::update_process::run(command, super::update_process::VERIFY_TIMEOUT, &|| false)
-                .map_err(|error| {
-                if let Some(pid) = error.running_pid
-                    && let Some(stage) = command.get_current_dir()
-                {
-                    let _ = super::update_stage::mark_running_process(stage, pid);
-                }
-                format!("{context}: {error}")
-            })?;
-        if output.status.success() {
-            Ok(())
-        } else {
-            Err(format!(
-                "{context}: {}",
-                String::from_utf8_lossy(&output.stderr).trim()
-            ))
         }
     }
 
@@ -1211,7 +1175,7 @@ mod linux {
             let staged = root.path().join("tty7.AppImage");
             fs::write(&staged, b"<html>Not Found</html>").unwrap();
             let error = verify_update(&staged, root.path(), "27.1.0").unwrap_err();
-            assert!(error.contains("not a type-2 AppImage"), "{error}");
+            assert!(error.detail.contains("not a type-2 AppImage"), "{error}");
         }
 
         #[test]
@@ -1475,6 +1439,7 @@ mod windows {
                     log: options.log.ok_or_else(usage)?,
                     version: options.expected_version.ok_or_else(usage)?,
                     gui_pid: options.gui_pid,
+                    stage: options.stage_dir,
                 })
             }
             _ => Err(usage()),
@@ -1502,7 +1467,7 @@ mod windows {
          --expected-sha256 <hex> [--config-dir <dir>] [--result-file <path>]\n\
          or: tty7-updater relaunch-watcher --status-file <path> --result-file <path> \
          --app-path <tty7-app.exe> --log <path> --expected-version <version> \
-         [--gui-pid <pid>] [--config-dir <dir>]"
+         [--gui-pid <pid>] [--config-dir <dir>] [--stage-dir <dir>]"
             .to_string()
     }
 
@@ -1553,6 +1518,9 @@ mod windows {
         expected_version: Option<String>,
         /// The GUI the watcher must not relaunch over. See [`WatcherPlan`].
         gui_pid: Option<u32>,
+        /// The attempt's stage retains an unconfirmed-process record even
+        /// after a transferred guard pid exits or cannot be inspected.
+        stage_dir: Option<PathBuf>,
     }
 
     fn tail_options(mut args: impl Iterator<Item = OsString>) -> Result<TailOptions, String> {
@@ -1565,6 +1533,7 @@ mod windows {
                     options.expected_sha256 = Some(next_string(&mut args)?)
                 }
                 Some("--status-file") => options.status_file = Some(next_path(&mut args)?),
+                Some("--stage-dir") => options.stage_dir = Some(next_path(&mut args)?),
                 Some("--app-path") => options.app_path = Some(next_path(&mut args)?),
                 Some("--log") => options.log = Some(next_path(&mut args)?),
                 Some("--expected-version") => {
@@ -1996,7 +1965,7 @@ mod windows {
         let output = super::update_process::run(&mut command, ELEVATED_TIMEOUT, &|| false)
             .map_err(|error| {
                 if let Some(pid) = error.running_pid {
-                    let _ = super::update_stage::mark_running_process(staging, pid);
+                    let _ = super::update_stage::mark_running_process(staging, pid, &error.detail);
                 }
                 command_failure(&plan.stage, &error)
             })?;
@@ -2178,6 +2147,7 @@ mod windows {
         /// it still brings the app back, which is the point of the timeouts
         /// below — it just cannot tell "still up" from "already gone".
         gui_pid: Option<u32>,
+        stage: Option<PathBuf>,
     }
 
     /// How often the watcher looks at the status and outcome files.
@@ -2315,6 +2285,30 @@ mod windows {
     }
 
     fn finish_watch(plan: &WatcherPlan, gui: &GuiProcess, end: WatchOutcome) -> Result<(), String> {
+        finish_watch_with(
+            plan,
+            gui,
+            end,
+            &tty7_core::daemon::update_guard::held,
+            &|app| {
+                Command::new(app)
+                    .stdin(Stdio::null())
+                    .stdout(Stdio::null())
+                    .stderr(Stdio::null())
+                    .spawn()
+                    .map_err(|error| format!("launching {}: {error}", app.display()))
+                    .and_then(|mut child| healthy_after_grace(&mut child))
+            },
+        )
+    }
+
+    fn finish_watch_with(
+        plan: &WatcherPlan,
+        gui: &GuiProcess,
+        end: WatchOutcome,
+        installer_active: &impl Fn() -> bool,
+        launch: &impl Fn(&Path) -> Result<(), String>,
+    ) -> Result<(), String> {
         let _ = fs::remove_file(&plan.status_file);
         let WatchOutcome { outcome, recorded } = end;
         // Nothing relaunches over a GUI that is still on screen. Two shapes
@@ -2350,10 +2344,17 @@ mod windows {
             }
         }
         let guard_deadline = Instant::now() + WATCH_RESULT_GRACE;
-        while tty7_core::daemon::update_guard::held() {
-            if Instant::now() >= guard_deadline {
+        loop {
+            let recovery = plan
+                .stage
+                .as_deref()
+                .is_some_and(super::update_stage::needs_recovery);
+            if !recovery && !installer_active() {
+                break;
+            }
+            if recovery || Instant::now() >= guard_deadline {
                 let detail = format!(
-                    "{}; the installer is still running; close it before relaunching tty7",
+                    "{}; installer termination is unconfirmed; close any remaining installer before relaunching tty7",
                     outcome
                         .detail
                         .as_deref()
@@ -2376,13 +2377,7 @@ mod windows {
         // the new version after a completed install, the previous one after
         // a recovery. Spawned from this never-elevated process, so the app
         // comes back as the original user whatever the chain ran as.
-        let health = Command::new(&plan.app)
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .map_err(|error| format!("launching {}: {error}", plan.app.display()))
-            .and_then(|mut child| healthy_after_grace(&mut child));
+        let health = launch(&plan.app);
         if let Err(error) = health {
             // "Installed but nothing came back" is a failure the user must
             // see, so it replaces the outcome the chain recorded.
@@ -3001,7 +2996,7 @@ mod windows {
     fn command_failure(stage: &Path, error: &super::update_process::Failure) -> String {
         if let Some(pid) = error.running_pid {
             tty7_core::daemon::update_guard::hold_for(pid);
-            let _ = super::update_stage::mark_running_process(stage, pid);
+            let _ = super::update_stage::mark_running_process(stage, pid, &error.detail);
             format!("{error}; update staging preserved at {}", stage.display())
         } else {
             error.to_string()
@@ -3547,6 +3542,49 @@ mod windows {
         use super::*;
         use std::cell::Cell;
         use std::os::windows::ffi::OsStringExt as _;
+
+        #[test]
+        fn recovery_record_prevents_relaunch_after_the_guard_pid_exits() {
+            let root = tempfile::tempdir().unwrap();
+            let stage = root.path().join("stage");
+            fs::create_dir(&stage).unwrap();
+            super::super::update_stage::mark_running_process(
+                &stage,
+                123,
+                "termination unconfirmed",
+            )
+            .unwrap();
+            let plan = WatcherPlan {
+                status_file: root.path().join("status"),
+                result_file: root.path().join("outcome.json"),
+                app: root.path().join("app.exe"),
+                log: root.path().join("update.log"),
+                version: "1.2.3".into(),
+                gui_pid: None,
+                stage: Some(stage.clone()),
+            };
+            let launched = Cell::new(false);
+            let result = finish_watch_with(
+                &plan,
+                &GuiProcess::open(None),
+                WatchOutcome::synthesized(&plan, "installer termination could not be confirmed"),
+                &|| false,
+                &|_| {
+                    launched.set(true);
+                    Ok(())
+                },
+            );
+            assert!(result.is_err());
+            assert!(
+                !launched.get(),
+                "recovery files must prevent an automatic relaunch"
+            );
+            let outcome = tty7_core::daemon::install::outcome::read_outcome(&plan.result_file)
+                .unwrap()
+                .unwrap();
+            assert!(!outcome.ok);
+            assert!(stage.exists());
+        }
 
         #[test]
         fn parses_release_versions_for_windows_resources() {

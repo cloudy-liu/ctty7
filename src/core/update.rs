@@ -534,8 +534,8 @@ fn remind_later() {
     state.save();
 }
 
-/// Abandons the transfer. The staging directory is removed by the download
-/// thread as it unwinds, so nothing is left to collect.
+/// Abandons the transfer. Its worker cleans staging after its commands stop;
+/// unconfirmed termination retains a recovery record and the staged files.
 pub fn cancel_download(cx: &mut App) {
     DOWNLOAD_GENERATION.fetch_add(1, Ordering::Relaxed);
     DOWNLOAD_CANCELLED.store(true, Ordering::Relaxed);
@@ -1458,6 +1458,8 @@ impl PendingUpdate {
             .arg(&parts.log)
             .arg("--expected-version")
             .arg(&parts.version)
+            .arg("--stage-dir")
+            .arg(&parts.stage)
             // So the watcher can tell a GUI that is quitting from one that
             // stayed: a declined prompt leaves this process on screen, and
             // the relaunch it would otherwise perform on its own timeout
@@ -2753,7 +2755,14 @@ fn verified_stage(staging: tempfile::TempDir, result: Result<()>) -> Result<temp
             .and_then(|failure| failure.running_pid)
         {
             let path = staging.keep();
-            let _ = super::update_stage::mark_running_process(&path, pid);
+            let detail = format!("{error:#}; update staging preserved at {}", path.display());
+            if let Err(record) = super::update_stage::mark_running_process(&path, pid, &detail) {
+                log::error!("{detail}; writing the recovery record: {record}");
+            } else {
+                // Cancellation supersedes the generation, so its result may
+                // never reach the UI. Record the recovery before returning.
+                log::error!("{detail}");
+            }
             return Err(error.context(format!("update staging preserved at {}", path.display())));
         }
         return Err(error);
@@ -2833,6 +2842,13 @@ mod tests {
             assert_eq!(path.exists(), running_pid.is_some());
             if running_pid.is_some() {
                 assert!(super::super::update_stage::needs_recovery(&path));
+                // The caller may discard an obsolete generation's result.
+                // Its own stage must still explain why recovery is needed.
+                let record =
+                    std::fs::read_to_string(path.join(super::super::update_stage::RUNNING_PROCESS))
+                        .unwrap();
+                assert!(record.contains("verification timed out"), "{record}");
+                assert!(record.contains(&path.display().to_string()), "{record}");
                 std::fs::remove_dir_all(path).unwrap();
             }
         }

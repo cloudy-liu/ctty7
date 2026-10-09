@@ -476,11 +476,12 @@ pub(crate) fn creation_time(pid: u32) -> Option<std::time::SystemTime> {
 }
 
 /// Waits until the process is gone, up to `timeout`. Returns whether it exited
-/// in time. A pid that cannot be opened is reported as exited: the handle is
-/// what names the process, and no handle means there is nothing left to wait
-/// on that this user could ever observe.
+/// in time. An absent pid has exited; access denied or another observation
+/// error does not prove that an elevated process has stopped.
 pub(crate) fn wait_for_exit(pid: u32, timeout: std::time::Duration) -> bool {
-    use windows_sys::Win32::Foundation::{CloseHandle, WAIT_OBJECT_0};
+    use windows_sys::Win32::Foundation::{
+        CloseHandle, ERROR_INVALID_PARAMETER, GetLastError, WAIT_OBJECT_0,
+    };
     use windows_sys::Win32::System::Threading::{
         OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
     };
@@ -488,7 +489,7 @@ pub(crate) fn wait_for_exit(pid: u32, timeout: std::time::Duration) -> bool {
     unsafe {
         let handle = OpenProcess(PROCESS_SYNCHRONIZE, 0, pid);
         if handle.is_null() {
-            return true;
+            return GetLastError() == ERROR_INVALID_PARAMETER;
         }
         let millis = timeout.as_millis().min(u128::from(u32::MAX - 1)) as u32;
         let result = WaitForSingleObject(handle, millis);

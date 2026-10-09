@@ -45,15 +45,27 @@ environment settings and applies bypass rules to redirects. TLS uses the
 existing platform verifier. Packages retain the 128 MiB limit; the checksum
 manifest is limited to 1 MiB.
 
+SOCKS proxy resolution has a cancellable 30-second limit. A failed configured
+proxy stops the download instead of falling back to a direct connection.
+
 Verification subprocesses receive the same cancellation predicate. They run
 in Windows jobs or Unix process groups, with stdout and stderr redirected
 to temporary files. This avoids waiting indefinitely for inherited pipes.
+Unix re-verification retains process failures through version and signature
+checks, so unconfirmed termination also prevents recovery relaunches.
 
 Ordinary stages can be removed. A stage containing a previous app/image or
 an unconfirmed-process marker is retained for recovery, including after the
 24-hour orphan-stage cutoff. A failed restoration reports its backup path.
 Windows cleanup waits for the staged updater to exit and retries transient
 deletion failures. The next startup can sweep ordinary leftovers.
+
+Recovery markers include the process ID, failure detail, and stage path.
+Desktop verification records the failure in its stage and application log
+even if cancellation has superseded the attempt. It leaves a newer attempt's
+state and installation consent alone. The Windows relaunch watcher checks
+the attempt's recovery marker as well as the update guard; an inaccessible
+process or a stale guard PID cannot authorize a recovery relaunch.
 
 ## Before and after evidence
 
@@ -71,6 +83,11 @@ without changing their behavior so the tests could call those paths.
   tests cover cancellation during TLS and package reads, closed connections,
   download limits/progress, process-tree termination, parent deadlines,
   preservation during sweeps, and failure cleanup.
+- Review regressions also failed before their fixes: an inaccessible live
+  holder was treated as exited; unconfirmed verification and a stale guard
+  still allowed relaunch; a cancelled verifier's record lacked its failure;
+  and an unresolved SOCKS proxy caused a direct request. Their tests now
+  cover conservative process observation, recovery records, and proxy failure.
 
 Run the desktop update and updater suites:
 
@@ -78,8 +95,8 @@ Run the desktop update and updater suites:
     cargo test --locked --features updater --bin tty7-updater
     cargo test --locked -p tty7-core daemon::update_guard::tests
 
-The ignored process-fixture test is executed as a child by the surrounding
-tests. It is not a skipped acceptance test.
+The ignored process-fixture tests are executed as children by the surrounding
+tests. They are not skipped acceptance tests.
 
 ## Verification limits
 

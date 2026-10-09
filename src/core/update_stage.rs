@@ -6,8 +6,11 @@ use std::path::Path;
 pub(crate) const RECOVERY_BACKUPS: [&str; 2] = ["previous.app", "previous.AppImage"];
 pub(crate) const RUNNING_PROCESS: &str = ".tty7-update-process";
 
-pub(crate) fn mark_running_process(stage: &Path, pid: u32) -> io::Result<()> {
-    std::fs::write(stage.join(RUNNING_PROCESS), pid.to_string())
+pub(crate) fn mark_running_process(stage: &Path, pid: u32, detail: &str) -> io::Result<()> {
+    std::fs::write(
+        stage.join(RUNNING_PROCESS),
+        format!("process: {pid}\n{detail}\nstage: {}\n", stage.display()),
+    )
 }
 
 pub(crate) fn needs_recovery(stage: &Path) -> bool {
