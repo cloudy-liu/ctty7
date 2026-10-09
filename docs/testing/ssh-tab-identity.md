@@ -11,6 +11,13 @@ light theme, and 1200 by 660 window.
 These images combine crops of native application screenshots. The Before and
 After labels are outside the crops; application pixels have not been redrawn.
 
+SSH uses an unframed pair of opposed chevrons, about 14 pixels in the top strip
+and 16 pixels in the sidebar. The existing avatar slots preserve name alignment.
+Its hover label identifies SSH. The design follows the lightweight remote
+indicator used in [VS Code's Extensions view](https://code.visualstudio.com/docs/remote/ssh#_managing-extensions);
+it is not a protocol brand logo. VS Code keeps the extension's own logo and
+uses a remote badge, while these tabs retain the selected SSH-first layout.
+
 | Session | Before | After |
 | --- | --- | --- |
 | Local terminal | Terminal name | Same terminal name |
@@ -28,10 +35,12 @@ Before source: `90d9a3cb564c63824d15547eaef1f9a4aa4762b2`. The capture runner ov
 entry point and enables its quiet transport helpers; it leaves the baseline
 tab selectors and renderers unchanged.
 
-After source: CI merge `c403cf48f65345b7296076730e07ab28eb5985aa`,
-which includes PR head `9cc1918cccb1291e2132fdb36425f463fbfc77f8`.
+After source: CI merge `a9371caf858d06f0ba643e47604477427012da3e`,
+which includes PR head `41fb6299ef3c43a8257f067aefc54227f7d8d774`.
+It also includes main `5d46af3d`, which changed sidebar status labels to
+lowercase in cloudy-liu/ctty7#123. That label styling is independent of SSH.
 
-[Full PNG captures, source metadata, and logs](https://github.com/cloudy-liu/ctty7/actions/runs/37943304886)
+[Full PNG captures, source metadata, and logs](https://github.com/cloudy-liu/ctty7/actions/runs/37952423042)
 are in the `native-ssh-tabs-before-after` artifact. The capture script checks
 that both windows render nonblank content and that each process exits cleanly.
 
