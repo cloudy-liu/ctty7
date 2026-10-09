@@ -18,4 +18,7 @@ pub mod session;
 pub mod shell_quote;
 pub mod ssh_config;
 pub mod update;
+mod update_download;
+mod update_process;
+mod update_stage;
 pub mod window_state;

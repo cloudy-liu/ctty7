@@ -67,7 +67,9 @@ pub fn hold_for_parent() {
     }
 }
 
-fn hold_for(pid: u32) {
+/// Transfer the guard to a still-running installer when its supervisor cannot
+/// confirm termination. The guard becomes stale when that process exits.
+pub fn hold_for(pid: u32) {
     let Some(path) = path() else { return };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -90,7 +92,7 @@ pub fn clear() {
 /// Whether an installer is replacing the installation right now. A stale
 /// guard — dead or recycled writer, unreadable garbage — is removed on sight,
 /// so one crashed holder never costs more than one look.
-pub(crate) fn held() -> bool {
+pub fn held() -> bool {
     let Some(path) = path() else { return false };
     let Ok(contents) = std::fs::read_to_string(&path) else {
         return false;

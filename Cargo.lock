@@ -10516,6 +10516,7 @@ dependencies = [
  "gpui-component",
  "gpui-component-assets",
  "gpui_platform",
+ "http_client_tls",
  "image",
  "jieba-rs",
  "keyring",
@@ -10554,6 +10555,7 @@ dependencies = [
  "windows 0.58.0",
  "windows-sys 0.61.2",
  "winresource",
+ "zed-reqwest",
 ]
 
 [[package]]

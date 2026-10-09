@@ -24,7 +24,8 @@ description: "How cctty7 checks, verifies and installs official releases."
   <Step title="Update and relaunch">
     A dedicated `tty7-updater` helper verifies the release checksum, the bundle
     version, and — on macOS — the code-signing requirement, before replacing the
-    installation. If the relaunch fails, it puts the previous copy back.
+    installation. Portable, macOS and AppImage updates attempt to restore the
+    previous copy if replacement or relaunch fails.
   </Step>
 </Steps>
 
@@ -36,6 +37,26 @@ ctty7 follows the latest official Release. There is no channel selector.
 Legacy `update_channel` configuration is ignored. Version numbers increase
 from 0.1.0; old 26.x installations need one manual replacement before ordinary
 updates resume. See the [migration guide](https://github.com/cloudy-liu/ctty7/blob/main/docs/maintenance/migration.md).
+
+## Cancellation and failed updates
+
+Cancelling a download also cancels requests waiting for a connection, TLS,
+headers, or checksums. Cancelling during verification stops the verification
+helper. A cancelled attempt cannot install itself later.
+
+The updater waits up to two minutes for the GUI to close. If it remains open,
+the attempt stops before changing installed files. Verification helpers,
+Windows Setup and the elevated install stage also have time limits.
+
+Failed or cancelled preparation removes its temporary files after its helper
+has stopped. Windows cleanup retries temporary file locks; ordinary leftovers
+can be removed at a later launch after 24 hours.
+
+If restoration fails, the updater preserves the previous app or image and
+records its backup path. Cleanup also preserves files when an installer's
+termination could not be confirmed. Close any remaining installer before
+retrying. Windows Setup does not provide a complete app-managed rollback;
+a partial installation can require running Setup manually.
 
 ## Platform notes
 
