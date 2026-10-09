@@ -375,7 +375,16 @@ impl Tty7App {
                         (shown, Some(full))
                     } else {
                         let (raw_title, home) = tab.leaf_title_and_home(Some(window), cx);
-                        let title = strip_host_prefix(raw_title.trim());
+                        let remote = raw_title
+                            .trim()
+                            .is_empty()
+                            .then(|| tab.remote_context(Some(window), cx))
+                            .flatten();
+                        let title = if raw_title.trim().is_empty() {
+                            crate::ui::app::title_or_ssh_target(&raw_title, remote.as_ref())
+                        } else {
+                            strip_host_prefix(raw_title.trim())
+                        };
                         let raw = abbreviate_home(title, home.as_deref());
                         if raw.trim().is_empty() {
                             // Nothing to expand: the row is naming an unnamed

@@ -503,7 +503,10 @@ fn badge_for_focused_pane(
         .unwrap_or_default()
 }
 
-fn title_or_ssh_target<'a>(title: &'a str, remote: Option<&'a RemoteContext>) -> &'a str {
+pub(crate) fn title_or_ssh_target<'a>(
+    title: &'a str,
+    remote: Option<&'a RemoteContext>,
+) -> &'a str {
     if title.trim().is_empty()
         && let Some(remote) = remote
         && matches!(
@@ -616,7 +619,9 @@ impl Tab {
     }
 
     pub(crate) fn leaf_title(&self, window: Option<&Window>, cx: &App) -> String {
-        self.leaf_title_and_home(window, cx).0
+        self.title_leaf(window, cx)
+            .map(|l| l.read(cx).title.clone())
+            .unwrap_or_default()
     }
 
     /// [`Self::leaf_title`] together with what a `~` in it would mean — one
@@ -631,10 +636,7 @@ impl Tab {
             return (String::new(), None);
         };
         let leaf = leaf.read(cx);
-        (
-            title_or_ssh_target(&leaf.title, leaf.remote_context().as_ref()).to_owned(),
-            leaf.display_home(cx),
-        )
+        (leaf.title.clone(), leaf.display_home(cx))
     }
 
     pub(crate) fn git_status(
@@ -8923,6 +8925,12 @@ mod tests {
         };
         assert_eq!(title_or_ssh_target("", Some(&wsl)), "");
         assert_eq!(title_or_ssh_target("", None), "");
+        let ipv6 = RemoteContext {
+            kind: RemoteKind::Ssh,
+            argv: vec!["ssh".into(), "deploy@2001:db8::1".into()],
+            target: "deploy@2001:db8::1".into(),
+        };
+        assert_eq!(title_or_ssh_target("", Some(&ipv6)), "deploy@2001:db8::1");
     }
 
     #[test]
@@ -9877,8 +9885,8 @@ mod ssh_tab_gpui_tests {
             });
         DaemonMsg::RemoteContext(Some(RemoteContext {
             kind: RemoteKind::Ssh,
-            argv: vec!["ssh".into(), "prod-web".into()],
-            target: "prod-web".into(),
+            argv: vec!["ssh".into(), "deploy@2001:db8::1".into()],
+            target: "deploy@2001:db8::1".into(),
         }))
         .encode(&mut daemon)
         .unwrap();
@@ -9896,13 +9904,19 @@ mod ssh_tab_gpui_tests {
         app.update_in(&mut vcx, |app, window, cx| {
             let tab = &mut app.tabs[0];
             tab.last_focused = Some(remote.entity_id());
-            assert_eq!(tab.remote_context(None, cx).unwrap().target, "prod-web");
+            assert_eq!(
+                tab.remote_context(None, cx).unwrap().target,
+                "deploy@2001:db8::1"
+            );
             assert_eq!(
                 tab.focused_agent_badge(None, cx).agent,
                 Some(CLIAgent::Codex)
             );
             remote.update(cx, |view, _| view.title.clear());
-            assert_eq!(app.tab_label(&app.tabs[0], 0, None, cx), "prod-web");
+            assert_eq!(
+                app.tab_label(&app.tabs[0], 0, None, cx),
+                "deploy@2001:db8::1"
+            );
             app.tabs[0].name = Some("My deployment".into());
             assert_eq!(app.tab_label(&app.tabs[0], 0, None, cx), "My deployment");
             // An inactive split must use its remembered leaf, rather than
@@ -9910,10 +9924,11 @@ mod ssh_tab_gpui_tests {
             app.tabs[0].last_focused = Some(local.entity_id());
             assert!(app.tabs[0].remote_context(None, cx).is_none());
             assert!(app.tabs[0].focused_agent_badge(None, cx).agent.is_none());
-            window.focus(&remote.read(cx).focus_handle, cx);
+            let focus = remote.read(cx).focus_handle.clone();
+            window.focus(&focus, cx);
             assert_eq!(
                 app.tabs[0].remote_context(Some(window), cx).unwrap().target,
-                "prod-web"
+                "deploy@2001:db8::1"
             );
         });
         DaemonMsg::RemoteContext(None).encode(&mut daemon).unwrap();

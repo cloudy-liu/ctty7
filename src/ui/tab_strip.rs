@@ -18,7 +18,9 @@ use crate::core::actions::{
 use crate::core::config::RightPanelTab;
 use crate::core::shells::DetectedShell;
 use crate::daemon::protocol::{RemoteKind, ShellSpec};
-use crate::ui::app::{SpawnWhere, TILE_GLYPH, TILE_SIZE, Tab, Tty7App, tile_trailing_inset};
+use crate::ui::app::{
+    SpawnWhere, TILE_GLYPH, TILE_SIZE, Tab, Tty7App, tile_trailing_inset, title_or_ssh_target,
+};
 use crate::ui::hints::tab_badge_label;
 use crate::ui::i18n::{L10nKey, t, t_fmt};
 use crate::ui::reorder::{self, Reorder, Surface};
@@ -1282,7 +1284,15 @@ impl Tty7App {
             }
         }
         let (raw, home) = tab.leaf_title_and_home(window, cx);
-        let label = short_title(&raw, home.as_deref());
+        let label = if raw.trim().is_empty() {
+            // A connection target is a literal name. It may contain IPv6
+            // colons, which are not a shell title's user@host:path prefix.
+            title_or_ssh_target(&raw, tab.remote_context(window, cx).as_ref())
+                .trim()
+                .to_owned()
+        } else {
+            short_title(&raw, home.as_deref())
+        };
         if label.trim().is_empty() {
             t_fmt(
                 L10nKey::TabUnnamedShell,
