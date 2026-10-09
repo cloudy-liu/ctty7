@@ -1,7 +1,8 @@
 # v0.2.0 release verification
 
 Prepared on 2026-10-07 and published on 2026-10-08 at 00:44:59 UTC.
-[ctty7 v0.2.0](https://github.com/cloudy-liu/ctty7/releases/tag/v0.2.0) is Latest.
+[ctty7 v0.2.0](https://github.com/cloudy-liu/ctty7/releases/tag/v0.2.0) was set
+Latest at publication and was superseded by v0.2.1 on 2026-10-09.
 The complete asset set was downloaded and verified while the release was still
 a draft. Published tags and binaries must not be replaced.
 
