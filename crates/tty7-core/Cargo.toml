@@ -76,14 +76,16 @@ portable-pty = "0.8"
 # fork behind `gpui::http_client` — unavailable here, since this crate must not
 # depend on gpui. `ureq` is blocking (matching the installer, which runs on a
 # daemon std thread), rustls-based (no OpenSSL to find at build time), and
-# reuses the `rustls`/`http` versions already in the tree. `gzip` is off: the
-# assets are already-compressed binaries.
+# reuses the `rustls`/`http` versions already in the tree. The platform verifier
+# honors OS-trusted CAs for both updates and remote-server downloads.
+# `gzip` is off: the assets are already-compressed binaries.
 #
 # Optional, and off by default, so the static musl `tty7-server` never links a
 # TLS stack for a code path it cannot take — it *is* the binary being
 # downloaded. The GUI package turns the feature on (see the root `Cargo.toml`).
 ureq = { version = "3", default-features = false, features = [
     "rustls",
+    "platform-verifier",
     "win-system-proxy",
     "socks-proxy",
 ], optional = true }

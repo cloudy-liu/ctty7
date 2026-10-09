@@ -239,6 +239,19 @@ pub fn spawn_check_forced(cx: &mut App) {
 /// claiming nothing is happening while a verified package sits in staging.
 fn hydrate_from_disk(cx: &mut App) {
     let mut state = UpdateState::load();
+    // Manual upgrades leave no success outcome. Retire transfer errors for
+    // versions already installed, using the download context in legacy
+    // records. Installation and recovery errors still need attention even
+    // when they name the running version.
+    if let Some(failure) = &state.last_failure
+        && failure.detail.starts_with("downloading ")
+        && parse_version(&failure.version)
+            .zip(parse_version(current_version()))
+            .is_some_and(|(failed, current)| failed <= current)
+    {
+        state.last_failure = None;
+        state.save();
+    }
     // A package for a version we are already running is finished business —
     // most often because it is the very update that just installed itself.
     if let Some(pending) = &state.pending
@@ -3248,6 +3261,78 @@ mod tests {
     /// pinned per-process config dir (the pattern `update_guard`'s tests
     /// document: one shared state file, parallel tests, one lock).
     static UPDATE_STATE_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[gpui::test]
+    fn completed_updates_clear_old_download_failures(cx: &mut gpui::TestAppContext) {
+        let _lock = UPDATE_STATE_LOCK.lock().unwrap();
+        crate::core::config::pin_test_config_dir();
+        for version in [
+            "0.0.1".to_string(),
+            current_version().to_string(),
+            format!("v{}", current_version()),
+        ] {
+            UpdateState {
+                last_failure: Some(FailureRecord {
+                    version,
+                    detail: "downloading checksums.txt: invalid peer certificate: UnknownIssuer"
+                        .into(),
+                }),
+                ..Default::default()
+            }
+            .save();
+
+            cx.update(hydrate_from_disk);
+
+            assert!(
+                UpdateState::load().last_failure.is_none(),
+                "a completed update must retire its download failure on disk"
+            );
+            cx.update(|cx| {
+                assert!(
+                    cx.global::<UpdateStatus>().failure.is_none(),
+                    "Settings must not show an obsolete download failure"
+                )
+            });
+        }
+        let _ = std::fs::remove_file(UpdateState::path().unwrap());
+    }
+
+    #[gpui::test]
+    fn hydration_preserves_unresolved_update_failures(cx: &mut gpui::TestAppContext) {
+        let _lock = UPDATE_STATE_LOCK.lock().unwrap();
+        crate::core::config::pin_test_config_dir();
+        for (version, detail) in [
+            (
+                "99.0.0",
+                "downloading checksums.txt: invalid peer certificate: UnknownIssuer",
+            ),
+            ("unparseable", "downloading checksums.txt: timed out"),
+            (current_version(), "the installer exited with code 5"),
+            (current_version(), "the update result could not be read"),
+            (
+                current_version(),
+                "a previous update was interrupted while replacing the installed files",
+            ),
+        ] {
+            let failure = FailureRecord {
+                version: version.into(),
+                detail: detail.into(),
+            };
+            UpdateState {
+                last_failure: Some(failure.clone()),
+                ..Default::default()
+            }
+            .save();
+
+            cx.update(hydrate_from_disk);
+
+            assert_eq!(UpdateState::load().last_failure.as_ref(), Some(&failure));
+            cx.update(|cx| {
+                assert_eq!(cx.global::<UpdateStatus>().failure.as_ref(), Some(&failure))
+            });
+        }
+        let _ = std::fs::remove_file(UpdateState::path().unwrap());
+    }
 
     #[test]
     fn updater_tail_args_carry_config_and_outcome_as_arguments() {
