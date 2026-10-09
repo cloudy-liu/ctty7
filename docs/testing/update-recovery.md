@@ -103,6 +103,10 @@ Run the desktop update and updater suites:
 The ignored process-fixture tests are executed as children by the surrounding
 tests. They are not skipped acceptance tests.
 
+The access-denied fixture disables privileges on its own impersonating
+thread, so elevated CI runners also exercise the denied-handle path without
+changing the process token shared by other tests.
+
 ## Verification limits
 
 The local fixtures use loopback HTTP, temporary installations, and dedicated

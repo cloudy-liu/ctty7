@@ -148,17 +148,18 @@ mod tests {
     #[test]
     fn an_inaccessible_holder_is_not_mistaken_for_an_exited_process() {
         use std::mem::{size_of, zeroed};
-        use std::os::windows::io::AsRawHandle as _;
+        use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
         use std::os::windows::process::CommandExt as _;
         use std::process::{Child, Command, Stdio};
-        use windows_sys::Win32::Foundation::{ERROR_ACCESS_DENIED, GetLastError};
+        use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, GetLastError};
         use windows_sys::Win32::Security::{
-            ACL, ACL_REVISION, DACL_SECURITY_INFORMATION, InitializeAcl,
-            InitializeSecurityDescriptor, SECURITY_DESCRIPTOR, SetKernelObjectSecurity,
-            SetSecurityDescriptorDacl,
+            ACL, ACL_REVISION, AdjustTokenPrivileges, DACL_SECURITY_INFORMATION, ImpersonateSelf,
+            InitializeAcl, InitializeSecurityDescriptor, RevertToSelf, SECURITY_DESCRIPTOR,
+            SecurityImpersonation, SetKernelObjectSecurity, SetSecurityDescriptorDacl,
+            TOKEN_ADJUST_PRIVILEGES,
         };
         use windows_sys::Win32::System::Threading::{
-            CREATE_NO_WINDOW, OpenProcess, PROCESS_SYNCHRONIZE,
+            CREATE_NO_WINDOW, GetCurrentThread, OpenProcess, OpenThreadToken, PROCESS_SYNCHRONIZE,
         };
 
         struct Fixture(Child);
@@ -166,6 +167,14 @@ mod tests {
             fn drop(&mut self) {
                 let _ = self.0.kill();
                 let _ = self.0.wait();
+            }
+        }
+        struct Impersonation;
+        impl Drop for Impersonation {
+            fn drop(&mut self) {
+                unsafe {
+                    RevertToSelf();
+                }
             }
         }
         let child = Fixture(
@@ -202,8 +211,38 @@ mod tests {
                 ),
                 0
             );
-            assert!(OpenProcess(PROCESS_SYNCHRONIZE, 0, child.0.id()).is_null());
-            assert_eq!(GetLastError(), ERROR_ACCESS_DENIED);
+        }
+        // SeDebugPrivilege can bypass the DACL on elevated CI runners. Use
+        // a thread token so other tests keep their process-token privileges.
+        unsafe {
+            assert_ne!(ImpersonateSelf(SecurityImpersonation), 0);
+        }
+        let _impersonation = Impersonation;
+        unsafe {
+            let mut token = std::ptr::null_mut();
+            assert_ne!(
+                OpenThreadToken(GetCurrentThread(), TOKEN_ADJUST_PRIVILEGES, 1, &mut token),
+                0
+            );
+            let token = OwnedHandle::from_raw_handle(token);
+            assert_ne!(
+                AdjustTokenPrivileges(
+                    token.as_raw_handle(),
+                    1,
+                    std::ptr::null(),
+                    0,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                ),
+                0
+            );
+            let observation = OpenProcess(PROCESS_SYNCHRONIZE, 0, child.0.id());
+            let error = GetLastError();
+            if !observation.is_null() {
+                CloseHandle(observation);
+            }
+            assert!(observation.is_null());
+            assert_eq!(error, ERROR_ACCESS_DENIED);
         }
         assert!(
             process_alive(child.0.id()),
