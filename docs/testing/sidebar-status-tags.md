@@ -1,19 +1,22 @@
 # Compact sidebar status acceptance
 
-## Lowercase capsules, 2026-10-09
+## Lowercase tags, 2026-10-09
 
-The current revision uses `idle`, `run`, `input`, and `done` capsules with full
-rounding, semibold text, a 24% state-colour fill, and a thin outline. Light
-appearance uses deeper text in the same hue. Width measurement includes the
-semibold glyphs, padding, and outline.
+The current revision uses `idle`, `run`, `input`, and `done` tags with the
+original 4 px corner radius and 5 px horizontal padding. Semibold text and a
+24% state-colour fill give the tags more depth. Light appearance uses deeper
+text in the same hue. Width measurement includes the semibold glyphs and
+padding.
 
-![Native lowercase capsule acceptance crops](images/sidebar-status-capsules-native.webp)
+![Native lowercase tag acceptance crops](images/sidebar-status-lowercase-native.webp)
 
 These Windows captures came from the local 0.2.1 debug build, using separate
 light and dark configurations and sample hook events. The sidebar crops are
 enlarged 2x; captions sit outside the application pixels. Both appearances show
-all four capsules at the minimum 180 logical-pixel width, alongside an elided
-long branch and intact `+12` / `−10` counts. The ordinary shell has no capsule.
+all four tags at the minimum 180 logical-pixel width, alongside an elided
+long branch and intact `+12` / `−10` counts. The ordinary shell has no tag.
+Agent avatars are bundled SVG assets; the fixture hooks select their identity
+and status without running those agent applications.
 
 `cargo fmt --all -- --check`, `cargo test --locked --workspace`, and
 `cargo build --locked --workspace --features gpui/test-support` passed. The

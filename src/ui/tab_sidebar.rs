@@ -55,9 +55,7 @@ mod row_metrics {
     /// Status tags use smaller type than the metadata, at semibold weight.
     pub(super) const STATUS_REM: f32 = 0.6875;
     /// Horizontal padding on each side of the status tag.
-    pub(super) const STATUS_PAD: f32 = 6.;
-    /// The one-pixel outline on each side of the capsule.
-    pub(super) const STATUS_BORDER: f32 = 1.;
+    pub(super) const STATUS_PAD: f32 = 5.;
 
     /// What a row can spend on text, before the badge is taken out.
     pub(super) const fn text_budget(width: f32) -> f32 {
@@ -329,7 +327,7 @@ impl Tty7App {
                 let status_size = row_metrics::STATUS_REM * rem;
                 let status_w = status_tag.map_or(0., |(tag, _)| {
                     measure_text(&window.text_system(), &status_font, status_size, tag)
-                        + 2. * (row_metrics::STATUS_PAD + row_metrics::STATUS_BORDER)
+                        + 2. * row_metrics::STATUS_PAD
                         + 0.375 * rem // The following gap_1p5 scales with the UI font size.
                 });
                 let status_lead = || {
@@ -347,9 +345,7 @@ impl Tty7App {
                             .line_height(gpui::relative(1.2))
                             .px(px(row_metrics::STATUS_PAD))
                             .py(px(1.))
-                            .rounded_full()
-                            .border_1()
-                            .border_color(colour.opacity(0.45))
+                            .rounded(px(4.))
                             .text_color(ink)
                             .bg(colour.opacity(0.24))
                             .child(tag)
