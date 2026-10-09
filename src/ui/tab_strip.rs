@@ -1262,7 +1262,12 @@ impl Tty7App {
         }
         let (raw, home) = tab.leaf_title_and_home(window, cx);
         let raw = raw.trim();
-        if raw.is_empty() || raw == self.tab_label(tab, index, window, cx) {
+        if raw.is_empty() {
+            let remote = tab.remote_context(window, cx);
+            let target = title_or_ssh_target(raw, remote.as_ref()).trim();
+            return (!target.is_empty()).then(|| SharedString::from(target.to_owned()));
+        }
+        if raw == self.tab_label(tab, index, window, cx) {
             return None;
         }
         Some(SharedString::from(

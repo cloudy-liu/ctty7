@@ -9917,8 +9917,13 @@ mod ssh_tab_gpui_tests {
                 app.tab_label(&app.tabs[0], 0, None, cx),
                 "deploy@2001:db8::1"
             );
+            assert_eq!(
+                app.tab_title_tooltip(&app.tabs[0], 0, None, cx).as_deref(),
+                Some("deploy@2001:db8::1")
+            );
             app.tabs[0].name = Some("My deployment".into());
             assert_eq!(app.tab_label(&app.tabs[0], 0, None, cx), "My deployment");
+            assert!(app.tab_title_tooltip(&app.tabs[0], 0, None, cx).is_none());
             // An inactive split must use its remembered leaf, rather than
             // borrowing the first pane's connection or agent.
             app.tabs[0].last_focused = Some(local.entity_id());
