@@ -27,6 +27,22 @@ pub fn remove() {
     }
 }
 
+/// Called with the singleton seat locked, so a replacement daemon cannot
+/// publish its pidfile between this identity check and the removal.
+#[cfg(unix)]
+pub(super) fn remove_if_matches(expected_pid: u32) -> std::io::Result<()> {
+    let Some(path) = path() else { return Ok(()) };
+    let contents = match std::fs::read_to_string(&path) {
+        Ok(contents) => contents,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(e) => return Err(e),
+    };
+    if contents.trim().parse::<u32>().ok() == Some(expected_pid) {
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
