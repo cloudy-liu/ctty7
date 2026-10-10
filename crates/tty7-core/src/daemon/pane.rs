@@ -2935,8 +2935,13 @@ fn apply_agent_signals(
 
         // A new session must start explicitly before it can replace a known
         // owner. Delayed status hooks from the previous session cannot take
-        // its identity or conversation id back.
-        if event.kind != AgentEventKind::SessionStart && !same_session {
+        // its identity or conversation id back. A legacy hook that lost its
+        // payload cannot establish a replacement session without its id.
+        let starts_session =
+            event.kind == AgentEventKind::SessionStart && event.session_id.is_some();
+        if (event.kind != AgentEventKind::SessionStart && !same_session)
+            || (st.agent.is_some() && !same_agent && !starts_session)
+        {
             continue;
         }
 
@@ -6408,6 +6413,53 @@ mod tests {
             rx.try_iter()
                 .all(|message| !matches!(message, DaemonMsg::Agent(Some(CLIAgent::Claude)))),
             "subscribers must never receive a Claude identity"
+        );
+    }
+
+    #[test]
+    fn cursor_foreign_status_hooks_cannot_flicker_identity_or_reset_the_session() {
+        use crate::core::agent_hooks::build_hook_sequence;
+        use crate::core::cli_agent::{AgentStatus, CLIAgent};
+
+        let mut state = test_state(true);
+        let mut sniffer = OscSniffer::new();
+        apply_agent(&mut state, Some((CLIAgent::Cursor, Vec::new())));
+        let input = r#"{"session_id":"cursor-session","cursor_version":"2026.10.01-e373342"}"#;
+        apply_signals(
+            &mut state,
+            sniffer.feed(&build_hook_sequence("claude", "prompt-submit", input)),
+        );
+        let session = state.agent_session.clone().unwrap();
+        assert_eq!(session.status, AgentStatus::Working);
+        let (tx, rx) = mpsc::channel();
+        state.subscriber = Some(tx);
+
+        // Captured from the live Cursor pane: the older PATH-resolved hook
+        // runner emits Claude with no session id when its input is rejected.
+        // Exercise hooks between process probes, where the UI sees the change.
+        for event in [
+            "session-start",
+            "tool-complete",
+            "prompt-submit",
+            "stop",
+            "notification",
+        ] {
+            let sequence = format!(
+                "\x1b]777;notify;tty7://cli-agent;{{\"v\":1,\"agent\":\"claude\",\"event\":\"{event}\"}}\x07"
+            );
+            apply_signals(&mut state, sniffer.feed(sequence.as_bytes()));
+            assert_eq!(state.agent, Some(CLIAgent::Cursor), "foreign {event}");
+            assert_eq!(
+                state.agent_session,
+                Some(session.clone()),
+                "foreign {event}"
+            );
+            apply_agent(&mut state, Some((CLIAgent::Cursor, Vec::new())));
+            assert_eq!(state.agent_session, Some(session.clone()), "process probe");
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "foreign hooks must not notify the UI"
         );
     }
 
