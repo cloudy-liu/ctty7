@@ -4,7 +4,8 @@ use crate::core::markdown_theme::{Color, Theme};
 use crate::ui::i18n::{L10nKey, t};
 use gpui::{
     App, AvailableSpace, Context, ImageSource, MouseButton, ObjectFit, Pixels, Point, Render,
-    SharedString, StyledImage as _, Window, canvas, div, img, point, prelude::*, px,
+    ScrollDelta, ScrollWheelEvent, SharedString, StyledImage as _, Window, canvas, div, img, point,
+    prelude::*, px,
 };
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, WindowExt as _,
@@ -57,6 +58,7 @@ pub(super) struct DiagramViewer {
     zoom: f32,
     pan: Point<Pixels>,
     width: Pixels,
+    image_width: Pixels,
     natural_width: Pixels,
     height: Pixels,
     drag: Option<Point<Pixels>>,
@@ -72,18 +74,22 @@ impl DiagramViewer {
             zoom: 1.,
             pan: point(px(0.), px(0.)),
             width: px(0.),
+            image_width: px(0.),
             natural_width: px(0.),
             height: px(0.),
             drag: None,
         }
     }
 
-    fn pan_by(&mut self, delta: Point<Pixels>) {
+    fn pan_by(&mut self, delta: Point<Pixels>) -> bool {
+        let old = self.pan;
+        let max_x = (self.image_width * (self.zoom - 1.) / 2.).max(px(0.));
+        let max_y = (self.height * (self.zoom - 1.) / 2.).max(px(0.));
         self.pan = point(
-            (self.pan.x + delta.x).clamp(-self.width * self.zoom / 2., self.width * self.zoom / 2.),
-            (self.pan.y + delta.y)
-                .clamp(-self.height * self.zoom / 2., self.height * self.zoom / 2.),
+            (self.pan.x + delta.x).clamp(-max_x, max_x),
+            (self.pan.y + delta.y).clamp(-max_y, max_y),
         );
+        self.pan != old
     }
 
     fn control(id: &'static str, icon: impl Into<Icon>, label: &'static str, cx: &App) -> Button {
@@ -121,6 +127,7 @@ impl Render for DiagramViewer {
         } else {
             available
         };
+        self.image_width = image_width;
         self.height = if self.expanded {
             window.viewport_size().height * 0.65
         } else {
@@ -267,6 +274,16 @@ impl Render for DiagramViewer {
                 MouseButton::Left,
                 cx.listener(|this, _, _, _| this.drag = None),
             )
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
+                let delta = match event.delta {
+                    ScrollDelta::Pixels(delta) => delta,
+                    ScrollDelta::Lines(delta) => point(px(delta.x * 20.), px(delta.y * 20.)),
+                };
+                if this.pan_by(delta) {
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            }))
             .child(
                 div()
                     .id("diagram-content")
@@ -459,6 +476,20 @@ fn color_to_hex(color: &Color) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expanded_viewer_pan_reaches_the_bottom_of_a_zoomed_diagram() {
+        let mut viewer = DiagramViewer::new("diagram.svg".into(), "".into(), 2., true);
+        viewer.image_width = px(600.);
+        viewer.height = px(400.);
+        viewer.zoom = 4.;
+
+        viewer.pan_by(point(px(0.), px(-10_000.)));
+
+        let top = viewer.pan.y + viewer.height * (1. - viewer.zoom) / 2.;
+        let bottom = top + viewer.height * viewer.zoom;
+        assert_eq!(bottom, viewer.height);
+    }
 
     #[test]
     fn builtin_mermaid_matches_live_github_canvas_padding() {
