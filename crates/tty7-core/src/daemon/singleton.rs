@@ -192,42 +192,85 @@ pub fn holder_pid() -> Option<u32> {
     contents.trim().parse::<u32>().ok().filter(|&pid| pid > 1)
 }
 
-/// Truncates the recorded pid — only when nobody holds the seat.
+/// Clears a reaped daemon's records while holding its released seat.
 ///
 /// For the reap, after it confirms the recorded process is gone: the content
 /// would otherwise keep naming the dead holder forever, and a later
 /// pre-recording build holding the seat over it would make that number — by
 /// then possibly reused for an unrelated process — read as the holder. A
-/// claim that lands before this does wins the flock, and the truncation is
-/// skipped rather than erasing the new holder's record.
+/// claim that lands before this does wins the flock. A changed record belongs
+/// to its successor and must survive, even if that successor has since exited.
+/// A forked descriptor can briefly retain the old flock after the daemon exits;
+/// retry that case until `deadline`, without waiting on a different holder.
 ///
 /// Like [`holder_pid`]'s probe, this holds the lock for a moment, so a claim
 /// colliding with it is told `Taken` — accepted for the same reason: every
 /// caller is a reap that has just confirmed the seat's holder dead, and a
 /// spawn follows on each of those paths.
 #[cfg(unix)]
-pub fn clear_record_if_free() {
+pub fn clear_records_if_free(
+    expected_pid: u32,
+    deadline: std::time::Instant,
+) -> std::io::Result<bool> {
+    use std::io::Read as _;
     use std::os::unix::io::AsRawFd as _;
 
-    let Some(path) = lock_path() else { return };
-    let Ok(file) = File::options().write(true).open(&path) else {
-        return;
+    let Some(path) = lock_path() else {
+        return Ok(false);
     };
+    let mut file = File::options()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(&path)?;
     loop {
         if unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_EX | libc::LOCK_NB) } == 0 {
-            let _ = file.set_len(0);
+            let result = (|| {
+                let mut contents = String::new();
+                file.read_to_string(&mut contents)?;
+                // A new daemon cannot write its pidfile while this seat is held.
+                // A legacy daemon may have left a matching pidfile alongside
+                // a different, older lock record. Remove only its own pidfile.
+                crate::daemon::pidfile::remove_if_matches(expected_pid)?;
+                if !contents.trim().is_empty()
+                    && contents.trim().parse::<u32>().ok() != Some(expected_pid)
+                {
+                    return Ok(false);
+                }
+                file.set_len(0)?;
+                Ok(true)
+            })();
             unsafe { libc::flock(file.as_raw_fd(), libc::LOCK_UN) };
-            return;
+            return result;
         }
-        match std::io::Error::last_os_error().raw_os_error() {
-            Some(libc::EINTR) => continue,
-            _ => return,
+        let error = std::io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(libc::EINTR) | Some(libc::EWOULDBLOCK) => {}
+            _ => return Err(error),
         }
+        // Read only to decide whether to stop waiting; mutations still require
+        // the exclusive lock and another identity check above.
+        if std::fs::read_to_string(&path)?.trim().parse::<u32>().ok() != Some(expected_pid) {
+            return Ok(false);
+        }
+        let Some(remaining) = deadline.checked_duration_since(std::time::Instant::now()) else {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::TimedOut,
+                "the reaped daemon's singleton lock is still held",
+            ));
+        };
+        std::thread::sleep(remaining.min(std::time::Duration::from_millis(10)));
     }
 }
 
 #[cfg(not(unix))]
-pub fn clear_record_if_free() {}
+pub fn clear_records_if_free(
+    _expected_pid: u32,
+    _deadline: std::time::Instant,
+) -> std::io::Result<bool> {
+    Ok(false)
+}
 
 #[cfg(not(unix))]
 pub fn holder_pid() -> Option<u32> {
@@ -447,27 +490,17 @@ mod tests {
             Claim::Held(s) => s,
             other => panic!("the claim must be granted, got {other:?}"),
         };
-        clear_record_if_free();
+        std::fs::write(&path, "42").unwrap();
+        let result = clear_records_if_free(42, std::time::Instant::now());
+        assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
         assert_eq!(
             std::fs::read_to_string(&path).unwrap().trim(),
-            std::process::id().to_string(),
+            "42",
             "a held seat's record must survive the clear"
         );
         drop(seat);
-        // A forked neighbour can keep the seat referenced briefly; keep
-        // asking until the clear lands.
-        let deadline = std::time::Instant::now() + PATIENCE;
-        loop {
-            clear_record_if_free();
-            if std::fs::read_to_string(&path).unwrap().is_empty() {
-                break;
-            }
-            assert!(
-                std::time::Instant::now() < deadline,
-                "a free seat's stale record must be cleared"
-            );
-            std::thread::sleep(std::time::Duration::from_millis(10));
-        }
+        assert!(clear_records_if_free(42, std::time::Instant::now() + PATIENCE).unwrap());
+        assert!(std::fs::read_to_string(&path).unwrap().is_empty());
     }
 
     #[test]
