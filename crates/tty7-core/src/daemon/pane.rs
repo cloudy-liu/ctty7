@@ -2960,8 +2960,13 @@ fn apply_agent_signals(
 
         // A new session must start explicitly before it can replace a known
         // owner. Delayed status hooks from the previous session cannot take
-        // its identity or conversation id back.
-        if event.kind != AgentEventKind::SessionStart && !same_session {
+        // its identity or conversation id back. A legacy hook that lost its
+        // payload cannot establish a replacement session without its id.
+        let starts_session =
+            event.kind == AgentEventKind::SessionStart && event.session_id.is_some();
+        if (event.kind != AgentEventKind::SessionStart && !same_session)
+            || (st.agent.is_some() && !same_agent && !starts_session)
+        {
             continue;
         }
 
@@ -6394,6 +6399,104 @@ mod tests {
     }
 
     #[test]
+    fn cursor_powershell_hook_payload_keeps_identity_through_process_probes() {
+        use crate::core::agent_hooks::build_hook_sequence;
+        use crate::core::cli_agent::{AgentStatus, CLIAgent};
+
+        let mut state = test_state(true);
+        let (tx, rx) = mpsc::channel();
+        state.subscriber = Some(tx);
+        let mut sniffer = OscSniffer::new();
+        apply_agent(&mut state, Some((CLIAgent::Cursor, Vec::new())));
+        for (native_event, hook_event, status) in [
+            ("sessionStart", "session-start", AgentStatus::Idle),
+            ("beforeSubmitPrompt", "prompt-submit", AgentStatus::Working),
+            ("postToolUse", "tool-complete", AgentStatus::Working),
+            ("stop", "stop", AgentStatus::Done),
+        ] {
+            // Windows PowerShell's UTF8 output encoding prefixes native stdin
+            // with a BOM when Cursor pipes its JSON to an imported Claude hook.
+            let input = format!(
+                "\u{feff}{}\r\n",
+                serde_json::json!({
+                    "session_id": "cursor-session",
+                    "cursor_version": "2026.10.01-e373342",
+                    "hook_event_name": native_event,
+                })
+            );
+            let sequence = build_hook_sequence("claude", hook_event, &input);
+            apply_signals(&mut state, sniffer.feed(&sequence));
+            assert_eq!(state.agent, Some(CLIAgent::Cursor), "{native_event}");
+            let session = state.agent_session.clone().expect("hook-owned session");
+            assert_eq!(session.session_id.as_deref(), Some("cursor-session"));
+            assert_eq!(session.status, status, "{native_event}");
+            apply_agent(&mut state, Some((CLIAgent::Cursor, Vec::new())));
+            assert_eq!(state.agent_session, Some(session));
+        }
+        let end = build_hook_sequence(
+            "claude",
+            "session-end",
+            "\u{feff}{\"session_id\":\"cursor-session\",\"cursor_version\":\"2026.10.01-e373342\",\"hook_event_name\":\"sessionEnd\"}\r\n",
+        );
+        apply_signals(&mut state, sniffer.feed(&end));
+        apply_agent(&mut state, Some((CLIAgent::Cursor, Vec::new())));
+        assert!(state.agent.is_none());
+        assert!(state.agent_session.is_none());
+        assert!(
+            rx.try_iter()
+                .all(|message| !matches!(message, DaemonMsg::Agent(Some(CLIAgent::Claude)))),
+            "subscribers must never receive a Claude identity"
+        );
+    }
+
+    #[test]
+    fn cursor_foreign_status_hooks_cannot_flicker_identity_or_reset_the_session() {
+        use crate::core::agent_hooks::build_hook_sequence;
+        use crate::core::cli_agent::{AgentStatus, CLIAgent};
+
+        let mut state = test_state(true);
+        let mut sniffer = OscSniffer::new();
+        apply_agent(&mut state, Some((CLIAgent::Cursor, Vec::new())));
+        let input = r#"{"session_id":"cursor-session","cursor_version":"2026.10.01-e373342"}"#;
+        apply_signals(
+            &mut state,
+            sniffer.feed(&build_hook_sequence("claude", "prompt-submit", input)),
+        );
+        let session = state.agent_session.clone().unwrap();
+        assert_eq!(session.status, AgentStatus::Working);
+        let (tx, rx) = mpsc::channel();
+        state.subscriber = Some(tx);
+
+        // Captured from the live Cursor pane: the older PATH-resolved hook
+        // runner emits Claude with no session id when its input is rejected.
+        // Exercise hooks between process probes, where the UI sees the change.
+        for event in [
+            "session-start",
+            "tool-complete",
+            "prompt-submit",
+            "stop",
+            "notification",
+        ] {
+            let sequence = format!(
+                "\x1b]777;notify;tty7://cli-agent;{{\"v\":1,\"agent\":\"claude\",\"event\":\"{event}\"}}\x07"
+            );
+            apply_signals(&mut state, sniffer.feed(sequence.as_bytes()));
+            assert_eq!(state.agent, Some(CLIAgent::Cursor), "foreign {event}");
+            assert_eq!(
+                state.agent_session,
+                Some(session.clone()),
+                "foreign {event}"
+            );
+            apply_agent(&mut state, Some((CLIAgent::Cursor, Vec::new())));
+            assert_eq!(state.agent_session, Some(session.clone()), "process probe");
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "foreign hooks must not notify the UI"
+        );
+    }
+
+    #[test]
     fn cursor_payload_detection_preserves_other_hook_callers() {
         use crate::core::agent_hooks::build_hook_sequence;
         use crate::core::cli_agent::{AgentStatus, CLIAgent};
@@ -6437,14 +6540,16 @@ mod tests {
                 CLIAgent::Cursor,
             ),
         ] {
-            let mut state = test_state(true);
-            let mut sniffer = OscSniffer::new();
-            let sequence = build_hook_sequence(agent, "prompt-submit", input);
-            apply_signals(&mut state, sniffer.feed(&sequence));
-            assert_eq!(state.agent, Some(expected), "{agent}: {input}");
-            let session = state.agent_session.as_ref().unwrap();
-            assert_eq!(session.session_id.as_deref(), Some("native-session"));
-            assert_eq!(session.status, AgentStatus::Working);
+            for input in [input.to_string(), format!("\u{feff}{input}\r\n")] {
+                let mut state = test_state(true);
+                let mut sniffer = OscSniffer::new();
+                let sequence = build_hook_sequence(agent, "prompt-submit", &input);
+                apply_signals(&mut state, sniffer.feed(&sequence));
+                assert_eq!(state.agent, Some(expected), "{agent}: {input}");
+                let session = state.agent_session.as_ref().unwrap();
+                assert_eq!(session.session_id.as_deref(), Some("native-session"));
+                assert_eq!(session.status, AgentStatus::Working);
+            }
         }
     }
 
