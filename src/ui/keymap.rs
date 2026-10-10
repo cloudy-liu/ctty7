@@ -120,8 +120,8 @@ fn paste_text_default() -> &'static str {
 }
 
 /// Windows and Linux paste with Ctrl+V everywhere else in the desktop, so the
-/// terminal answers it too — but only off the alternate screen, where the key
-/// is a control code a full-screen program is waiting for (#677). It is a
+/// terminal answers it too, including inside coding agents. Other programs on
+/// the alternate screen keep their control key (#677). It is a
 /// binding of its own rather than a second keystroke on `PasteText` so that it
 /// can carry that narrower context, and so that a user who wants the Windows
 /// Terminal behaviour back can say so: `"AlternatePaste": ""` hands Ctrl+V to
@@ -1028,10 +1028,9 @@ fn action_context(action: &str) -> Option<&'static str> {
     match action {
         "FindInTerminal" | "FindNext" | "FindPrevious" | "ClearScrollback" | "InsertNewline"
         | "CopyText" | "PasteText" => Some("Terminal"),
-        // `alt_screen` is declared by the pane whenever a full-screen program
-        // owns the grid, so this binding is simply absent there and Ctrl+V
-        // carries on to the PTY as SYN (#677).
-        "AlternatePaste" => Some("Terminal && !alt_screen"),
+        // Coding agents use the alternate screen too, but need terminal-side
+        // clipboard paste. Other full-screen programs retain Ctrl+V (#677).
+        "AlternatePaste" => Some("Terminal && (!alt_screen || agent)"),
         "ScmCommit" | "ScmCommitAmend" => Some("ScmCommit"),
         _ => None,
     }
@@ -1444,9 +1443,8 @@ mod tests {
                 "{key} is a terminal chord and must not paste outside one"
             );
         }
-        // Plain Ctrl+V is `AlternatePaste`, and only where no full-screen
-        // program is running: on the alternate screen the chord belongs to
-        // that program and reaches it as SYN.
+        // Plain Ctrl+V is `AlternatePaste` at prompts and in coding agents.
+        // Other programs on the alternate screen retain their control key.
         assert!(
             dispatched(&effective, "ctrl-v", "Terminal").contains(&AlternatePaste::name_for_type()),
             "ctrl-v pastes at a prompt off macOS"
@@ -1454,6 +1452,15 @@ mod tests {
         assert!(
             dispatched(&effective, "ctrl-v", "Terminal alt_screen").is_empty(),
             "a full-screen program owns ctrl-v"
+        );
+        assert!(
+            dispatched(&effective, "ctrl-v", "Terminal alt_screen agent")
+                .contains(&AlternatePaste::name_for_type()),
+            "ctrl-v must paste for a coding agent even on the alternate screen"
+        );
+        assert!(
+            dispatched(&effective, "alt-v", "Terminal alt_screen agent").is_empty(),
+            "alt-v belongs to the agent"
         );
         assert!(
             dispatched(&effective, "ctrl-shift-v", "Terminal alt_screen")
@@ -1471,9 +1478,17 @@ mod tests {
             dispatched(&retired, "ctrl-v", "Terminal").is_empty(),
             "an emptied AlternatePaste gives Ctrl+V back to the shell"
         );
+        assert!(
+            dispatched(&retired, "ctrl-v", "Terminal alt_screen agent").is_empty(),
+            "an emptied AlternatePaste also gives Ctrl+V back to agents"
+        );
         let mut everywhere = effective.clone();
         set_binding(&mut everywhere, "PasteText", "ctrl-v".to_string());
-        for context in ["Terminal", "Terminal alt_screen"] {
+        for context in [
+            "Terminal",
+            "Terminal alt_screen",
+            "Terminal alt_screen agent",
+        ] {
             assert!(
                 dispatched(&everywhere, "ctrl-v", context).contains(&PasteText::name_for_type()),
                 "a user may put Paste itself on Ctrl+V and have it on every screen"

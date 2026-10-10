@@ -2017,8 +2017,8 @@ impl TerminalView {
         }
 
         // Ctrl+V is not here: off macOS it is the `AlternatePaste` binding,
-        // which the keymap withholds on the alternate screen so a full-screen
-        // program gets its SYN, and which the user can retire outright. Copy
+        // which the keymap withholds for other full-screen programs so they
+        // get their control key, and which the user can retire outright. Copy
         // and cut stay, because both answer a selection this view owns and
         // fall through to the PTY when there is none.
         //
@@ -2642,33 +2642,29 @@ impl TerminalView {
 
     /// The keymap context this pane declares each frame.
     ///
-    /// `alt_screen` is how a binding steps aside for a full-screen program:
-    /// `AlternatePaste` carries `Terminal && !alt_screen`, so Ctrl+V pastes at
-    /// a prompt, reaches vim as SYN, and can still be handed the whole screen
-    /// by rebinding `PasteText` onto it (#677).
+    /// Ctrl+V pastes at shell prompts and in coding agents. Other programs on
+    /// `alt_screen` retain the control key, unless the user binds `PasteText`
+    /// onto it (#677).
     pub(super) fn key_context(&self) -> gpui::KeyContext {
         let mut context = gpui::KeyContext::new_with_defaults();
         context.add("Terminal");
         if self.on_alt_screen() {
             context.add("alt_screen");
         }
+        if self.agent().is_some() {
+            context.add("agent");
+        }
         context
     }
 
-    /// `AlternatePaste`, with the grid asked again before it pastes.
+    /// `AlternatePaste`, with the terminal state checked again before pasting.
     ///
-    /// The `!alt_screen` half of the binding's context comes from the frame
-    /// that was last *painted*, and gpui matches keystrokes against that frame
-    /// — so a program that took the alternate screen after the last paint is
-    /// still "at a prompt" as far as the keymap is concerned. One frame is
-    /// enough: the keystroke that launches a full-screen program and the
-    /// Ctrl+V after it can land either side of a paint. Pasting there is not a
-    /// mistake the user can take back — vim in normal mode runs the clipboard
-    /// as commands — so the last word belongs to the terminal mode, not to the
-    /// frame. Propagating hands the chord on to `on_key_down`, which encodes it
-    /// as the SYN the program is waiting for.
+    /// GPUI matches against the last painted frame. A program can enter the
+    /// alternate screen, or an agent can exit, before the next paint. Check
+    /// both states again so clipboard text cannot run as commands in vim.
+    /// Propagating hands the chord to `on_key_down` for control-key encoding.
     fn alternate_paste(&mut self, cx: &mut Context<Self>) {
-        if self.on_alt_screen() {
+        if self.on_alt_screen() && self.agent().is_none() {
             cx.propagate();
             return;
         }
@@ -14210,6 +14206,79 @@ mod native_history_gpui_tests {
 
     fn key(spec: &str) -> gpui::Keystroke {
         gpui::Keystroke::parse(spec).expect("valid keystroke spec")
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[gpui::test]
+    fn agent_ctrl_v_pastes_text_and_alt_v_reaches_the_agent(cx: &mut TestAppContext) {
+        use crate::core::cli_agent::CLIAgent;
+
+        for agent in CLIAgent::ALL.into_iter().map(Some).chain([None]) {
+            let (window, mut daemon) = harness(cx);
+            cx.update(|cx| crate::ui::keymap::init(cx));
+            cx.update(|cx| cx.write_to_clipboard(ClipboardItem::new_string("echo hi".into())));
+            DaemonMsg::Agent(agent).encode(&mut daemon).unwrap();
+            DaemonMsg::Output(b"\x1b[?9001h\x1b[?1049h\x1b[?2004h".to_vec())
+                .encode(&mut daemon)
+                .unwrap();
+            let mut ready = false;
+            for _ in 0..200 {
+                cx.run_until_parked();
+                ready = window
+                    .update(cx, |view, _, _| {
+                        view.agent() == agent
+                            && view.on_alt_screen()
+                            && view.terminal.win32_input_mode()
+                            && view
+                                .terminal
+                                .term
+                                .lock()
+                                .mode()
+                                .contains(TermMode::BRACKETED_PASTE)
+                    })
+                    .unwrap();
+                if ready {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(
+                ready,
+                "{agent:?} and its terminal modes must reach the view"
+            );
+            daemon
+                .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                .unwrap();
+            window
+                .update(cx, |view, window, cx| {
+                    assert!(view.on_alt_screen());
+                    window.activate_window();
+                    view.focus_handle.focus(window, cx);
+                })
+                .unwrap();
+
+            let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+            vcx.simulate_keystrokes("ctrl-v");
+            assert_eq!(
+                next_input(&mut daemon),
+                if agent.is_some() {
+                    b"\x1b[200~echo hi\x1b[201~".to_vec()
+                } else {
+                    vec![0x16]
+                },
+                "{agent:?}: Ctrl+V must paste for agents and remain a control key for other full-screen programs"
+            );
+
+            // Parsed shortcut specs omit key_char; native Alt+V includes it.
+            let mut alt_v = key("alt-v");
+            alt_v.key_char = Some("v".into());
+            vcx.simulate_event(KeyDownEvent {
+                keystroke: alt_v,
+                is_held: false,
+                prefer_character_input: false,
+            });
+            assert_eq!(next_input(&mut daemon), b"\x1bv".to_vec());
+        }
     }
 
     #[gpui::test]
