@@ -749,6 +749,7 @@ l10n_keys! {
     FileTreeContextNewFolder,
     FileTreeContextRename,
     FileTreeContextCopyPath,
+    FileTreeContextCopyName,
     FileTreeContextHideDotfiles,
     FileTreeContextShowDotfiles,
     FileDropIntoItself,
