@@ -1521,7 +1521,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::CmdCopy => "Copy",
         L10nKey::CmdCut => "Cut",
         L10nKey::CmdPaste => "Paste",
-        L10nKey::CmdAlternatePaste => "Paste (outside full-screen apps)",
+        L10nKey::CmdAlternatePaste => "Paste (shells and agents)",
         L10nKey::CmdSelectAll => "Select All",
         L10nKey::CmdSshAddConnection => "SSH: Add Connection…",
         L10nKey::CmdSshManageProfiles => "SSH: Manage Profiles…",

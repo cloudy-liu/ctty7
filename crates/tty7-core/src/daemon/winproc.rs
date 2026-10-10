@@ -92,6 +92,19 @@ fn detect_foreground_agent_with<F>(
 where
     F: Fn(u32) -> Option<std::path::PathBuf>,
 {
+    detect_agent_process_with(procs, shell_pid, image_path_for, custom)
+        .map(|(_, agent)| (agent, Vec::new()))
+}
+
+fn detect_agent_process_with<F>(
+    procs: &[Proc],
+    shell_pid: u32,
+    image_path_for: F,
+    custom: &std::collections::HashMap<String, String>,
+) -> Option<(u32, CLIAgent)>
+where
+    F: Fn(u32) -> Option<std::path::PathBuf>,
+{
     for (depth, pid, name) in walk(procs, shell_pid) {
         if depth > AGENT_SCAN_MAX_DEPTH {
             break;
@@ -113,10 +126,29 @@ where
             // ToolHelp does not expose the command line. An invented argv is
             // unsafe to replay for session resume (especially interpreter
             // wrappers), so this probe reports identity only.
-            return Some((agent, Vec::new()));
+            return Some((pid, agent));
         }
     }
     None
+}
+
+pub(crate) fn foreground_agent_input(
+    shell_pid: u32,
+    custom: &std::collections::HashMap<String, String>,
+) -> (Option<(CLIAgent, Vec<String>)>, bool) {
+    let procs = snapshot();
+    let Some((pid, agent)) = detect_agent_process_with(&procs, shell_pid, image_path, custom)
+    else {
+        return (None, false);
+    };
+    let input = console_input(pid);
+    let suspended = agent_input_suspended_with(&procs, pid, |child| {
+        let Some(input) = &input else { return false };
+        console_input(child).is_some_and(|child_input| unsafe {
+            windows_sys::Win32::Foundation::CompareObjectHandles(input.0, child_input.0) != 0
+        })
+    });
+    (Some((agent, Vec::new())), suspended)
 }
 
 pub(crate) fn foreground_agent(
@@ -124,6 +156,126 @@ pub(crate) fn foreground_agent(
     custom: &std::collections::HashMap<String, String>,
 ) -> Option<(CLIAgent, Vec<String>)> {
     detect_foreground_agent_with(&snapshot(), shell_pid, image_path, custom)
+}
+
+fn agent_input_suspended_with(
+    procs: &[Proc],
+    agent_pid: u32,
+    shares_input: impl Fn(u32) -> bool,
+) -> bool {
+    // MCP servers use pipes or a separate PTY. An external editor inherits
+    // this console's input, even when its launcher is several levels deep.
+    walk(procs, agent_pid)
+        .into_iter()
+        .any(|(_, pid, _)| shares_input(pid))
+}
+
+struct ConsoleInput(windows_sys::Win32::Foundation::HANDLE);
+
+impl Drop for ConsoleInput {
+    fn drop(&mut self) {
+        unsafe {
+            windows_sys::Win32::Foundation::CloseHandle(self.0);
+        }
+    }
+}
+
+fn console_input(pid: u32) -> Option<ConsoleInput> {
+    use windows_sys::Win32::Foundation::{CloseHandle, DUPLICATE_SAME_ACCESS, DuplicateHandle};
+    use windows_sys::Win32::System::Console::GetConsoleMode;
+    use windows_sys::Win32::System::Diagnostics::Debug::ReadProcessMemory;
+    use windows_sys::Win32::System::Threading::{
+        GetCurrentProcess, OpenProcess, PROCESS_DUP_HANDLE, PROCESS_QUERY_INFORMATION,
+        PROCESS_VM_READ,
+    };
+
+    #[repr(C)]
+    struct BasicInfo {
+        exit_status: usize,
+        peb: usize,
+        affinity: usize,
+        priority: usize,
+        pid: usize,
+        parent: usize,
+    }
+
+    unsafe {
+        let process = OpenProcess(
+            PROCESS_DUP_HANDLE | PROCESS_QUERY_INFORMATION | PROCESS_VM_READ,
+            0,
+            pid,
+        );
+        if process.is_null() {
+            return None;
+        }
+        let result = (|| {
+            let mut info: BasicInfo = std::mem::zeroed();
+            if NtQueryInformationProcess(
+                process,
+                0,
+                (&mut info as *mut BasicInfo).cast(),
+                size_of::<BasicInfo>() as u32,
+                std::ptr::null_mut(),
+            ) != 0
+            {
+                return None;
+            }
+            let mut peb32 = 0usize;
+            // ProcessWow64Information supplies the 32-bit PEB for an x86 child.
+            let status = NtQueryInformationProcess(
+                process,
+                26,
+                (&mut peb32 as *mut usize).cast(),
+                size_of::<usize>() as u32,
+                std::ptr::null_mut(),
+            );
+            if status != 0 {
+                return None;
+            }
+            let (peb, width) = if peb32 != 0 {
+                (peb32, 4)
+            } else {
+                (info.peb, size_of::<usize>())
+            };
+            let read_pointer = |address: usize| -> Option<usize> {
+                let mut bytes = [0u8; 8];
+                let mut read = 0usize;
+                if ReadProcessMemory(
+                    process,
+                    address as *const _,
+                    bytes.as_mut_ptr().cast(),
+                    width,
+                    &mut read,
+                ) == 0
+                    || read != width
+                {
+                    return None;
+                }
+                usize::try_from(u64::from_le_bytes(bytes)).ok()
+            };
+            // PEB.ProcessParameters and RTL_USER_PROCESS_PARAMETERS.StandardInput.
+            let params = read_pointer(peb.checked_add(if width == 4 { 0x10 } else { 0x20 })?)?;
+            let stdin = read_pointer(params.checked_add(if width == 4 { 0x18 } else { 0x20 })?)?;
+            let mut handle = std::ptr::null_mut();
+            if DuplicateHandle(
+                process,
+                stdin as *mut _,
+                GetCurrentProcess(),
+                &mut handle,
+                0,
+                0,
+                DUPLICATE_SAME_ACCESS,
+            ) == 0
+            {
+                return None;
+            }
+            let input = ConsoleInput(handle);
+            let mut mode = 0;
+            (GetConsoleMode(input.0, &mut mode) != 0).then_some(input)
+        })();
+        CloseHandle(process);
+        result
+    }
 }
 
 /// The OpenSSH client in this pane's process tree, if one is the hop the
@@ -917,6 +1069,32 @@ mod tests {
         assert_eq!(
             detected.as_ref().map(|(agent, _)| *agent),
             Some(CLIAgent::Codex)
+        );
+    }
+
+    #[test]
+    fn agent_input_ignores_piped_mcp_and_detects_nested_console_editor() {
+        let mut procs = vec![
+            p(100, 1, "cmd.exe"),
+            p(200, 100, "node.exe"),
+            p(300, 200, "codex.exe"),
+            p(400, 300, "node.exe"),
+            p(500, 400, "mcp.exe"),
+        ];
+        assert!(!agent_input_suspended_with(&procs, 300, |_| false));
+        procs.extend([
+            p(600, 300, "cmd.exe"),
+            p(700, 600, "cmd.exe"),
+            p(800, 700, "vim.exe"),
+        ]);
+        assert!(agent_input_suspended_with(&procs, 300, |pid| pid == 800));
+        // A child with a different console must not take this pane's keys.
+        assert!(!agent_input_suspended_with(&procs, 300, |pid| pid == 999));
+        procs.retain(|p| p.pid < 600);
+        assert!(!agent_input_suspended_with(&procs, 300, |pid| pid == 800));
+        assert_eq!(
+            detect_foreground_agent_with(&procs, 100, |_| None, &Default::default()),
+            Some((CLIAgent::Codex, Vec::new()))
         );
     }
 
