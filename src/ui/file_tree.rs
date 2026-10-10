@@ -1982,6 +1982,7 @@ impl Tty7App {
             .context_menu({
                 let app = cx.entity().downgrade();
                 let path = path.clone();
+                let name = row.entry.name.clone();
                 let is_root = row.is_root;
                 let show_hidden = self.file_tree.show_hidden;
                 let paths_are_local = self.spawn_host(cx).is_local();
@@ -1990,6 +1991,7 @@ impl Tty7App {
                     Self::tree_row_context_menu(
                         menu,
                         &path,
+                        &name,
                         is_dir,
                         is_root,
                         show_hidden,
@@ -2028,6 +2030,7 @@ impl Tty7App {
     fn tree_row_context_menu(
         menu: PopupMenu,
         path: &Path,
+        name: &str,
         is_dir: bool,
         is_root: bool,
         show_hidden: bool,
@@ -2153,6 +2156,14 @@ impl Tty7App {
                 };
                 move |_, _window, cx| {
                     cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
+                }
+            }),
+        );
+        menu = menu.item(
+            PopupMenuItem::new(t(L10nKey::FileTreeContextCopyName)).on_click({
+                let name = name.to_owned();
+                move |_, _window, cx| {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string(name.clone()));
                 }
             }),
         );
