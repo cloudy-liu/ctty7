@@ -20,6 +20,150 @@ use tty7_core::client::PaneClient;
 const READY_WITHIN: Duration = Duration::from_secs(30);
 const DEAD_WITHIN: Duration = Duration::from_secs(5);
 
+fn claim_recorded_seat(dir: &Path, pid: u32) -> tty7_core::daemon::singleton::Singleton {
+    use tty7_core::daemon::singleton::{self, Claim};
+
+    let deadline = Instant::now() + DEAD_WITHIN;
+    loop {
+        match singleton::claim() {
+            Claim::Held(seat) => {
+                std::fs::write(dir.join("daemon.lock"), pid.to_string()).unwrap();
+                std::fs::write(dir.join("daemon.pid"), pid.to_string()).unwrap();
+                return seat;
+            }
+            Claim::Taken if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            other => panic!("claim the test seat, got {other:?}"),
+        }
+    }
+}
+
+#[test]
+fn record_cleanup_waits_for_the_last_reference_to_the_old_seat() {
+    use std::os::fd::FromRawFd as _;
+    use std::sync::mpsc;
+    use tty7_core::daemon::singleton;
+
+    let _gate = serialized();
+    let dir = pinned_dir();
+    clear_stale_files(dir);
+    let seat = claim_recorded_seat(dir, 42);
+    let fd = unsafe { libc::dup(singleton::held_fd().unwrap()) };
+    assert!(fd >= 0, "duplicate the old seat reference");
+    let inherited = unsafe { std::fs::File::from_raw_fd(fd) };
+    drop(seat);
+
+    let (started_tx, started_rx) = mpsc::channel();
+    let (result_tx, result_rx) = mpsc::channel();
+    let cleanup = std::thread::spawn(move || {
+        started_tx.send(()).unwrap();
+        result_tx
+            .send(singleton::clear_records_if_free(
+                42,
+                Instant::now() + DEAD_WITHIN,
+            ))
+            .unwrap();
+    });
+    started_rx.recv_timeout(DEAD_WITHIN).unwrap();
+    let early = result_rx.recv_timeout(Duration::from_millis(50));
+    let waited = matches!(&early, Err(mpsc::RecvTimeoutError::Timeout));
+    drop(inherited);
+    let result = match early {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => result_rx.recv_timeout(DEAD_WITHIN).unwrap(),
+        Err(e) => panic!("cleanup thread disconnected: {e}"),
+    };
+    cleanup.join().unwrap();
+    assert!(
+        waited,
+        "cleanup must not finish while the old lock is retained"
+    );
+    assert!(result.unwrap(), "cleanup must wait for the retained lock");
+    assert!(
+        std::fs::read_to_string(dir.join("daemon.lock"))
+            .unwrap()
+            .is_empty()
+    );
+    assert!(!dir.join("daemon.pid").exists());
+}
+
+#[test]
+fn record_cleanup_preserves_a_successor_even_after_it_releases_the_seat() {
+    use tty7_core::daemon::singleton;
+
+    let _gate = serialized();
+    let dir = pinned_dir();
+    clear_stale_files(dir);
+    let successor = claim_recorded_seat(dir, 84);
+    assert!(!singleton::clear_records_if_free(42, Instant::now() + DEAD_WITHIN).unwrap());
+    drop(successor);
+    assert!(!singleton::clear_records_if_free(42, Instant::now() + DEAD_WITHIN).unwrap());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("daemon.lock")).unwrap(),
+        "84"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("daemon.pid")).unwrap(),
+        "84"
+    );
+}
+
+#[test]
+fn record_cleanup_times_out_without_discarding_the_old_records() {
+    use tty7_core::daemon::singleton;
+
+    let _gate = serialized();
+    let dir = pinned_dir();
+    clear_stale_files(dir);
+    let _seat = claim_recorded_seat(dir, 42);
+    let result = singleton::clear_records_if_free(42, Instant::now());
+    assert_eq!(result.unwrap_err().kind(), std::io::ErrorKind::TimedOut);
+    assert_eq!(
+        std::fs::read_to_string(dir.join("daemon.lock")).unwrap(),
+        "42"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.join("daemon.pid")).unwrap(),
+        "42"
+    );
+}
+
+#[test]
+fn record_cleanup_handles_a_legacy_pidfile_without_a_lock_file() {
+    use tty7_core::daemon::singleton;
+
+    let _gate = serialized();
+    let dir = pinned_dir();
+    clear_stale_files(dir);
+    let _ = std::fs::remove_file(dir.join("daemon.lock"));
+    std::fs::write(dir.join("daemon.pid"), "42").unwrap();
+    assert!(singleton::clear_records_if_free(42, Instant::now() + DEAD_WITHIN).unwrap());
+    assert!(!dir.join("daemon.pid").exists());
+    assert!(
+        std::fs::read_to_string(dir.join("daemon.lock"))
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn record_cleanup_removes_a_legacy_pidfile_without_erasing_another_lock_record() {
+    use tty7_core::daemon::singleton;
+
+    let _gate = serialized();
+    let dir = pinned_dir();
+    clear_stale_files(dir);
+    std::fs::write(dir.join("daemon.pid"), "42").unwrap();
+    std::fs::write(dir.join("daemon.lock"), "84").unwrap();
+    assert!(!singleton::clear_records_if_free(42, Instant::now() + DEAD_WITHIN).unwrap());
+    assert!(!dir.join("daemon.pid").exists());
+    assert_eq!(
+        std::fs::read_to_string(dir.join("daemon.lock")).unwrap(),
+        "84"
+    );
+}
+
 /// The one config dir every test here shares, pinned into `tty7_core` on
 /// first use. `set_config_dir` is first-wins for the whole process, so a
 /// per-test directory would silently leave later tests reaping in the first

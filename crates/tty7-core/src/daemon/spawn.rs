@@ -766,11 +766,11 @@ fn reap_recorded_daemon(recorded: Option<u32>) {
         return;
     };
     if pid <= 1 || pid == std::process::id() {
-        clear_daemon_records();
+        clear_daemon_records(pid);
         return;
     }
     if !process_alive(pid as libc::pid_t) {
-        clear_daemon_records();
+        clear_daemon_records(pid);
         return;
     }
     match process_identity(pid as libc::pid_t) {
@@ -796,16 +796,18 @@ fn reap_recorded_daemon(recorded: Option<u32>) {
             return;
         }
     }
-    clear_daemon_records();
+    clear_daemon_records(pid);
 }
 
 /// Clears both records of a daemon the reap has confirmed dealt with — the
 /// pidfile, and the pid in the lock file (which is only touched if the seat
-/// is actually free; see `clear_record_if_free`).
+/// is actually free; see `clear_records_if_free`).
 #[cfg(any(target_os = "macos", target_os = "linux"))]
-fn clear_daemon_records() {
-    pidfile::remove();
-    crate::daemon::singleton::clear_record_if_free();
+fn clear_daemon_records(pid: u32) {
+    let deadline = Instant::now() + REAP_KILL_TIMEOUT;
+    if let Err(e) = crate::daemon::singleton::clear_records_if_free(pid, deadline) {
+        log::warn!("could not clear reaped daemon {pid}'s records: {e}");
+    }
 }
 
 #[cfg(any(target_os = "macos", target_os = "linux"))]
