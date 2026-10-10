@@ -785,6 +785,53 @@ mod tests {
     }
 
     #[test]
+    fn codex_static_title_marks_a_draft_idle() {
+        // Codex keeps a static OSC title while a draft is being edited. Herdr
+        // uses that title as idle evidence; the spinner and approval rules
+        // above it still win when a turn is active.
+        let draft = "previous response\n────────────────\n› dd\n────────────────\n  GPT-6.1-Sol xhigh · D:\\gh-prj\\ctty7 · Fast on\n";
+        let reading = read(
+            CLIAgent::Codex,
+            &Input {
+                screen: draft,
+                osc_title: "OpenAI Codex (v0.162.1)",
+            },
+        )
+        .expect("the agent has a manifest");
+        assert_eq!(reading.state, ScreenState::Idle);
+        assert!(reading.visible_idle);
+    }
+
+    #[test]
+    fn codex_static_title_idle_yields_to_work_and_blocked_rules() {
+        let title = "OpenAI Codex (v0.162.1)";
+        assert_eq!(
+            read(
+                CLIAgent::Codex,
+                &Input {
+                    screen: "• Working (2s • esc to interrupt)\n› \n",
+                    osc_title: title,
+                },
+            )
+            .unwrap()
+            .state,
+            ScreenState::Working
+        );
+        assert_eq!(
+            read(
+                CLIAgent::Codex,
+                &Input {
+                    screen: "›\nallow command?\n",
+                    osc_title: title,
+                },
+            )
+            .unwrap()
+            .state,
+            ScreenState::Blocked
+        );
+    }
+
+    #[test]
     fn every_manifest_parses_and_compiles() {
         for agent in CLIAgent::ALL {
             if let Some(source) = manifest_source(agent) {
