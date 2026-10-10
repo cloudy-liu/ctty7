@@ -70,6 +70,7 @@ struct ReaderSignals {
     remote: Arc<Mutex<Option<RemoteContext>>>,
     agent: Arc<Mutex<Option<CLIAgent>>>,
     foreground_app: Arc<Mutex<Option<ForegroundApp>>>,
+    agent_input_suspended: Arc<AtomicBool>,
     agent_session: Arc<Mutex<Option<AgentSessionState>>>,
     exited: Arc<AtomicBool>,
     child_exited: Arc<AtomicBool>,
@@ -502,6 +503,7 @@ pub struct RemoteTerminal {
     auto_supplied_password: bool,
     agent: Arc<Mutex<Option<CLIAgent>>>,
     foreground_app: Arc<Mutex<Option<ForegroundApp>>>,
+    agent_input_suspended: Arc<AtomicBool>,
     agent_session: Arc<Mutex<Option<AgentSessionState>>>,
     /// Kitty-graphics images placed on this pane's grid (issue #213).
     /// Written by the reader thread from out-of-band `Image`/`DeleteImage`
@@ -781,6 +783,7 @@ impl RemoteTerminal {
     ) -> anyhow::Result<()> {
         self.stop_reader();
         while self.events.try_recv().is_ok() {}
+        self.agent_input_suspended.store(false, Ordering::SeqCst);
         if let Ok(mut app) = self.foreground_app.lock() {
             *app = None;
         }
@@ -816,6 +819,7 @@ impl RemoteTerminal {
                 remote: self.remote_context.clone(),
                 agent: self.agent.clone(),
                 foreground_app: self.foreground_app.clone(),
+                agent_input_suspended: self.agent_input_suspended.clone(),
                 agent_session: self.agent_session.clone(),
                 exited: self.exited_flag.clone(),
                 child_exited: self.child_exited.clone(),
@@ -869,6 +873,7 @@ impl RemoteTerminal {
         let remote_context: Arc<Mutex<Option<RemoteContext>>> = Arc::new(Mutex::new(None));
         let agent: Arc<Mutex<Option<CLIAgent>>> = Arc::new(Mutex::new(None));
         let foreground_app: Arc<Mutex<Option<ForegroundApp>>> = Arc::new(Mutex::new(None));
+        let agent_input_suspended = Arc::new(AtomicBool::new(false));
         let agent_session: Arc<Mutex<Option<AgentSessionState>>> = Arc::new(Mutex::new(None));
         let exited_flag = Arc::new(AtomicBool::new(false));
         let child_exited = Arc::new(AtomicBool::new(false));
@@ -895,6 +900,7 @@ impl RemoteTerminal {
                 remote: remote_context.clone(),
                 agent: agent.clone(),
                 foreground_app: foreground_app.clone(),
+                agent_input_suspended: agent_input_suspended.clone(),
                 agent_session: agent_session.clone(),
                 exited: exited_flag.clone(),
                 child_exited: child_exited.clone(),
@@ -938,6 +944,7 @@ impl RemoteTerminal {
             auto_supplied_password: false,
             agent,
             foreground_app,
+            agent_input_suspended,
             agent_session,
             images,
             turns,
@@ -1005,6 +1012,7 @@ impl RemoteTerminal {
                     remote,
                     agent,
                     foreground_app,
+                    agent_input_suspended,
                     agent_session,
                     exited: exited_flag,
                     child_exited,
@@ -1393,6 +1401,9 @@ impl RemoteTerminal {
                             }
                             DaemonMsg::Agent(a) => {
                                 flush_batch!();
+                                if a.is_none() {
+                                    agent_input_suspended.store(false, Ordering::SeqCst);
+                                }
                                 let clear_session = if let Ok(mut guard) = agent.lock() {
                                     let changed = a.is_none() || guard.is_some_and(|old| Some(old) != a);
                                     *guard = a;
@@ -1411,6 +1422,11 @@ impl RemoteTerminal {
                                     *guard = app;
                                     proxy.send_event(AlacEvent::Wakeup);
                                 }
+                            }
+                            DaemonMsg::AgentInputSuspended(suspended) => {
+                                flush_batch!();
+                                agent_input_suspended.store(suspended, Ordering::SeqCst);
+                                proxy.send_event(AlacEvent::Wakeup);
                             }
                             DaemonMsg::AgentStatus(mut state) => {
                                 flush_batch!();
@@ -1627,6 +1643,10 @@ impl RemoteTerminal {
 
     pub fn foreground_agent(&self) -> Option<CLIAgent> {
         self.agent.lock().ok().and_then(|g| *g)
+    }
+
+    pub fn agent_input_suspended(&self) -> bool {
+        self.agent_input_suspended.load(Ordering::SeqCst)
     }
 
     pub fn foreground_app(&self) -> Option<ForegroundApp> {
@@ -4925,6 +4945,35 @@ mod tests {
             .unwrap();
         daemon_side.flush().unwrap();
         assert!(poll(None));
+    }
+
+    #[test]
+    fn agent_input_suspension_follows_daemon_reports() {
+        let (client_side, mut daemon_side) = UnixStream::pair().unwrap();
+        let term = RemoteTerminal::from_stream(client_side, TermSize::new(80, 24)).unwrap();
+        assert!(!term.agent_input_suspended());
+        DaemonMsg::AgentInputSuspended(true)
+            .encode(&mut daemon_side)
+            .unwrap();
+        daemon_side.flush().unwrap();
+        for _ in 0..200 {
+            if term.agent_input_suspended() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(term.agent_input_suspended());
+        DaemonMsg::AgentInputSuspended(false)
+            .encode(&mut daemon_side)
+            .unwrap();
+        daemon_side.flush().unwrap();
+        for _ in 0..200 {
+            if !term.agent_input_suspended() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(!term.agent_input_suspended());
     }
 
     #[test]

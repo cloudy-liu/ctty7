@@ -737,6 +737,7 @@ struct PaneState {
     remote: Option<RemoteContext>,
     agent: Option<crate::core::cli_agent::CLIAgent>,
     foreground_app: Option<crate::core::foreground_app::ForegroundApp>,
+    agent_input_suspended: bool,
     agent_argv: Option<Vec<String>>,
     agent_session: Option<crate::core::cli_agent::AgentSessionState>,
     command_input: CommandInput,
@@ -1468,6 +1469,7 @@ impl DaemonPane {
                 remote: spawn.remote.clone(),
                 agent: None,
                 foreground_app: None,
+                agent_input_suspended: false,
                 agent_session: None,
                 agent_argv: None,
                 ended_agent: None,
@@ -1700,6 +1702,7 @@ impl DaemonPane {
                 remote: carried.remote,
                 agent: carried.agent,
                 foreground_app: carried.foreground_app,
+                agent_input_suspended: false,
                 agent_session: carried.agent_session,
                 agent_argv: carried.agent_argv,
                 ended_agent: carried.ended_agent,
@@ -1752,6 +1755,7 @@ impl DaemonPane {
             remote: Some(remote),
             agent: None,
             foreground_app: None,
+            agent_input_suspended: false,
             agent_session: None,
             agent_argv: None,
             ended_agent: None,
@@ -2377,8 +2381,9 @@ impl DaemonPane {
         death: Arc<DeathReporter>,
     ) {
         use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::Foundation::WAIT_TIMEOUT;
         use windows_sys::Win32::System::Threading::{
-            INFINITE, OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
+            OpenProcess, PROCESS_SYNCHRONIZE, WaitForSingleObject,
         };
 
         let Some(pid) = shell_pid else { return };
@@ -2400,8 +2405,24 @@ impl DaemonPane {
             .name("tty7-daemon-pane-exit-monitor".to_string())
             .spawn(move || {
                 let handle = handle as windows_sys::Win32::Foundation::HANDLE;
+                while unsafe {
+                    WaitForSingleObject(handle, REMOTE_CONTEXT_POLL_INTERVAL.as_millis() as u32)
+                } == WAIT_TIMEOUT
+                {
+                    if shutting_down.load(Ordering::SeqCst) || state.lock().unwrap().agent.is_none()
+                    {
+                        continue;
+                    }
+                    // An idle editor may emit no more output after taking or
+                    // returning console input. Refresh independently of reads.
+                    let (_, suspended) = crate::daemon::winproc::foreground_agent_input(
+                        pid,
+                        crate::core::config::agent_commands_cached(),
+                    );
+                    let mut st = state.lock().unwrap();
+                    apply_agent_input_suspended(&mut st, suspended);
+                }
                 unsafe {
-                    WaitForSingleObject(handle, INFINITE);
                     CloseHandle(handle);
                 }
                 drain_then_report(master, state, shutting_down, death, EXIT_DRAIN_WINDOW);
@@ -2701,6 +2722,9 @@ fn replay_state(st: &PaneState, subscriber: &Sender<DaemonMsg>) {
     if st.agent.is_some() {
         let _ = subscriber.send(DaemonMsg::Agent(st.agent));
     }
+    if st.agent_input_suspended {
+        let _ = subscriber.send(DaemonMsg::AgentInputSuspended(true));
+    }
     if st.foreground_app.is_some() {
         let _ = subscriber.send(DaemonMsg::ForegroundApp(st.foreground_app));
     }
@@ -2866,6 +2890,7 @@ fn apply_signals(st: &mut PaneState, signals: SniffSignals) -> (bool, bool) {
 }
 
 fn end_agent(st: &mut PaneState) {
+    apply_agent_input_suspended(st, false);
     if let Some(agent) = st.agent {
         let argv = st.agent_argv.take().or_else(|| {
             st.agent_session
@@ -3028,6 +3053,13 @@ fn apply_foreground_app(
         st.foreground_app = app;
         crate::core::machine::observe_pane(st.id, |record| record.foreground_app = app);
         notify(st, DaemonMsg::ForegroundApp(app));
+    }
+}
+
+fn apply_agent_input_suspended(st: &mut PaneState, suspended: bool) {
+    if st.agent_input_suspended != suspended {
+        st.agent_input_suspended = suspended;
+        notify(st, DaemonMsg::AgentInputSuspended(suspended));
     }
 }
 
@@ -5733,6 +5765,7 @@ mod tests {
             remote: None,
             agent: None,
             foreground_app: None,
+            agent_input_suspended: false,
             agent_session: None,
             agent_argv: None,
             ended_agent: None,
@@ -7240,6 +7273,28 @@ mod tests {
             replay.try_recv(),
             Ok(DaemonMsg::ForegroundApp(None))
         ));
+    }
+
+    #[test]
+    fn agent_input_suspension_replays_without_clearing_session() {
+        use crate::core::cli_agent::CLIAgent;
+        let mut st = test_state(true);
+        st.agent = Some(CLIAgent::Codex);
+        let (tx, rx) = std::sync::mpsc::channel();
+        st.subscriber = Some(tx);
+        apply_agent_input_suspended(&mut st, true);
+        assert_eq!(rx.try_recv().unwrap(), DaemonMsg::AgentInputSuspended(true));
+        apply_agent_input_suspended(&mut st, true);
+        assert!(rx.try_recv().is_err());
+        assert_eq!(st.agent, Some(CLIAgent::Codex));
+        let (tx, rx) = std::sync::mpsc::channel();
+        replay_state(&st, &tx);
+        assert!(
+            rx.try_iter()
+                .any(|m| m == DaemonMsg::AgentInputSuspended(true))
+        );
+        apply_agent_input_suspended(&mut st, false);
+        assert_eq!(st.agent, Some(CLIAgent::Codex));
     }
 
     #[test]

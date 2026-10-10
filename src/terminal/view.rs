@@ -1562,6 +1562,11 @@ impl TerminalView {
         self.terminal.foreground_agent()
     }
 
+    fn input_agent(&self) -> Option<crate::core::cli_agent::CLIAgent> {
+        self.agent()
+            .filter(|_| !self.terminal.agent_input_suspended())
+    }
+
     pub(crate) fn foreground_app(&self) -> Option<crate::core::foreground_app::ForegroundApp> {
         self.terminal.foreground_app().or_else(|| {
             crate::core::foreground_app::ForegroundApp::from_command_mark(
@@ -2642,7 +2647,8 @@ impl TerminalView {
 
     /// The keymap context this pane declares each frame.
     ///
-    /// Ctrl+V pastes at shell prompts and in coding agents. Other programs on
+    /// Ctrl+V pastes at shell prompts and while coding agents own input.
+    /// Other programs on
     /// `alt_screen` retain the control key, unless the user binds `PasteText`
     /// onto it (#677).
     pub(super) fn key_context(&self) -> gpui::KeyContext {
@@ -2651,7 +2657,7 @@ impl TerminalView {
         if self.on_alt_screen() {
             context.add("alt_screen");
         }
-        if self.agent().is_some() {
+        if self.input_agent().is_some() {
             context.add("agent");
         }
         context
@@ -2661,10 +2667,11 @@ impl TerminalView {
     ///
     /// GPUI matches against the last painted frame. A program can enter the
     /// alternate screen, or an agent can exit, before the next paint. Check
-    /// both states again so clipboard text cannot run as commands in vim.
+    /// both states and input ownership again so clipboard text cannot run as
+    /// commands in vim.
     /// Propagating hands the chord to `on_key_down` for control-key encoding.
     fn alternate_paste(&mut self, cx: &mut Context<Self>) {
-        if self.on_alt_screen() && self.agent().is_none() {
+        if self.on_alt_screen() && self.input_agent().is_none() {
             cx.propagate();
             return;
         }
@@ -2673,7 +2680,7 @@ impl TerminalView {
 
     pub(super) fn key_flags(&self) -> super::input::KeyFlags {
         let win32_input = self.terminal.win32_input_mode()
-            && self.agent() == Some(crate::core::cli_agent::CLIAgent::Codex);
+            && self.input_agent() == Some(crate::core::cli_agent::CLIAgent::Codex);
         super::input::KeyFlags::from_mode(self.terminal.term.lock().mode())
             .with_win32_input(win32_input)
     }
@@ -14278,6 +14285,50 @@ mod native_history_gpui_tests {
                 prefer_character_input: false,
             });
             assert_eq!(next_input(&mut daemon), b"\x1bv".to_vec());
+
+            for suspended in [true, false] {
+                DaemonMsg::AgentInputSuspended(suspended)
+                    .encode(&mut daemon)
+                    .unwrap();
+                let mut ready = false;
+                for _ in 0..200 {
+                    vcx.run_until_parked();
+                    ready = window
+                        .update(&mut vcx, |view, _, _| {
+                            view.terminal.agent_input_suspended() == suspended
+                        })
+                        .unwrap();
+                    if ready {
+                        break;
+                    }
+                    std::thread::sleep(std::time::Duration::from_millis(5));
+                }
+                assert!(ready);
+                vcx.update(|window, _| window.refresh());
+                vcx.run_until_parked();
+                vcx.simulate_keystrokes("ctrl-v");
+                assert_eq!(
+                    next_input(&mut daemon),
+                    if agent.is_some() && !suspended {
+                        b"\x1b[200~echo hi\x1b[201~".to_vec()
+                    } else {
+                        vec![0x16]
+                    },
+                    "{agent:?}: an external editor owns Ctrl+V until it exits"
+                );
+                window
+                    .update(&mut vcx, |view, _, _| {
+                        assert_eq!(
+                            view.agent(),
+                            agent,
+                            "input ownership must preserve identity"
+                        );
+                        if suspended {
+                            assert!(!view.key_flags().win32_input());
+                        }
+                    })
+                    .unwrap();
+            }
         }
     }
 
