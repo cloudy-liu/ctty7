@@ -9,7 +9,6 @@ use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
-use tty7_core::daemon::install::AssetFetcher as _;
 use tty7_core::daemon::install::asset::{CHECKSUMS_ASSET, download_url};
 
 use crate::core::config::Config;
@@ -260,7 +259,7 @@ fn hydrate_from_disk(cx: &mut App) {
         let stage = pending.stage.clone();
         state.pending = None;
         state.save();
-        let _ = std::fs::remove_dir_all(stage);
+        let _ = super::update_stage::remove_stage(&stage);
     }
     let (ready, failure) = (state.pending.clone(), state.last_failure.clone());
     update_status(cx, |status| {
@@ -548,8 +547,8 @@ fn remind_later() {
     state.save();
 }
 
-/// Abandons the transfer. The staging directory is removed by the download
-/// thread as it unwinds, so nothing is left to collect.
+/// Abandons the transfer. Its worker cleans staging after its commands stop;
+/// unconfirmed termination retains a recovery record and the staged files.
 pub fn cancel_download(cx: &mut App) {
     DOWNLOAD_GENERATION.fetch_add(1, Ordering::Relaxed);
     DOWNLOAD_CANCELLED.store(true, Ordering::Relaxed);
@@ -637,7 +636,7 @@ fn arm_pending(mut pending: PendingUpdate, cx: &mut App) {
 pub fn discard_pending(cx: &mut App) {
     let mut state = UpdateState::load();
     if let Some(pending) = state.pending.take() {
-        let _ = std::fs::remove_dir_all(&pending.stage);
+        let _ = super::update_stage::remove_stage(&pending.stage);
     }
     state.save();
     update_status(cx, |status| status.ready = None);
@@ -701,7 +700,7 @@ fn spawn_download(update: AvailableUpdate, cx: &mut App) {
         // Obsolete work may clean up its own staging directory, nothing else.
         if DOWNLOAD_GENERATION.load(Ordering::Relaxed) != generation {
             if let Ok(prepared) = result {
-                let _ = std::fs::remove_dir_all(&prepared.stage);
+                let _ = super::update_stage::remove_stage(&prepared.stage);
             }
             return;
         }
@@ -953,7 +952,7 @@ pub fn apply_pending_at_launch() -> bool {
         );
         state.pending = None;
         state.save();
-        let _ = std::fs::remove_dir_all(&pending.stage);
+        let _ = super::update_stage::remove_stage(&pending.stage);
         return false;
     }
 
@@ -1086,32 +1085,36 @@ pub fn absorb_update_outcome_at_launch() {
 /// normally /Applications, and a hidden 30 MB directory there is one nobody
 /// finds on purpose. The live plan's own directory is kept however old it is.
 fn sweep_orphaned_stages(keep: Option<PathBuf>) {
+    let cutoff = std::time::SystemTime::now() - STAGE_TTL;
     for root in stage_roots() {
-        let Ok(entries) = std::fs::read_dir(&root) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if keep.as_deref() == Some(path.as_path()) {
-                continue;
-            }
-            if !path
+        sweep_stage_root(&root, keep.as_deref(), cutoff);
+    }
+}
+
+fn sweep_stage_root(root: &Path, keep: Option<&Path>, cutoff: std::time::SystemTime) {
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if keep == Some(path.as_path())
+            || !path
                 .file_name()
                 .and_then(|name| name.to_str())
                 .is_some_and(is_stage_name)
-            {
-                continue;
-            }
-            let expired = entry
-                .metadata()
-                .and_then(|meta| meta.modified())
-                .ok()
-                .and_then(|modified| modified.elapsed().ok())
-                .is_some_and(|age| age > STAGE_TTL);
-            if expired {
-                log::info!("removing orphaned update staging at {}", path.display());
-                let _ = std::fs::remove_dir_all(&path);
-            }
+            || !entry
+                .file_type()
+                .is_ok_and(|kind| kind.is_dir() && !kind.is_symlink())
+        {
+            continue;
+        }
+        let expired = entry
+            .metadata()
+            .and_then(|meta| meta.modified())
+            .is_ok_and(|modified| modified < cutoff);
+        if expired && !super::update_stage::needs_recovery(&path) {
+            log::info!("removing orphaned update staging at {}", path.display());
+            let _ = super::update_stage::remove_stage(&path);
         }
     }
 }
@@ -1468,6 +1471,8 @@ impl PendingUpdate {
             .arg(&parts.log)
             .arg("--expected-version")
             .arg(&parts.version)
+            .arg("--stage-dir")
+            .arg(&parts.stage)
             // So the watcher can tell a GUI that is quitting from one that
             // stayed: a declined prompt leaves this process on screen, and
             // the relaunch it would otherwise perform on its own timeout
@@ -1988,7 +1993,7 @@ fn updater_speaks_elevation(install_dir: &Path) -> bool {
         .arg("capabilities")
         .stdin(Stdio::null())
         .stderr(Stdio::null());
-    let output = tty7_core::core::proc::hide_console(&mut command).output();
+    let output = super::update_process::run(&mut command, Duration::from_secs(5), &|| false);
     let Ok(output) = output else { return false };
     output.status.success() && capabilities_cover_elevation(&output.stdout)
 }
@@ -2014,29 +2019,37 @@ fn prepare_update(
 ) -> Result<PreparedUpdate> {
     // Runs off the main thread, so the `Config` global is out of reach.
     let cfg = Config::load();
-    let fetcher =
-        tty7_core::daemon::install::download::HttpsFetcher::new(cfg.http_proxy.as_deref());
-    // Fetched without progress: a few hundred bytes next to a 30 MB package.
-    let checksums = fetcher
-        .get(&asset.checksums_url)
-        .map_err(anyhow::Error::msg)
-        .context("downloading checksums.txt")?;
-    let archive = fetcher
-        .get_cancellable(&asset.url, on_progress)
-        .map_err(anyhow::Error::msg)
-        .with_context(|| format!("downloading {}", asset.name))?;
+    let (checksums, archive) = super::update_download::fetch(
+        cfg.http_proxy.as_deref(),
+        &asset.checksums_url,
+        &asset.url,
+        on_progress,
+    )?;
+    let cancelled = || {
+        on_progress(
+            progress.received.load(Ordering::Relaxed),
+            match progress.total.load(Ordering::Relaxed) {
+                0 => None,
+                total => Some(total),
+            },
+        )
+        .is_break()
+    };
+    if cancelled() {
+        anyhow::bail!(tty7_core::daemon::install::download::CANCELLED);
+    }
     progress.verifying.store(true, Ordering::Relaxed);
     #[cfg(target_os = "macos")]
     {
-        return prepare_macos_update(version, &asset.name, &archive, &checksums);
+        return prepare_macos_update(version, &asset.name, &archive, &checksums, &cancelled);
     }
     #[cfg(target_os = "windows")]
     {
-        return prepare_windows_update(version, &asset.name, &archive, &checksums);
+        return prepare_windows_update(version, &asset.name, &archive, &checksums, &cancelled);
     }
     #[cfg(target_os = "linux")]
     {
-        return prepare_linux_update(version, &asset.name, &archive, &checksums);
+        return prepare_linux_update(version, &asset.name, &archive, &checksums, &cancelled);
     }
     #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
     anyhow::bail!("automatic installation is not supported on this platform")
@@ -2104,7 +2117,7 @@ impl PreparedUpdate {
             .stderr(Stdio::null())
             .spawn()
             .inspect_err(|_| {
-                let _ = std::fs::remove_dir_all(&self.stage);
+                let _ = super::update_stage::remove_stage(&self.stage);
             })
             .context("launching tty7-updater")?;
         Ok(())
@@ -2176,6 +2189,7 @@ fn prepare_macos_update(
     asset_name: &str,
     archive: &[u8],
     checksums: &[u8],
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedUpdate> {
     let current =
         current_macos_app_bundle().context("tty7 is not running from an application bundle")?;
@@ -2187,17 +2201,21 @@ fn prepare_macos_update(
     let dir = staging.path().to_path_buf();
     let archive = write_staged_asset(&dir, asset_name, archive)?;
     let checksums = write_staged_asset(&dir, "checksums.txt", checksums)?;
-    run_updater(
-        &updater,
-        [
-            PathBuf::from("verify"),
-            current.clone(),
-            archive.clone(),
-            checksums.clone(),
-            PathBuf::from(asset_name),
-            dir.clone(),
-            PathBuf::from(version),
-        ],
+    let staging = verified_stage(
+        staging,
+        run_updater(
+            &updater,
+            [
+                PathBuf::from("verify"),
+                current.clone(),
+                archive.clone(),
+                checksums.clone(),
+                PathBuf::from(asset_name),
+                dir.clone(),
+                PathBuf::from(version),
+            ],
+            cancelled,
+        ),
     )?;
     let log =
         crate::core::config::config_path("update.log").unwrap_or_else(|| dir.join("update.log"));
@@ -2239,6 +2257,7 @@ fn prepare_linux_update(
     asset_name: &str,
     archive: &[u8],
     checksums: &[u8],
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedUpdate> {
     let current = current_appimage().context("tty7 is not running from an AppImage")?;
     let parent = current
@@ -2249,16 +2268,20 @@ fn prepare_linux_update(
     let dir = staging.path().to_path_buf();
     let archive = write_staged_asset(&dir, asset_name, archive)?;
     let checksums = write_staged_asset(&dir, "checksums.txt", checksums)?;
-    run_updater(
-        &bundled,
-        [
-            PathBuf::from("verify"),
-            archive.clone(),
-            checksums.clone(),
-            PathBuf::from(asset_name),
-            dir.clone(),
-            PathBuf::from(version),
-        ],
+    let staging = verified_stage(
+        staging,
+        run_updater(
+            &bundled,
+            [
+                PathBuf::from("verify"),
+                archive.clone(),
+                checksums.clone(),
+                PathBuf::from(asset_name),
+                dir.clone(),
+                PathBuf::from(version),
+            ],
+            cancelled,
+        ),
     )?;
     let updater = dir.join("tty7-updater");
     std::fs::copy(&bundled, &updater)
@@ -2294,6 +2317,7 @@ fn prepare_windows_update(
     asset_name: &str,
     package: &[u8],
     checksums: &[u8],
+    cancelled: &dyn Fn() -> bool,
 ) -> Result<PreparedUpdate> {
     let layout = current_windows_update_layout()
         .context("tty7 is not running from a recognized Windows installation")?;
@@ -2338,35 +2362,21 @@ fn prepare_windows_update(
 
     // Verification runs before the GUI commits to quitting. Both Windows
     // update modes repeat their archive checks after the parent exits.
-    let install_command = match &layout {
-        WindowsUpdateLayout::Inno(_) => {
-            run_updater(
-                &bundled,
-                [
-                    PathBuf::from("verify"),
-                    package.clone(),
-                    checksums.clone(),
-                    PathBuf::from(asset_name),
-                    PathBuf::from(version),
-                ],
-            )?;
-            "install"
-        }
-        WindowsUpdateLayout::Portable(_) => {
-            run_updater(
-                &bundled,
-                [
-                    PathBuf::from("verify-portable"),
-                    package.clone(),
-                    checksums.clone(),
-                    PathBuf::from(asset_name),
-                    PathBuf::from(version),
-                    dir.clone(),
-                ],
-            )?;
-            "install-portable"
-        }
+    let (install_command, verify_command) = match &layout {
+        WindowsUpdateLayout::Inno(_) => ("install", "verify"),
+        WindowsUpdateLayout::Portable(_) => ("install-portable", "verify-portable"),
     };
+    let mut verify_args = vec![
+        PathBuf::from(verify_command),
+        package.clone(),
+        checksums.clone(),
+        PathBuf::from(asset_name),
+        PathBuf::from(version),
+    ];
+    if matches!(layout, WindowsUpdateLayout::Portable(_)) {
+        verify_args.push(dir.clone());
+    }
+    let staging = verified_stage(staging, run_updater(&bundled, verify_args, cancelled))?;
 
     // Windows locks a running executable. Run a private copy from the staging
     // directory so Inno can replace the bundled helper in the installation.
@@ -2729,12 +2739,19 @@ fn can_stage_replacement_in(dir: &Path) -> bool {
         .is_ok()
 }
 
-fn run_updater(updater: &Path, args: impl IntoIterator<Item = PathBuf>) -> Result<()> {
+fn run_updater(
+    updater: &Path,
+    args: impl IntoIterator<Item = PathBuf>,
+    cancelled: &dyn Fn() -> bool,
+) -> Result<()> {
     let mut command = Command::new(updater);
     command.args(args);
-    let output = tty7_core::core::proc::hide_console(&mut command)
-        .output()
-        .context("running tty7-updater verification")?;
+    let output = super::update_process::run(
+        &mut command,
+        super::update_process::VERIFY_TIMEOUT,
+        cancelled,
+    )
+    .context("running tty7-updater verification")?;
     if !output.status.success() {
         anyhow::bail!(
             "tty7-updater verification failed: {}",
@@ -2742,6 +2759,28 @@ fn run_updater(updater: &Path, args: impl IntoIterator<Item = PathBuf>) -> Resul
         )
     }
     Ok(())
+}
+
+fn verified_stage(staging: tempfile::TempDir, result: Result<()>) -> Result<tempfile::TempDir> {
+    if let Err(error) = result {
+        if let Some(pid) = error
+            .downcast_ref::<super::update_process::Failure>()
+            .and_then(|failure| failure.running_pid)
+        {
+            let path = staging.keep();
+            let detail = format!("{error:#}; update staging preserved at {}", path.display());
+            if let Err(record) = super::update_stage::mark_running_process(&path, pid, &detail) {
+                log::error!("{detail}; writing the recovery record: {record}");
+            } else {
+                // Cancellation supersedes the generation, so its result may
+                // never reach the UI. Record the recovery before returning.
+                log::error!("{detail}");
+            }
+            return Err(error.context(format!("update staging preserved at {}", path.display())));
+        }
+        return Err(error);
+    }
+    Ok(staging)
 }
 
 /// Orders official versions and legacy custom prerelease versions.
@@ -2775,6 +2814,58 @@ fn is_update_available(latest: &str, current: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expired_stage_cleanup_preserves_pending_updates_and_recovery_files() {
+        let root = tempfile::tempdir().unwrap();
+        let ordinary = root.path().join("tty7-update-old");
+        let pending = root.path().join("tty7-update-pending");
+        let recovery = root.path().join(".tty7-update-recovery");
+        let unrelated = root.path().join("unrelated");
+        for dir in [&ordinary, &pending, &recovery, &unrelated] {
+            std::fs::create_dir(dir).unwrap();
+            std::fs::write(dir.join("package.zip"), b"package").unwrap();
+        }
+        std::fs::write(recovery.join("previous.AppImage"), b"previous version").unwrap();
+        sweep_stage_root(
+            root.path(),
+            Some(&pending),
+            std::time::SystemTime::now() + Duration::from_secs(1),
+        );
+        assert!(!ordinary.exists());
+        assert!(pending.exists());
+        assert_eq!(
+            std::fs::read(recovery.join("previous.AppImage")).unwrap(),
+            b"previous version"
+        );
+        assert!(unrelated.exists());
+    }
+
+    #[test]
+    fn failed_verification_cleans_only_stopped_commands() {
+        for running_pid in [None, Some(std::process::id())] {
+            let staging = tempfile::tempdir().unwrap();
+            let path = staging.path().to_path_buf();
+            std::fs::write(path.join("package.zip"), b"package").unwrap();
+            let failure = super::super::update_process::Failure {
+                detail: "verification timed out".to_string(),
+                running_pid,
+            };
+            assert!(verified_stage(staging, Err(failure.into())).is_err());
+            assert_eq!(path.exists(), running_pid.is_some());
+            if running_pid.is_some() {
+                assert!(super::super::update_stage::needs_recovery(&path));
+                // The caller may discard an obsolete generation's result.
+                // Its own stage must still explain why recovery is needed.
+                let record =
+                    std::fs::read_to_string(path.join(super::super::update_stage::RUNNING_PROCESS))
+                        .unwrap();
+                assert!(record.contains("verification timed out"), "{record}");
+                assert!(record.contains(&path.display().to_string()), "{record}");
+                std::fs::remove_dir_all(path).unwrap();
+            }
+        }
+    }
 
     // Exercise discovery with real HTTP responses, without GitHub or user settings.
     fn release_from_http(responses: Vec<String>) -> Result<(LatestRelease, String)> {

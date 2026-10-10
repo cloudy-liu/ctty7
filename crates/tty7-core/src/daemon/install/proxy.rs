@@ -16,7 +16,7 @@
 //! from Finder or the Dock inherits launchd's environment, not the shell's, so
 //! step 3 on its own would leave `HTTP_PROXY` unset for most users.
 
-use ureq::{Proxy, ProxyProtocol};
+pub use ureq::{Proxy, ProxyProtocol};
 
 /// Resolve the proxy that should be used for `target_url`.
 pub fn resolve(target_url: &str, manual: Option<&str>) -> Option<Proxy> {

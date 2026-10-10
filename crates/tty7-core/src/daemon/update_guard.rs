@@ -67,7 +67,9 @@ pub fn hold_for_parent() {
     }
 }
 
-fn hold_for(pid: u32) {
+/// Transfer the guard to a still-running installer when its supervisor cannot
+/// confirm termination. The guard becomes stale when that process exits.
+pub fn hold_for(pid: u32) {
     let Some(path) = path() else { return };
     if let Some(parent) = path.parent() {
         let _ = std::fs::create_dir_all(parent);
@@ -90,7 +92,7 @@ pub fn clear() {
 /// Whether an installer is replacing the installation right now. A stale
 /// guard — dead or recycled writer, unreadable garbage — is removed on sight,
 /// so one crashed holder never costs more than one look.
-pub(crate) fn held() -> bool {
+pub fn held() -> bool {
     let Some(path) = path() else { return false };
     let Ok(contents) = std::fs::read_to_string(&path) else {
         return false;
@@ -136,6 +138,117 @@ fn process_alive(pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "child process fixture, invoked by the inaccessible-holder test"]
+    fn inaccessible_process_fixture() {
+        std::thread::sleep(Duration::from_secs(10));
+    }
+
+    #[test]
+    fn an_inaccessible_holder_is_not_mistaken_for_an_exited_process() {
+        use std::mem::{size_of, zeroed};
+        use std::os::windows::io::{AsRawHandle as _, FromRawHandle as _, OwnedHandle};
+        use std::os::windows::process::CommandExt as _;
+        use std::process::{Child, Command, Stdio};
+        use windows_sys::Win32::Foundation::{CloseHandle, ERROR_ACCESS_DENIED, GetLastError};
+        use windows_sys::Win32::Security::{
+            ACL, ACL_REVISION, AdjustTokenPrivileges, DACL_SECURITY_INFORMATION, ImpersonateSelf,
+            InitializeAcl, InitializeSecurityDescriptor, RevertToSelf, SECURITY_DESCRIPTOR,
+            SecurityImpersonation, SetKernelObjectSecurity, SetSecurityDescriptorDacl,
+            TOKEN_ADJUST_PRIVILEGES,
+        };
+        use windows_sys::Win32::System::Threading::{
+            CREATE_NO_WINDOW, GetCurrentThread, OpenProcess, OpenThreadToken, PROCESS_SYNCHRONIZE,
+        };
+
+        struct Fixture(Child);
+        impl Drop for Fixture {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
+        struct Impersonation;
+        impl Drop for Impersonation {
+            fn drop(&mut self) {
+                unsafe {
+                    RevertToSelf();
+                }
+            }
+        }
+        let child = Fixture(
+            Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "daemon::update_guard::tests::inaccessible_process_fixture",
+                    "--ignored",
+                ])
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .stderr(Stdio::null())
+                .creation_flags(CREATE_NO_WINDOW)
+                .spawn()
+                .unwrap(),
+        );
+        // Deny new observations of this dedicated child. The existing Child
+        // handle retains its rights, so cleanup can always stop the fixture.
+        let mut acl: ACL = unsafe { zeroed() };
+        let mut descriptor: SECURITY_DESCRIPTOR = unsafe { zeroed() };
+        let descriptor = (&mut descriptor as *mut SECURITY_DESCRIPTOR).cast();
+        unsafe {
+            assert_ne!(
+                InitializeAcl(&mut acl, size_of::<ACL>() as u32, ACL_REVISION),
+                0
+            );
+            assert_ne!(InitializeSecurityDescriptor(descriptor, 1), 0);
+            assert_ne!(SetSecurityDescriptorDacl(descriptor, 1, &acl, 0), 0);
+            assert_ne!(
+                SetKernelObjectSecurity(
+                    child.0.as_raw_handle(),
+                    DACL_SECURITY_INFORMATION,
+                    descriptor
+                ),
+                0
+            );
+        }
+        // SeDebugPrivilege can bypass the DACL on elevated CI runners. Use
+        // a thread token so other tests keep their process-token privileges.
+        unsafe {
+            assert_ne!(ImpersonateSelf(SecurityImpersonation), 0);
+        }
+        let _impersonation = Impersonation;
+        unsafe {
+            let mut token = std::ptr::null_mut();
+            assert_ne!(
+                OpenThreadToken(GetCurrentThread(), TOKEN_ADJUST_PRIVILEGES, 1, &mut token),
+                0
+            );
+            let token = OwnedHandle::from_raw_handle(token);
+            assert_ne!(
+                AdjustTokenPrivileges(
+                    token.as_raw_handle(),
+                    1,
+                    std::ptr::null(),
+                    0,
+                    std::ptr::null_mut(),
+                    std::ptr::null_mut(),
+                ),
+                0
+            );
+            let observation = OpenProcess(PROCESS_SYNCHRONIZE, 0, child.0.id());
+            let error = GetLastError();
+            if !observation.is_null() {
+                CloseHandle(observation);
+            }
+            assert!(observation.is_null());
+            assert_eq!(error, ERROR_ACCESS_DENIED);
+        }
+        assert!(
+            process_alive(child.0.id()),
+            "access denied does not confirm that the installer has exited"
+        );
+    }
 
     fn pin_config_dir() {
         let dir = std::env::temp_dir().join(format!("tty7-covtest-{}", std::process::id()));

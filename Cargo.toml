@@ -118,6 +118,10 @@ cssparser = "0.36"
 # pins no new native code — it only exposes what we're already building. Pinned
 # to gpui's rev so the shared `http_client`/`zed-reqwest` versions stay aligned.
 reqwest_client = { git = "https://github.com/zed-industries/zed", rev = "1d217ee39d381ac101b7cf49d3d22451ac1093fe" }
+# Configure cancellable release requests with the existing proxy resolver and
+# platform verifier. Both dependencies already belong to reqwest_client.
+reqwest = { package = "zed-reqwest", git = "https://github.com/zed-industries/reqwest.git", rev = "c15662463bda39148ba154100dd44d3fba5873a4", default-features = false, features = ["stream", "socks", "rustls-tls-native-roots"] }
+http_client_tls = { git = "https://github.com/zed-industries/zed", rev = "1d217ee39d381ac101b7cf49d3d22451ac1093fe" }
 
 # See `[workspace.dependencies]`: the pin is shared with tty7-cli, which parses
 # `capture` output through the same grid.
@@ -174,6 +178,8 @@ windows-sys = { version = "0.61", features = [
     # but the Win32 metadata files it under Diagnostics::Debug, so that is the
     # module the binding needs — nothing here pulls in dbghelp.
     "Win32_System_Diagnostics_Debug",
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_JobObjects",
     "Win32_System_Threading",
     "Win32_UI_Shell",
     "Win32_UI_WindowsAndMessaging",
@@ -416,3 +422,4 @@ gpui_platform = { git = "https://github.com/l0ng-ai/zed", branch = "tty7" }
 gpui_macros = { git = "https://github.com/l0ng-ai/zed", branch = "tty7" }
 gpui_web = { git = "https://github.com/l0ng-ai/zed", branch = "tty7" }
 reqwest_client = { git = "https://github.com/l0ng-ai/zed", branch = "tty7" }
+http_client_tls = { git = "https://github.com/l0ng-ai/zed", branch = "tty7" }
