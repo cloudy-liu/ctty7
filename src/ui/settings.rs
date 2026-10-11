@@ -706,6 +706,11 @@ fn settings_search_entries() -> &'static [SearchEntry] {
         },
         SearchEntry {
             section: WindowTabs,
+            title: SettingsAgentNotificationSound,
+            keywords: SettingsSearchAgentNotificationSoundKeywords,
+        },
+        SearchEntry {
+            section: WindowTabs,
             title: SettingsNotifyThreshold,
             keywords: SettingsSearchNotifyThresholdKeywords,
         },
@@ -5924,6 +5929,55 @@ impl Tty7App {
                 this.set_notify_mode(mode, cx);
             },
         );
+        let agent_sound_row = {
+            let sound_idx = match cx.global::<Config>().agent_notification_sound {
+                NotifyMode::Never => 0,
+                NotifyMode::Unfocused => 1,
+                NotifyMode::Always => 2,
+            };
+            let sound_radio = self.segmented(
+                "wt-agent-sound",
+                &[
+                    t(L10nKey::NotifyModeNever),
+                    t(L10nKey::NotifyModeUnfocused),
+                    t(L10nKey::NotifyModeAlways),
+                ],
+                sound_idx,
+                cx,
+                |this, ix, _, cx| {
+                    this.set_agent_notification_sound(
+                        match ix {
+                            0 => NotifyMode::Never,
+                            1 => NotifyMode::Unfocused,
+                            _ => NotifyMode::Always,
+                        },
+                        cx,
+                    );
+                },
+            );
+            Some(
+                self.settings_row(
+                    t(L10nKey::SettingsAgentNotificationSound),
+                    t(L10nKey::SettingsAgentNotificationSoundDesc),
+                    h_flex()
+                        .gap_2()
+                        .items_center()
+                        .child(sound_radio)
+                        .child(
+                            Button::new("agent-sound-preview")
+                                .debug_selector(|| "agent-sound-preview".into())
+                                .label(t(L10nKey::SettingsAgentNotificationSoundPreview))
+                                .small()
+                                .on_click(cx.listener(|_, _, _, cx| {
+                                    crate::terminal::agent_notification::preview(cx)
+                                })),
+                        )
+                        .into_any_element(),
+                    cx,
+                )
+                .into_any_element(),
+            )
+        };
         let threshold_radio = self.segmented_valued(
             "wt-notify-threshold",
             &NOTIFY_THRESHOLD_LABELS,
@@ -6093,6 +6147,7 @@ impl Tty7App {
                 notify_radio,
                 cx,
             ))
+            .children(agent_sound_row)
             .child(self.settings_row(
                 t(L10nKey::SettingsNotifyThreshold),
                 t(L10nKey::SettingsNotifyThresholdDesc),
@@ -8528,6 +8583,73 @@ mod gpui_tests {
             .unwrap();
         let vcx = VisualTestContext::from_window(window.into(), cx);
         (app, vcx)
+    }
+
+    #[gpui::test]
+    fn agent_sound_settings_persist_without_changing_desktop_policy(cx: &mut TestAppContext) {
+        use crate::core::config::NotifyMode;
+        crate::core::config::pin_test_config_dir();
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |app, _, cx| {
+            app.set_notify_mode(NotifyMode::Never, cx)
+        });
+        for sound in [NotifyMode::Always, NotifyMode::Never, NotifyMode::Unfocused] {
+            app.update_in(&mut vcx, |app, _, cx| {
+                app.set_agent_notification_sound(sound, cx)
+            });
+            vcx.update(|_, cx| {
+                let cfg = cx.global::<Config>();
+                assert_eq!(cfg.agent_notification_sound, sound);
+                assert_eq!(cfg.notify_on_command_finish, NotifyMode::Never);
+            });
+            let saved = Config::load();
+            assert_eq!(saved.agent_notification_sound, sound);
+            assert_eq!(saved.notify_on_command_finish, NotifyMode::Never);
+        }
+    }
+
+    #[gpui::test]
+    fn settings_preview_plays_with_automatic_sound_disabled(cx: &mut TestAppContext) {
+        use crate::core::config::NotifyMode;
+        use crate::terminal::agent_notification::RecordingDelivery;
+        crate::core::config::pin_test_config_dir();
+        crate::ui::i18n::set_locale("en");
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            cx.global_mut::<Config>().agent_notification_sound = NotifyMode::Never;
+            cx.set_global(RecordingDelivery::default());
+            app.open_settings_section(SettingsSection::WindowTabs, window, cx);
+            app.active_settings()
+                .unwrap()
+                .search
+                .update(cx, |input, cx| {
+                    input.set_value("agent sound", window, cx);
+                });
+            window.activate_window();
+        });
+        vcx.simulate_resize(size(px(1100.), px(1500.)));
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let bounds = vcx
+            .debug_bounds("agent-sound-preview")
+            .expect("settings expose a sound preview");
+        vcx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        vcx.run_until_parked();
+        vcx.update(|_, cx| {
+            let delivered = cx.global::<RecordingDelivery>();
+            assert_eq!(delivered.sounds, 1);
+            assert!(delivered.desktops.is_empty());
+            assert_eq!(
+                cx.global::<Config>().agent_notification_sound,
+                NotifyMode::Never
+            );
+        });
     }
 
     #[gpui::test]

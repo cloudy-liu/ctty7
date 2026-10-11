@@ -3124,6 +3124,14 @@ impl Tty7App {
         self.update_config(cx, |cfg| cfg.notify_on_command_finish = mode);
     }
 
+    pub(crate) fn set_agent_notification_sound(
+        &mut self,
+        mode: crate::core::config::NotifyMode,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_config(cx, |cfg| cfg.agent_notification_sound = mode);
+    }
+
     pub(crate) fn set_notify_threshold(&mut self, secs: u64, cx: &mut Context<Self>) {
         self.update_config(cx, |cfg| cfg.notify_threshold_secs = secs.clamp(1, 3600));
     }

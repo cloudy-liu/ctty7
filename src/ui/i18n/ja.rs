@@ -641,9 +641,17 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::DocumentFillTooltip => "ワークスペース全体に表示",
         L10nKey::DocumentRestoreTooltip => "分割レイアウトに戻す",
         L10nKey::SettingsNotifications => "通知",
-        L10nKey::SettingsNotifyOnCommandFinish => "コマンド終了時に通知",
+        L10nKey::SettingsNotifyOnCommandFinish => "デスクトップ通知",
         L10nKey::SettingsNotifyOnCommandFinishDesc => {
-            "長時間のフォアグラウンドコマンドが完了したらデスクトップ通知を表示"
+            "Agent の完了・入力待ちと長時間コマンドの完了を通知。"
+        }
+        L10nKey::SettingsAgentNotificationSound => "Agent 通知音",
+        L10nKey::SettingsAgentNotificationSoundDesc => {
+            "Agent のターン完了時や入力待ちに Codex Default の音を再生。デスクトップ通知とは別に設定。"
+        }
+        L10nKey::SettingsAgentNotificationSoundPreview => "試聴",
+        L10nKey::SettingsSearchAgentNotificationSoundKeywords => {
+            "agent 通知音 音声 サウンド 試聴 完了 入力"
         }
         L10nKey::SettingsNotifyThreshold => "通知閾値（秒）",
         L10nKey::SettingsNotifyThresholdDesc => "「長時間」とみなすのに必要なコマンドの実行時間",

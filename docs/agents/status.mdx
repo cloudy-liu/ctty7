@@ -99,18 +99,31 @@ The hooks' three turn states are what `tty7 agents` reports as `working` /
 
 ## Notifications
 
-Two, both following your **Settings → Window & Tabs → Notifications** policy:
+Agent alerts follow the same observed states as the pane's status marks:
 
-- **"needs your permission…"** the moment an agent blocks on you
-- **"finished after 42s"** at the end of a turn
+- Entering **input** produces an alert when the Agent needs your reply or permission.
+- Entering **done** produces an alert when a live turn finishes.
 
-Which means that by default — *When unfocused* — you are told the instant you
-are the bottleneck, and left alone while you are watching.
+Open **Settings → Window & Tabs → Notifications** to control desktop
+notifications and Agent notification sound independently. Each offers
+**Never**, **When unfocused**, and **Always**. Both default to **When unfocused**:
+if any tty7 window is active, including a separate settings window, Agent
+alerts stay quiet. Existing desktop notification preferences survive upgrades.
 
-These come from agents whose hooks are installed. An agent tty7 only reads off
-its screen, such as Cursor without imported hooks or Antigravity, moves its
-symbol but does not interrupt you mid-session: it gets the one "finished"
-notice when the agent exits.
+Sounds use the bundled Codex Default WAV on Windows, macOS and Linux. You can
+enable sound without desktop banners, enable banners without sound, enable
+both, or disable both. **Preview** plays the sound even while the app is focused
+or automatic sound is disabled. Agent banners are silent so they do not add a
+second notification sound.
+
+Alerts cover states reported by hooks and states detected on an Agent's screen.
+Repeated observations stay quiet, restored sessions do not replay old alerts,
+and simultaneous events do not queue or overlap sounds. Playing a sound keeps
+the result's unread **done** mark until you view it. Normal command completion
+and terminal BEL use their separate existing rules.
+
+Linux playback needs a running PulseAudio server or PipeWire's PulseAudio
+compatibility service. See [installation requirements](/getting-started/installation#building-from-source).
 
 ## The tray icon
 
