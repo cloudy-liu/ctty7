@@ -326,7 +326,9 @@ pub struct TerminalView {
     last_agent_status: Option<crate::core::cli_agent::AgentStatus>,
     last_agent_session: (Option<String>, Option<Vec<String>>),
     agent_turn_started: Option<std::time::Instant>,
-    agent_was_rich: bool,
+    agent_notifications_initialized: bool,
+    agent_waiting_notified: bool,
+    last_notification_agent: Option<crate::core::cli_agent::CLIAgent>,
     agent_result_unread: bool,
     keep_unread_on_focus: bool,
     /// The agent's status as its screen shows it — see
@@ -625,18 +627,6 @@ impl TerminalView {
             )
         };
         self.notify_pane(None, &body, cx);
-    }
-
-    fn notify_agent_finished(
-        &self,
-        agent: crate::core::cli_agent::CLIAgent,
-        elapsed: std::time::Duration,
-        cx: &mut Context<Self>,
-    ) {
-        let secs = elapsed.as_secs().to_string();
-        let body = t_fmt(L10nKey::NotifyAgentFinished, &[("secs", &secs)]);
-        let title = self.notification_title(Some(agent.display_name()), cx);
-        super::remote::notify_agent_desktop_for_pane(&title, &body, cx.entity_id());
     }
 
     /// Notify about this pane, with a title describing where it lives and a
@@ -1361,7 +1351,9 @@ impl TerminalView {
             last_agent_status: None,
             last_agent_session: (None, None),
             agent_turn_started: None,
-            agent_was_rich: false,
+            agent_notifications_initialized: false,
+            agent_waiting_notified: false,
+            last_notification_agent: None,
             agent_result_unread: false,
             keep_unread_on_focus: false,
             screen_status: Default::default(),
@@ -1559,6 +1551,13 @@ impl TerminalView {
         self.relink_abandoned = false;
         self.relink_inflight = false;
         self.title = self.default_title.clone();
+        self.pending_title = None;
+        self.screen_status = Default::default();
+        self.last_agent_status = None;
+        self.agent_turn_started = None;
+        self.agent_notifications_initialized = false;
+        self.agent_waiting_notified = false;
+        self.last_notification_agent = None;
         cx.notify();
         Ok(())
     }
@@ -3386,18 +3385,13 @@ impl TerminalView {
                 let title = std::mem::take(&mut self.running_title);
                 let agent = self.running_agent.take();
                 self.running_since = None;
-                if notify_allowed {
-                    match agent {
-                        Some(_) if self.agent_was_rich => {}
-                        Some(agent) => self.notify_agent_finished(agent, elapsed, cx),
-                        None => {
-                            let threshold = std::time::Duration::from_secs(
-                                cx.global::<Config>().notify_threshold_secs,
-                            );
-                            if elapsed >= threshold {
-                                self.notify_command_finished(&title, elapsed, cx);
-                            }
-                        }
+                // Agent reminders come only from the merged lifecycle. A
+                // process exit is not another completed turn.
+                if agent.is_none() && notify_allowed {
+                    let threshold =
+                        std::time::Duration::from_secs(cx.global::<Config>().notify_threshold_secs);
+                    if elapsed >= threshold {
+                        self.notify_command_finished(&title, elapsed, cx);
                     }
                 }
             }
@@ -3632,27 +3626,33 @@ impl TerminalView {
                 crate::terminal::screen_status::detection_text(&term.lock())
             });
 
-        // Notifications stay with agents whose hooks report, as before the
-        // screen was read. For the rest the screen only moves the badge, and
-        // they keep the one notice when the agent exits.
         let session = self.terminal.agent_session();
-        if session.as_ref().is_some_and(|s| s.rich) {
-            self.agent_was_rich = true;
-        }
-        if agent.is_none() && session.is_none() {
-            self.agent_was_rich = false;
+        if agent != self.last_notification_agent {
+            self.last_notification_agent = agent;
+            self.agent_notifications_initialized = false;
+            self.agent_waiting_notified = false;
+            self.agent_turn_started = None;
+            self.last_agent_status = None;
         }
 
         let identity = (
             session.as_ref().and_then(|s| s.session_id.clone()),
             session.as_ref().and_then(|s| s.launch_argv.clone()),
         );
-        if identity != self.last_agent_session {
+        if session.is_some() && identity != self.last_agent_session {
             self.last_agent_session = identity;
+            self.agent_notifications_initialized = false;
+            self.agent_waiting_notified = false;
+            self.agent_turn_started = None;
+            self.last_agent_status = None;
             cx.emit(AgentSessionChanged);
         }
 
         let status = self.agent_status();
+        let baseline = !self.agent_notifications_initialized;
+        if status.is_some() {
+            self.agent_notifications_initialized = true;
+        }
         if status == self.last_agent_status {
             return false;
         }
@@ -3677,7 +3677,6 @@ impl TerminalView {
             }
         }
 
-        let rich = session.as_ref().is_some_and(|s| s.rich);
         let agent_name = self
             .terminal
             .foreground_agent()
@@ -3686,21 +3685,20 @@ impl TerminalView {
         match status {
             Some(AgentStatus::Working) => {
                 self.agent_turn_started = Some(std::time::Instant::now());
+                self.agent_waiting_notified = false;
             }
-            Some(AgentStatus::Waiting) if rich => {
-                let body = session
-                    .as_ref()
-                    .and_then(|s| s.message.clone())
-                    .unwrap_or_else(|| t(L10nKey::NotifyAgentWaiting).to_string());
-                self.notify_agent_event(agent_name, &body, window, cx);
+            Some(AgentStatus::Waiting) => {
+                // Unknown and idle do not prove that this wait ended. Only
+                // actual work permits another input alert.
+                if !std::mem::replace(&mut self.agent_waiting_notified, true) && !baseline {
+                    let body = session
+                        .as_ref()
+                        .and_then(|s| s.message.clone())
+                        .unwrap_or_else(|| t(L10nKey::NotifyAgentWaiting).to_string());
+                    self.notify_agent_event(agent_name, &body, window, cx);
+                }
             }
-            Some(AgentStatus::Done)
-                if rich
-                    && matches!(
-                        prev,
-                        Some(AgentStatus::Working) | Some(AgentStatus::Waiting)
-                    ) =>
-            {
+            Some(AgentStatus::Done) if self.agent_turn_started.is_some() => {
                 let body = match self.agent_turn_started.take() {
                     Some(start) => {
                         let secs = start.elapsed().as_secs().to_string();
@@ -14494,6 +14492,10 @@ mod native_history_gpui_tests {
     }
 }
 
+#[cfg(test)]
+#[path = "agent_lifecycle_tests.rs"]
+mod agent_lifecycle_tests;
+
 #[cfg(all(test, target_os = "windows"))]
 mod agent_notification_tests {
     use super::super::agent_notification::RecordingDelivery;
@@ -14533,6 +14535,17 @@ mod agent_notification_tests {
         view: &Entity<TerminalView>,
         cx: &mut TestAppContext,
     ) {
+        report_pending(status, daemon, window, view, cx);
+        cx.run_until_parked();
+    }
+
+    fn report_pending(
+        status: AgentStatus,
+        daemon: &mut crate::daemon::transport::Stream,
+        window: WindowHandle<gpui_component::Root>,
+        view: &Entity<TerminalView>,
+        cx: &mut TestAppContext,
+    ) {
         DaemonMsg::AgentStatus(Some(AgentSessionState {
             status,
             rich: true,
@@ -14563,6 +14576,127 @@ mod agent_notification_tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         panic!("agent hook report never reached the view");
+    }
+
+    #[gpui::test]
+    fn agent_alerts_recheck_focus_before_deferred_delivery_and_do_not_replay(
+        cx: &mut TestAppContext,
+    ) {
+        let (source, view, mut daemon) = harness(cx);
+        cx.update(crate::ui::keymap::init);
+        let settings = cx.add_window(|window, cx| {
+            let app = cx.new(|cx| {
+                let mut app = crate::ui::app::Tty7App::with_session(
+                    None,
+                    Some(crate::core::session::Session::default()),
+                    window,
+                    cx,
+                );
+                app.open_settings_section(
+                    crate::ui::settings::SettingsSection::Terminal,
+                    window,
+                    cx,
+                );
+                app
+            });
+            gpui_component::Root::new(app, window, cx)
+        });
+        let mut visual = gpui::VisualTestContext::from_window(source.into(), cx);
+        visual.deactivate_window();
+        let mut settings_visual = gpui::VisualTestContext::from_window(settings.into(), cx);
+        settings_visual.deactivate_window();
+        cx.run_until_parked();
+        let (release, deferred) = smol::channel::bounded(1);
+        cx.update(|cx| cx.global_mut::<RecordingDelivery>().defer_dispatch = Some(deferred));
+        report(AgentStatus::Working, &mut daemon, source, &view, cx);
+        report(AgentStatus::Waiting, &mut daemon, source, &view, cx);
+        settings
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        assert!(
+            settings
+                .update(cx, |_, window, _| window.is_window_active())
+                .unwrap()
+        );
+        release.try_send(()).unwrap();
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let delivered = cx.global::<RecordingDelivery>();
+            assert_eq!((delivered.sounds, delivered.desktops.len()), (0, 0));
+        });
+        settings_visual.deactivate_window();
+        cx.run_until_parked();
+        report(AgentStatus::Waiting, &mut daemon, source, &view, cx);
+        cx.update(|cx| {
+            let delivered = cx.global::<RecordingDelivery>();
+            assert_eq!((delivered.sounds, delivered.desktops.len()), (0, 0));
+        });
+    }
+
+    #[gpui::test]
+    fn agent_alerts_recheck_changed_policies_before_deferred_delivery(cx: &mut TestAppContext) {
+        let (window, view, mut daemon) = harness(cx);
+        cx.update(|cx| {
+            let cfg = cx.global_mut::<Config>();
+            cfg.notify_on_command_finish = NotifyMode::Always;
+            cfg.agent_notification_sound = NotifyMode::Always;
+        });
+        report(AgentStatus::Working, &mut daemon, window, &view, cx);
+        report_pending(AgentStatus::Waiting, &mut daemon, window, &view, cx);
+        cx.update(|cx| cx.global_mut::<Config>().agent_notification_sound = NotifyMode::Never);
+        cx.run_until_parked();
+        cx.update(|cx| {
+            let delivered = cx.global::<RecordingDelivery>();
+            assert_eq!((delivered.sounds, delivered.desktops.len()), (0, 1));
+        });
+    }
+
+    #[gpui::test]
+    fn agent_alerts_are_suppressed_while_another_settings_window_is_active(
+        cx: &mut TestAppContext,
+    ) {
+        let (source, view, mut daemon) = harness(cx);
+        cx.update(crate::ui::keymap::init);
+        let settings = cx.add_window(|window, cx| {
+            let app = cx.new(|cx| {
+                let mut app = crate::ui::app::Tty7App::with_session(
+                    None,
+                    Some(crate::core::session::Session::default()),
+                    window,
+                    cx,
+                );
+                app.open_settings_section(
+                    crate::ui::settings::SettingsSection::Terminal,
+                    window,
+                    cx,
+                );
+                app
+            });
+            gpui_component::Root::new(app, window, cx)
+        });
+        let mut visual = gpui::VisualTestContext::from_window(source.into(), cx);
+        visual.deactivate_window();
+        settings
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        assert!(
+            !source
+                .update(cx, |_, window, _| window.is_window_active())
+                .unwrap()
+        );
+        assert!(
+            settings
+                .update(cx, |_, window, _| window.is_window_active())
+                .unwrap()
+        );
+        report(AgentStatus::Working, &mut daemon, source, &view, cx);
+        report(AgentStatus::Waiting, &mut daemon, source, &view, cx);
+        cx.update(|cx| {
+            let delivered = cx.global::<RecordingDelivery>();
+            assert_eq!((delivered.sounds, delivered.desktops.len()), (0, 0));
+        });
     }
 
     #[gpui::test]
