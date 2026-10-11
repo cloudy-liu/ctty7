@@ -3124,7 +3124,6 @@ impl Tty7App {
         self.update_config(cx, |cfg| cfg.notify_on_command_finish = mode);
     }
 
-    #[cfg(target_os = "windows")]
     pub(crate) fn set_agent_notification_sound(
         &mut self,
         mode: crate::core::config::NotifyMode,
