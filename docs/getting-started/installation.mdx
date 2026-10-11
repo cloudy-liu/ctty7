@@ -110,19 +110,26 @@ binary is `tty7-app`.
     ```
   </Tab>
   <Tab title="Linux">
-    gpui resolves its X11/Wayland/font backends through `pkg-config` at build
-    time, so the development packages have to be present:
+    The X11, Wayland, font and PulseAudio backends resolve system libraries
+    through `pkg-config` at build time, so the development packages have to
+    be present:
 
     ```bash
     sudo apt-get install -y pkg-config cmake clang \
       libxkbcommon-dev libxkbcommon-x11-dev \
       libfontconfig1-dev libfreetype6-dev \
       libwayland-dev libx11-dev libxcb1-dev \
-      libzstd-dev libssl-dev libkrb5-dev
+      libzstd-dev libssl-dev libkrb5-dev libpulse-dev
     cargo build --release
     ```
   </Tab>
 </Tabs>
+
+On Linux, Agent notification sounds use the desktop's PulseAudio server or
+PipeWire's PulseAudio compatibility service. Archive builds need the
+PulseAudio client libraries installed; AppImage packaging collects these
+libraries with the other native dependencies. The desktop audio service must
+be running for sounds to play.
 
 <Warning>
   A source build does not update itself, and it will not replace an installed
