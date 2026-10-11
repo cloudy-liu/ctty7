@@ -57,7 +57,7 @@ only, following the format in AGENTS.md:
   detail; link the one-time manual migration guide when it applies.
 
 Choose the next semantic version for the accepted scope. The current published
-release is v0.2.2; its [verification record](../testing/release-v0.2.2.md)
+release is v0.3.0; its [verification record](../testing/release-v0.3.0.md)
 documents the source, package checks, and completed publication.
 
 ## Build, verify, publish
