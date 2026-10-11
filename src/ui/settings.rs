@@ -704,7 +704,6 @@ fn settings_search_entries() -> &'static [SearchEntry] {
             title: SettingsNotifyOnCommandFinish,
             keywords: SettingsSearchNotifyOnCommandFinishKeywords,
         },
-        #[cfg(target_os = "windows")]
         SearchEntry {
             section: WindowTabs,
             title: SettingsAgentNotificationSound,
