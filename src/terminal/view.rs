@@ -635,7 +635,8 @@ impl TerminalView {
     ) {
         let secs = elapsed.as_secs().to_string();
         let body = t_fmt(L10nKey::NotifyAgentFinished, &[("secs", &secs)]);
-        self.notify_pane(Some(agent.display_name()), &body, cx);
+        let title = self.notification_title(Some(agent.display_name()), cx);
+        super::remote::notify_agent_desktop_for_pane(&title, &body, cx.entity_id());
     }
 
     /// Notify about this pane, with a title describing where it lives and a
@@ -645,6 +646,23 @@ impl TerminalView {
     fn notify_pane(&self, lead: Option<&str>, body: &str, cx: &mut Context<Self>) {
         let title = self.notification_title(lead, cx);
         super::remote::notify_desktop_for_pane(Some(&title), body, Some(cx.entity_id()));
+    }
+
+    fn notify_agent_event(
+        &self,
+        agent_name: &str,
+        body: &str,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) {
+        let title = self.notification_title(Some(agent_name), cx);
+        super::agent_notification::deliver(
+            &title,
+            body,
+            cx.entity_id(),
+            window.is_window_active(),
+            cx,
+        );
     }
 
     fn notification_title(&self, lead: Option<&str>, cx: &App) -> String {
@@ -3598,7 +3616,7 @@ impl TerminalView {
 
     fn poll_agent_status(
         &mut self,
-        notify_allowed: bool,
+        _notify_allowed: bool,
         window: &Window,
         cx: &mut Context<Self>,
     ) -> bool {
@@ -3669,16 +3687,15 @@ impl TerminalView {
             Some(AgentStatus::Working) => {
                 self.agent_turn_started = Some(std::time::Instant::now());
             }
-            Some(AgentStatus::Waiting) if rich && notify_allowed => {
+            Some(AgentStatus::Waiting) if rich => {
                 let body = session
                     .as_ref()
                     .and_then(|s| s.message.clone())
                     .unwrap_or_else(|| t(L10nKey::NotifyAgentWaiting).to_string());
-                self.notify_pane(Some(agent_name), &body, cx);
+                self.notify_agent_event(agent_name, &body, window, cx);
             }
             Some(AgentStatus::Done)
                 if rich
-                    && notify_allowed
                     && matches!(
                         prev,
                         Some(AgentStatus::Working) | Some(AgentStatus::Waiting)
@@ -3691,7 +3708,7 @@ impl TerminalView {
                     }
                     None => t(L10nKey::NotifyTurnFinished).to_string(),
                 };
-                self.notify_pane(Some(agent_name), &body, cx);
+                self.notify_agent_event(agent_name, &body, window, cx);
             }
             _ => {}
         }
@@ -14474,5 +14491,203 @@ mod native_history_gpui_tests {
         assert_eq!(next_input(&mut daemon), b".venv\\".to_vec());
         assert_eq!(next_input(&mut daemon), b"\x1b[A".to_vec());
         assert_eq!(next_input(&mut daemon), b"\x1b[B".to_vec());
+    }
+}
+
+#[cfg(all(test, target_os = "windows"))]
+mod agent_notification_tests {
+    use super::super::agent_notification::RecordingDelivery;
+    use super::*;
+    use crate::core::cli_agent::{AgentSessionState, AgentStatus};
+    use crate::daemon::protocol::DaemonMsg;
+    use gpui::{Entity, TestAppContext, WindowHandle};
+
+    fn harness(
+        cx: &mut TestAppContext,
+    ) -> (
+        WindowHandle<gpui_component::Root>,
+        Entity<TerminalView>,
+        crate::daemon::transport::Stream,
+    ) {
+        crate::core::config::pin_test_config_dir();
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(Config::default());
+            cx.set_global(RecordingDelivery::default());
+        });
+        let mut built = None;
+        let window = cx.add_window(|window, cx| {
+            let (view, stream) = quiet_test_pane(91, window, cx);
+            built = Some((view.clone(), stream));
+            gpui_component::Root::new(view, window, cx)
+        });
+        let (view, stream) = built.unwrap();
+        (window, view, stream)
+    }
+
+    fn report(
+        status: AgentStatus,
+        daemon: &mut crate::daemon::transport::Stream,
+        window: WindowHandle<gpui_component::Root>,
+        view: &Entity<TerminalView>,
+        cx: &mut TestAppContext,
+    ) {
+        DaemonMsg::AgentStatus(Some(AgentSessionState {
+            status,
+            rich: true,
+            session_id: Some("live-sound".into()),
+            launch_argv: Some(vec!["claude".into()]),
+            unstarted: false,
+            message: None,
+            cwd: None,
+            activity: 0,
+        }))
+        .encode(daemon)
+        .unwrap();
+        for _ in 0..200 {
+            let ready = window
+                .update(cx, |_, window, cx| {
+                    view.update(cx, |pane, cx| {
+                        if pane.terminal.agent_session().map(|s| s.status) != Some(status) {
+                            return false;
+                        }
+                        pane.poll_agent_status(false, window, cx);
+                        true
+                    })
+                })
+                .unwrap();
+            if ready {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        panic!("agent hook report never reached the view");
+    }
+
+    #[gpui::test]
+    fn live_agent_sound_is_independent_of_desktop_notifications(cx: &mut TestAppContext) {
+        let (window, view, mut daemon) = harness(cx);
+        cx.update(|cx| {
+            let cfg = cx.global_mut::<Config>();
+            cfg.notify_on_command_finish = NotifyMode::Never;
+            cfg.agent_notification_sound = NotifyMode::Always;
+        });
+        for status in [
+            AgentStatus::Working,
+            AgentStatus::Waiting,
+            AgentStatus::Working,
+            AgentStatus::Done,
+        ] {
+            report(status, &mut daemon, window, &view, cx);
+        }
+        cx.update(|cx| {
+            let delivered = cx.global::<RecordingDelivery>();
+            assert_eq!(
+                delivered.sounds, 2,
+                "input and done each play with desktop disabled"
+            );
+            assert!(delivered.desktops.is_empty());
+        });
+    }
+
+    #[gpui::test]
+    fn live_agent_channels_follow_current_settings_and_focus(cx: &mut TestAppContext) {
+        let (window, view, mut daemon) = harness(cx);
+        use NotifyMode::{Always, Never, Unfocused};
+        for (focused, desktop, sound, sounds, toasts) in [
+            (false, Unfocused, Unfocused, 1, 1),
+            (true, Unfocused, Unfocused, 0, 0),
+            (true, Never, Always, 1, 0),
+            (true, Always, Never, 0, 1),
+            (false, Never, Never, 0, 0),
+            (true, Always, Always, 1, 1),
+            (true, Always, Unfocused, 0, 1),
+            (true, Unfocused, Always, 1, 0),
+        ] {
+            cx.update(|cx| {
+                let cfg = cx.global_mut::<Config>();
+                cfg.notify_on_command_finish = desktop;
+                cfg.agent_notification_sound = sound;
+                cx.set_global(RecordingDelivery::default());
+            });
+            if focused {
+                window
+                    .update(cx, |_, window, _| window.activate_window())
+                    .unwrap();
+            } else {
+                let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+                visual.deactivate_window();
+            }
+            cx.run_until_parked();
+            assert_eq!(
+                window
+                    .update(cx, |_, window, _| window.is_window_active())
+                    .unwrap(),
+                focused,
+                "platform focus callback has settled"
+            );
+            report(AgentStatus::Working, &mut daemon, window, &view, cx);
+            report(AgentStatus::Waiting, &mut daemon, window, &view, cx);
+            cx.update(|cx| {
+                let delivered = cx.global::<RecordingDelivery>();
+                assert_eq!(
+                    (delivered.sounds, delivered.desktops.len()),
+                    (sounds, toasts),
+                    "focused={focused}, desktop={desktop:?}, sound={sound:?}"
+                );
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn dense_agent_events_share_sound_but_keep_individual_silent_toasts(cx: &mut TestAppContext) {
+        let (window, view, mut daemon) = harness(cx);
+        cx.update(|cx| {
+            let cfg = cx.global_mut::<Config>();
+            cfg.notify_on_command_finish = NotifyMode::Always;
+            cfg.agent_notification_sound = NotifyMode::Always;
+            cx.global_mut::<RecordingDelivery>().hold_sound = true;
+        });
+        for status in [
+            AgentStatus::Working,
+            AgentStatus::Waiting,
+            AgentStatus::Working,
+            AgentStatus::Done,
+        ] {
+            report(status, &mut daemon, window, &view, cx);
+        }
+        cx.update(|cx| {
+            let delivered = cx.global::<RecordingDelivery>();
+            assert_eq!(
+                delivered.sounds, 1,
+                "an active sound absorbs the second event"
+            );
+            assert_eq!(delivered.desktops.len(), 2);
+            assert!(
+                delivered
+                    .desktops
+                    .iter()
+                    .all(|(_, _, pane, silent)| *pane == view.entity_id() && *silent)
+            );
+            RecordingDelivery::complete_sound(cx);
+        });
+        cx.run_until_parked();
+        cx.update(|cx| {
+            assert_eq!(
+                cx.global::<RecordingDelivery>().sounds,
+                1,
+                "completion does not replay the absorbed event"
+            )
+        });
+        report(AgentStatus::Working, &mut daemon, window, &view, cx);
+        report(AgentStatus::Waiting, &mut daemon, window, &view, cx);
+        cx.update(|cx| {
+            assert_eq!(
+                cx.global::<RecordingDelivery>().sounds,
+                2,
+                "a later live event may play again"
+            )
+        });
     }
 }

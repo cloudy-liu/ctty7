@@ -245,6 +245,9 @@ pub struct Config {
     pub sidebar_group_names: BTreeMap<String, String>,
     #[serde(default, deserialize_with = "de_lenient")]
     pub notify_on_command_finish: NotifyMode,
+    /// Audio for Agent completion/input, independent of desktop notifications.
+    #[serde(default, deserialize_with = "de_lenient")]
+    pub agent_notification_sound: NotifyMode,
     pub check_for_updates: bool,
     /// Whether a found update is fetched and verified before the user asks for
     /// it. On by default: it turns "spend five minutes downloading" into "press
@@ -629,6 +632,7 @@ impl Default for Config {
             sidebar_agent_status_text: true,
             sidebar_group_names: BTreeMap::new(),
             notify_on_command_finish: NotifyMode::Unfocused,
+            agent_notification_sound: NotifyMode::Unfocused,
             check_for_updates: true,
             auto_download_updates: true,
             install_cli_on_path: true,
@@ -1262,6 +1266,18 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn agent_sound_upgrades_preserve_desktop_preferences() {
+        for desktop in ["never", "unfocused", "always"] {
+            let cfg: Config =
+                serde_json::from_str(&format!(r#"{{"notify_on_command_finish":"{desktop}"}}"#))
+                    .unwrap();
+            let saved = serde_json::to_value(&cfg).unwrap();
+            assert_eq!(saved["notify_on_command_finish"], desktop);
+            assert_eq!(saved["agent_notification_sound"], "unfocused");
+        }
+    }
+
     #[test]
     fn legacy_update_channel_is_ignored_and_not_saved() {
         for channel in ["stable", "nightly"] {

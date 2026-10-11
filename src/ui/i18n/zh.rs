@@ -566,8 +566,18 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::DocumentFillTooltip => "铺满主工作区",
         L10nKey::DocumentRestoreTooltip => "还原分屏布局",
         L10nKey::SettingsNotifications => "通知",
-        L10nKey::SettingsNotifyOnCommandFinish => "命令完成时通知",
-        L10nKey::SettingsNotifyOnCommandFinishDesc => "较长的前台命令完成后发出桌面提醒。",
+        L10nKey::SettingsNotifyOnCommandFinish => "桌面通知",
+        L10nKey::SettingsNotifyOnCommandFinishDesc => {
+            "Agent 完成或等待输入，以及较长命令完成时发出桌面提醒。"
+        }
+        L10nKey::SettingsAgentNotificationSound => "Agent 提示音",
+        L10nKey::SettingsAgentNotificationSoundDesc => {
+            "Agent 完成一轮或等待输入时播放 Codex Default 音效。与桌面通知独立控制。"
+        }
+        L10nKey::SettingsAgentNotificationSoundPreview => "试听",
+        L10nKey::SettingsSearchAgentNotificationSoundKeywords => {
+            "agent 提示音 声音 音频 通知 试听 完成 输入"
+        }
         L10nKey::SettingsNotifyThreshold => "通知阈值",
         L10nKey::SettingsNotifyThresholdDesc => "命令需运行多久才能算作“较长”。",
         L10nKey::SettingsWindow => "窗口",

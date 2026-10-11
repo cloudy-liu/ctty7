@@ -1,5 +1,6 @@
 mod adaptive_colors;
 pub(crate) mod agent_marks;
+pub(crate) mod agent_notification;
 mod agent_restore;
 mod boxdraw;
 mod cmd_editor;

@@ -2402,11 +2402,24 @@ pub(crate) fn notify_desktop(title: Option<&str>, body: &str) {
 /// click) falls back to the plain `notify-rust` path below, which is why
 /// `try_clickable_notification` reports whether it took the job.
 pub(crate) fn notify_desktop_for_pane(title: Option<&str>, body: &str, pane: Option<EntityId>) {
+    notify_desktop_for_pane_with_sound(title, body, pane, false);
+}
+
+pub(crate) fn notify_agent_desktop_for_pane(title: &str, body: &str, pane: EntityId) {
+    notify_desktop_for_pane_with_sound(Some(title), body, Some(pane), true);
+}
+
+fn notify_desktop_for_pane_with_sound(
+    title: Option<&str>,
+    body: &str,
+    pane: Option<EntityId>,
+    silent: bool,
+) {
     let summary = sanitize_notification_text(title.unwrap_or("tty7"), NOTIFY_TITLE_MAX);
     let body = sanitize_notification_text(body, NOTIFY_BODY_MAX);
 
     if let Some(pane) = pane
-        && try_clickable_notification(&summary, &body, pane.as_u64())
+        && try_clickable_notification(&summary, &body, pane.as_u64(), silent)
     {
         return;
     }
@@ -2416,6 +2429,12 @@ pub(crate) fn notify_desktop_for_pane(title: Option<&str>, body: &str, pane: Opt
         ensure_notification_app();
         let mut notif = notify_rust::Notification::new();
         notif.summary(&summary).body(&body);
+        #[cfg(target_os = "windows")]
+        if silent {
+            // notify-rust maps an unrecognized sound to Toast.sound(None),
+            // which emits <audio silent="true" /> even on its fallback AUMID.
+            notif.sound_name("none");
+        }
         // Without our own AUMID, the Windows backend falls back to
         // PowerShell's — icon and name included. Only set ours once the shell
         // has indexed a shortcut carrying it: for an AUMID it does not know,
@@ -2460,7 +2479,7 @@ fn sanitize_notification_text(s: &str, max_chars: usize) -> String {
 /// Deliver a click-to-reveal notification, reporting whether it was taken.
 /// `false` means the caller should fall back to the plain notification path.
 #[cfg(all(target_os = "macos", not(test)))]
-fn try_clickable_notification(title: &str, body: &str, leaf_id: u64) -> bool {
+fn try_clickable_notification(title: &str, body: &str, leaf_id: u64, silent: bool) -> bool {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     // `mac-notification-sys` blocks the calling thread until the user acts on
@@ -2481,6 +2500,7 @@ fn try_clickable_notification(title: &str, body: &str, leaf_id: u64) -> bool {
         return false;
     }
 
+    let _ = silent;
     let (title, body) = (title.to_string(), body.to_string());
     std::thread::spawn(move || {
         show_macos_toast(&title, &body, leaf_id);
@@ -2513,7 +2533,7 @@ fn show_macos_toast(title: &str, body: &str, leaf_id: u64) {
 }
 
 #[cfg(all(target_os = "windows", not(test)))]
-fn try_clickable_notification(title: &str, body: &str, leaf_id: u64) -> bool {
+fn try_clickable_notification(title: &str, body: &str, leaf_id: u64, silent: bool) -> bool {
     // An AUMID the shell has not indexed makes `Show` report success and drops
     // the toast on the floor, so without one the notify-rust path — which
     // deliberately keeps PowerShell's identity rather than lose the toast — is
@@ -2524,12 +2544,12 @@ fn try_clickable_notification(title: &str, body: &str, leaf_id: u64) -> bool {
     let Some(tx) = toast_thread() else {
         return false;
     };
-    tx.try_send((title.to_string(), body.to_string(), leaf_id))
+    tx.try_send((title.to_string(), body.to_string(), leaf_id, silent))
         .is_ok()
 }
 
 #[cfg(all(target_os = "windows", not(test)))]
-type ToastRequest = (String, String, u64);
+type ToastRequest = (String, String, u64, bool);
 
 /// Toasts are built, shown and *kept* on one dedicated thread.
 ///
@@ -2573,8 +2593,8 @@ fn toast_loop(rx: std::sync::mpsc::Receiver<ToastRequest>) {
     const MAX_LIVE_TOASTS: usize = 32;
     let mut live: VecDeque<ToastNotification> = VecDeque::new();
 
-    while let Ok((title, body, leaf_id)) = rx.recv() {
-        if let Some(toast) = show_windows_toast(&title, &body, leaf_id) {
+    while let Ok((title, body, leaf_id, silent)) = rx.recv() {
+        if let Some(toast) = show_windows_toast(&title, &body, leaf_id, silent) {
             if live.len() == MAX_LIVE_TOASTS {
                 live.pop_front();
             }
@@ -2588,6 +2608,7 @@ fn show_windows_toast(
     title: &str,
     body: &str,
     leaf_id: u64,
+    silent: bool,
 ) -> Option<windows::UI::Notifications::ToastNotification> {
     use windows::Data::Xml::Dom::XmlDocument;
     use windows::Foundation::TypedEventHandler;
@@ -2604,9 +2625,15 @@ fn show_windows_toast(
       <text id="2">{}</text>
     </binding>
   </visual>
+  {}
 </toast>"#,
         xml_escape(title),
-        xml_escape(body)
+        xml_escape(body),
+        if silent {
+            r#"<audio silent="true" />"#
+        } else {
+            ""
+        }
     );
 
     let doc = match XmlDocument::new() {
@@ -2669,7 +2696,7 @@ fn reveal_pane(leaf_id: u64) {
     all(target_os = "macos", not(test)),
     all(target_os = "windows", not(test))
 )))]
-fn try_clickable_notification(_title: &str, _body: &str, _leaf_id: u64) -> bool {
+fn try_clickable_notification(_title: &str, _body: &str, _leaf_id: u64, _silent: bool) -> bool {
     // Linux notifications go through notify-rust; click-to-reveal would need a
     // D-Bus action listener of its own.
     false

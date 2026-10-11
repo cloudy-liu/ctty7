@@ -631,9 +631,17 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::DocumentFillTooltip => "Fill workspace",
         L10nKey::DocumentRestoreTooltip => "Restore split layout",
         L10nKey::SettingsNotifications => "Notifications",
-        L10nKey::SettingsNotifyOnCommandFinish => "Notify on command finish",
+        L10nKey::SettingsNotifyOnCommandFinish => "Desktop notifications",
         L10nKey::SettingsNotifyOnCommandFinishDesc => {
-            "Desktop alert after a long foreground command completes."
+            "Desktop alerts for Agent completion or input, and long commands."
+        }
+        L10nKey::SettingsAgentNotificationSound => "Agent notification sound",
+        L10nKey::SettingsAgentNotificationSoundDesc => {
+            "Play the Codex Default sound when an Agent finishes a turn or needs input. Independent of desktop notifications."
+        }
+        L10nKey::SettingsAgentNotificationSoundPreview => "Preview",
+        L10nKey::SettingsSearchAgentNotificationSoundKeywords => {
+            "agent sound audio notification preview done input"
         }
         L10nKey::SettingsNotifyThreshold => "Notify threshold",
         L10nKey::SettingsNotifyThresholdDesc => {
