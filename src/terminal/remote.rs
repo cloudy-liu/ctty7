@@ -2435,6 +2435,12 @@ fn notify_desktop_for_pane_with_sound(
             // which emits <audio silent="true" /> even on its fallback AUMID.
             notif.sound_name("none");
         }
+        #[cfg(target_os = "linux")]
+        if silent {
+            // Agent audio is delivered separately. Ask the desktop server to
+            // suppress its own alert even when the Agent sound policy is off.
+            notif.hint(notify_rust::Hint::SuppressSound(true));
+        }
         // Without our own AUMID, the Windows backend falls back to
         // PowerShell's — icon and name included. Only set ours once the shell
         // has indexed a shortcut carrying it: for an AUMID it does not know,

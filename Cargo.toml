@@ -226,7 +226,7 @@ winresource = "0.1"
 # and it makes jieba unnecessary here — see the non-macos section below.
 core-foundation = "0.10"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSAppearance", "NSGraphics", "NSImage"] }
+objc2-app-kit = { version = "0.3", features = ["NSApplication", "NSResponder", "NSAppearance", "NSGraphics", "NSImage", "NSSound"] }
 # NSData feeds the runtime Dock icon for bare (non-bundled) binaries — see
 # `set_dock_icon_for_bare_binary` in main.rs.
 objc2-foundation = { version = "0.3", features = ["NSData"] }
@@ -250,6 +250,12 @@ jieba-rs = "0.10"
 # itself via `cfg`, so no feature is needed for them.
 [target.'cfg(target_os = "linux")'.dependencies]
 gpui_platform = { workspace = true, features = ["x11", "wayland"] }
+# Play the bundled Agent WAV through the desktop's PulseAudio server, including
+# PipeWire's PulseAudio compatibility service. hound only decodes the WAV; the
+# native simple API handles playback without another audio runtime.
+hound = "3.5"
+libpulse-binding = "2.30"
+libpulse-simple-binding = "2.29"
 # Linux tray (`ui::tray`): pure-Rust StatusNotifierItem over DBus (zbus — already
 # in the tree). `blocking` + `async-io` gives a synchronous handle without
 # requiring the app to own a tokio runtime; ksni runs its own service thread. On

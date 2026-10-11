@@ -98,7 +98,6 @@ fn agent_lifecycle_initial_waiting_is_a_silent_baseline(cx: &mut TestAppContext)
             cx.global::<RecordingDelivery>().desktops.is_empty(),
             "restored waiting is not a live input event"
         );
-        #[cfg(target_os = "windows")]
         assert_eq!(cx.global::<RecordingDelivery>().sounds, 0);
     });
 }
@@ -315,7 +314,6 @@ fn agent_lifecycle_screen_turns_alert_without_rich_hooks(cx: &mut TestAppContext
                 .iter()
                 .all(|(_, _, pane, silent)| *pane == view.entity_id() && *silent)
         );
-        #[cfg(target_os = "windows")]
         assert_eq!(delivered.sounds, 2);
         assert_eq!(view.read(cx).agent_status(), Some(AgentStatus::Done));
     });
@@ -362,7 +360,6 @@ fn agent_lifecycle_waiting_rearms_only_after_real_work(cx: &mut TestAppContext) 
             3,
             "two waiting episodes and one observed completion"
         );
-        #[cfg(target_os = "windows")]
         assert_eq!(cx.global::<RecordingDelivery>().sounds, 3);
     });
 }

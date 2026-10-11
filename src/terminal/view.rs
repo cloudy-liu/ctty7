@@ -14496,7 +14496,7 @@ mod native_history_gpui_tests {
 #[path = "agent_lifecycle_tests.rs"]
 mod agent_lifecycle_tests;
 
-#[cfg(all(test, target_os = "windows"))]
+#[cfg(test)]
 mod agent_notification_tests {
     use super::super::agent_notification::RecordingDelivery;
     use super::*;

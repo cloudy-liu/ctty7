@@ -5930,7 +5930,6 @@ impl Tty7App {
                 this.set_notify_mode(mode, cx);
             },
         );
-        #[cfg(target_os = "windows")]
         let agent_sound_row = {
             let sound_idx = match cx.global::<Config>().agent_notification_sound {
                 NotifyMode::Never => 0,
@@ -5980,8 +5979,6 @@ impl Tty7App {
                 .into_any_element(),
             )
         };
-        #[cfg(not(target_os = "windows"))]
-        let agent_sound_row: Option<AnyElement> = None;
         let threshold_radio = self.segmented_valued(
             "wt-notify-threshold",
             &NOTIFY_THRESHOLD_LABELS,
@@ -8589,7 +8586,6 @@ mod gpui_tests {
         (app, vcx)
     }
 
-    #[cfg(target_os = "windows")]
     #[gpui::test]
     fn agent_sound_settings_persist_without_changing_desktop_policy(cx: &mut TestAppContext) {
         use crate::core::config::NotifyMode;
@@ -8613,7 +8609,6 @@ mod gpui_tests {
         }
     }
 
-    #[cfg(target_os = "windows")]
     #[gpui::test]
     fn settings_preview_plays_with_automatic_sound_disabled(cx: &mut TestAppContext) {
         use crate::core::config::NotifyMode;
