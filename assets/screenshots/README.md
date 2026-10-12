@@ -1,13 +1,32 @@
 # README screenshots
 
-Captured on Windows on 2026-10-07 with the computer-use plugin's native window
-capture, using the production `tty7-app` executable built from `b4f7b086` plus
-the local v0.2.0 version change. These are application screenshots, not mockups.
+The README's current feature images use the newer native captures in
+`docs/testing/images/` and `docs/specs/images/`. The older WebP files below are
+kept for history and remain available to links in earlier release notes.
+
+The historical WebP captures were made on Windows on 2026-10-07 with the
+computer-use plugin's native window capture, using the production `tty7-app`
+executable built from `b4f7b086` plus the local v0.2.0 version change. They are
+application screenshots, not mockups.
 
 | Image | Contents |
 | --- | --- |
-| [agents-light-dark.webp](agents-light-dark.webp) | One image combining light and dark native captures of Claude Code's terminal and the agent session sidebar. |
-| [source-light.webp](source-light.webp) | The same document in the source editor, using automatic GitHub Light colors. |
+| [agents-light-dark.webp](agents-light-dark.webp) | Historical combined light and dark capture from the 0.2.0 README. |
+| [source-light.webp](source-light.webp) | Historical source-editor capture from the 0.2.0 README. |
+
+The current README uses these higher-resolution captures:
+
+| Image | Contents |
+| --- | --- |
+| [sidebar-status-uppercase-light.png](../../docs/testing/images/sidebar-status-uppercase-light.png) | Light native window at 1684 × 912 with agent status tags, avatars, branches, and diff counts. |
+| [sidebar-status-uppercase-dark.png](../../docs/testing/images/sidebar-status-uppercase-dark.png) | Dark native window at 1684 × 912 with the same status-focused layout. |
+| [remote-badge-windows-top.png](../../docs/testing/images/remote-badge-windows-top.png) | Native SSH sessions at 1202 × 691 with the Remote badge in top tabs. |
+| [remote-badge-windows-sidebar.png](../../docs/testing/images/remote-badge-windows-sidebar.png) | Native SSH sessions at 1202 × 691 with the Remote badge in sidebar rows. |
+| [editor-github-light-native.png](../../docs/specs/images/editor-github-light-native.png) | Native source editor and file tree capture at 1463 × 867. |
+
+The status captures were refreshed on 2026-10-09 from the status-tag work. The
+remote captures were refreshed on 2026-10-12 from the Remote badge work. Both
+sets are native application screenshots, not mockups.
 
 The agent hero used an isolated `.tty7-dev-readme-agent` configuration and a
 1280 by 540 logical-pixel window at the machine's existing Windows display scale.

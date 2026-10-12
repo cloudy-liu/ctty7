@@ -17,9 +17,18 @@ cloudy's customized tty7: the terminal that outlives its window, tuned for codin
 
 </div>
 
-<img src="assets/screenshots/agents-light-dark.webp" alt="ctty7 in light and dark appearance with Claude Code in the terminal and coding-agent sessions in the sidebar" width="1280" />
+<table>
+  <tr>
+    <td><img src="docs/testing/images/sidebar-status-uppercase-light.png" alt="ctty7 light appearance with agent status tags in the sidebar" width="100%" /></td>
+    <td><img src="docs/testing/images/sidebar-status-uppercase-dark.png" alt="ctty7 dark appearance with agent status tags in the sidebar" width="100%" /></td>
+  </tr>
+  <tr>
+    <td align="center">Light</td>
+    <td align="center">Dark</td>
+  </tr>
+</table>
 
-*Claude Code and Codex at their prompts, in light and dark, from native Windows captures. [Capture details](assets/screenshots/README.md).*
+*Native Windows captures at 1684 × 912. The sidebar shows agent avatars, status symbols, branch context, and `+N −M` working-tree counts. [Capture details](assets/screenshots/README.md).*
 
 ## What this is
 
@@ -31,13 +40,26 @@ ctty7 keeps all of that and focuses on what daily use demanded: Windows shells, 
 
 **Windows shells as first-class citizens.** Stock CMD and Cmder/Clink get prompt boundaries, working-directory reporting, completion, ghost suggestions, and prompt editing. Up/Down keeps the shell's native history, and fuzzy search reads PSReadLine and Clink history. Windows paths select as a single range, and modified Enter reaches programs that request ConPTY win32-input-mode instead of submitting the line. [Shell integration](docs/reference/shell-integration.mdx)
 
-**See which agent needs you.** Sidebar rows carry compact idle, run, input, and done tags, so one glance says who is working, who is blocked on you, and whose result is unread. Known conversations survive restarts and daemon replacement: Claude Code and Codex resume their exact session, and when an identity cannot be recovered, restore leaves a usable shell instead of a session picker. Agent detection walks the Windows process tree, so prompt helpers and MCP child processes are not mistaken for the foreground agent, and every avatar follows the theme. [Agent status](docs/agents/status.mdx) · [Sessions](docs/agents/sessions.mdx)
+**See which agent needs you.** Sidebar rows carry compact `idle`, `run`, `input`, and `done` tags, status symbols, branch names, and live `+N −M` working-tree counts. Palette commands can send the current selection or a repository diff to the running agent, and `tty7 wait` lets scripts wait for agent state changes. Desktop notifications, tray attention, and the bundled agent sound can be enabled independently. Known conversations survive restarts and daemon replacement: Claude Code and Codex resume their exact session, and when an identity cannot be recovered, restore leaves a usable shell instead of a session picker. Agent detection walks the Windows process tree, so prompt helpers and MCP child processes are not mistaken for the foreground agent, and every avatar follows the theme. [Agent status](docs/agents/status.mdx) · [Sessions](docs/agents/sessions.mdx) · [Orchestration](docs/agents/orchestration.mdx)
 
-**Read and edit in the same window.** Markdown opens in a GitHub-styled preview with Mermaid diagrams and installable v2 themes, sharing one buffer with the source editor. The editor follows the app appearance with GitHub Light or Atom One Dark colors and its own typography. File trees and editor headers use Symbols icons, documents fill and restore, and diffs switch between split and unified layouts. [Markdown themes](docs/customization/markdown-themes.mdx)
+**Read and edit in the same window.** Markdown opens in a GitHub-styled preview with Mermaid diagrams, zoom and pan controls, copy buttons, front matter tables, and installable v2 themes, sharing one buffer with the source editor. The editor follows the app appearance with GitHub Light or Atom One Dark colors and its own typography. File trees show dotfiles with Symbols icons and support Copy Name, documents fill and restore, and diffs switch between split and unified layouts. [Markdown themes](docs/customization/markdown-themes.mdx) · [Diffs](docs/git/diffs.mdx)
 
-![GitHub Light source editor in ctty7](assets/screenshots/source-light.webp)
+![GitHub Light source editor in ctty7](docs/specs/images/editor-github-light-native.png)
 
-**Remote work without ceremony.** WSL resolves the account's login shell, and Windows packages bundle the Linux server needed to bootstrap it. An `ssh` started inside a pane is detected, so the sidebar follows the remote context instead of the local one. [Remote workspaces](docs/remote/workspaces.mdx) · [SSH](docs/remote/ssh.mdx)
+**Remote work without ceremony.** WSL resolves the account's login shell, and Windows packages bundle the Linux server needed to bootstrap it. Native SSH supports saved profiles, keychain credentials, jump hosts, SFTP, and port forwarding. An `ssh` started inside a pane is detected, and the blue Remote badge appears in tabs and sidebar rows so remote sessions remain distinct from local ones. [Remote workspaces](docs/remote/workspaces.mdx) · [SSH](docs/remote/ssh.mdx)
+
+<table>
+  <tr>
+    <td><img src="docs/testing/images/remote-badge-windows-top.png" alt="Remote badges in ctty7 top tabs" width="100%" /></td>
+    <td><img src="docs/testing/images/remote-badge-windows-sidebar.png" alt="Remote badges in ctty7 sidebar rows" width="100%" /></td>
+  </tr>
+  <tr>
+    <td align="center">Top tabs</td>
+    <td align="center">Sidebar</td>
+  </tr>
+</table>
+
+*Remote badge captures from the native Windows SSH fixture, 1202 × 691 each.*
 
 **A release line of its own.** ctty7 runs its own versioned releases with in-app update checks that do not depend on the GitHub REST API, and defaults the terminal bell to off. [Updates](docs/reference/updates.mdx)
 
