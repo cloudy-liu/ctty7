@@ -71,6 +71,12 @@ local observation rather than a statistical benchmark or power-use estimate.
 The important lifecycle result is that native minimized and hidden windows
 stop renewing animation work and resume when shown.
 
+The native top-tab fixture also refreshed at about twelve times per second,
+stopped while minimized or hidden, and resumed after restore/show. Its visible
+sample used 9.520% of one processor, or 0.595% of the whole machine, with average
+root UI build times of 0.84 to 0.94 milliseconds. There was no separate native
+top-tab CPU baseline in the production-path comparison.
+
 Two lossless native window bitmaps were taken 250 milliseconds apart. Their
 pixel differences are confined to the two working status symbols; both have
 the same changed region relative to their own location. The surrounding
