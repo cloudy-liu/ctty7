@@ -85,6 +85,19 @@ logos, text and layout are unchanged.
 [Native frame A](images/run-badge-native-sidebar-a.png) and
 [native frame B](images/run-badge-native-sidebar-b.png).
 
+## Before and after recording
+
+| Before: static working symbol | After: rotating working symbol |
+| --- | --- |
+| ![Native sidebar before animation](images/run-badge-native-before.png) | ![Native sidebar after animation](images/run-badge-native-after.gif) |
+
+Both panels are crops of native Windows window captures with the same fixture
+and appearance. The source pixels are not resized or redrawn. All 48 baseline
+captures were identical. The after recording contains twelve distinct native
+angles, with changes confined to the two working badges. The GIF uses a shared
+palette and a 1.95-second loop cut at the return to its initial native pose.
+Its crop is 454 by 510 pixels; GitHub may scale the displayed panels to fit.
+
 ## Verification limits
 
 - Native CPU and window-hide/minimize measurements were taken on Windows only.
