@@ -65,7 +65,7 @@ included in CPU totals. CPU percentages below use one logical processor as
 
 Visible animation added about 0.45 percentage points of whole-machine CPU in
 the first sample. Its average root UI build time was 1.08 to 1.21 milliseconds
-across the visible sampling windows. This times construction of the root UI,
+in the first visible sample. This times construction of the root UI,
 not the entire frame or GPU work. CPU varied between phases, so the table is a
 local observation rather than a statistical benchmark or power-use estimate.
 The important lifecycle result is that native minimized and hidden windows
