@@ -77,6 +77,16 @@ colours:
 
 A finished turn keeps its check until you look at the pane, then reads as idle.
 
+The yellow working half-circle rotates clockwise once per second, in twelve
+steps, in both the sidebar and the top tab bar. Its background, the agent logo
+and the `run` text stay still. Other states keep their static symbols.
+
+Working badges share one refresh clock per window. Filtering them out,
+collapsing the sidebar or scrolling them out of view stops animation refreshes;
+showing them again resumes rotation. An unfocused visible window still animates.
+The current UI framework does not expose the system's reduced-motion preference,
+so this animation does not yet follow that preference.
+
 A sidebar row also shows a compact rounded tag at the start of its second line,
 using the same state colour with a stronger fill. Semibold text
 uses deeper ink in light themes. The labels stay lowercase and in

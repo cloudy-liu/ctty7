@@ -36,6 +36,34 @@ pub(crate) const GRAB_HANDLE_W: f32 = 80.;
 
 const KEEP_SEGMENTS: usize = 3;
 
+/// A single clock for the window's working badges. Only actual visible paint
+/// renews its one-shot wake, so an idle or unpainted window cannot spin a loop.
+pub(crate) struct RunBadgeAnimation {
+    epoch: std::time::Instant,
+    phase: f32,
+    visible: bool,
+    pending: bool,
+    owner: gpui::WeakEntity<Tty7App>,
+}
+
+impl RunBadgeAnimation {
+    pub(crate) fn new(cx: &Context<Tty7App>) -> Self {
+        Self {
+            epoch: cx.background_executor().now(),
+            phase: 0.,
+            visible: false,
+            pending: false,
+            owner: cx.weak_entity(),
+        }
+    }
+
+    pub(crate) fn begin_frame(&mut self, cx: &App) {
+        self.visible = false;
+        let elapsed = cx.background_executor().now().duration_since(self.epoch);
+        self.phase = ((elapsed.as_nanos() * 12 / 1_000_000_000) % 12) as f32 / 12.;
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TabAvatar {
     Agent(crate::core::cli_agent::CLIAgent),
@@ -1138,11 +1166,14 @@ impl Tty7App {
     /// colours — on a disc of the surface, so the symbol stays legible over
     /// whatever part of the logo it covers.
     fn status_badge(
+        &self,
         indicator: crate::ui::status_indicator::StatusIndicator,
         size: f32,
         surface: gpui::Hsla,
     ) -> gpui::AnyElement {
         let d = (size * 0.5).max(9.);
+        let working = indicator == crate::ui::status_indicator::StatusIndicator::Working;
+        let phase = self.run_badge_animation.borrow().phase;
         div()
             .absolute()
             .right(px(-(d * 0.25)))
@@ -1157,8 +1188,62 @@ impl Tty7App {
                 gpui::svg()
                     .path(indicator.icon_path())
                     .size(px(d * 0.9))
-                    .text_color(indicator.color(surface)),
+                    .text_color(indicator.color(surface))
+                    .when(working, |icon| {
+                        icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(
+                            phase,
+                        )))
+                    }),
             )
+            .when(working, |badge| {
+                let animation = self.run_badge_animation.clone();
+                badge.child(
+                    canvas(
+                        |_, _, _| (),
+                        move |bounds, _, window, cx| {
+                            if !bounds.intersects(&window.content_mask().bounds)
+                                || !bounds.intersects(&Bounds::new(
+                                    gpui::point(px(0.), px(0.)),
+                                    window.viewport_size(),
+                                ))
+                            {
+                                return;
+                            }
+                            let mut state = animation.borrow_mut();
+                            state.visible = true;
+                            if state.pending {
+                                return;
+                            }
+                            state.pending = true;
+                            let elapsed = cx
+                                .background_executor()
+                                .now()
+                                .duration_since(state.epoch)
+                                .as_nanos();
+                            let next_step = elapsed * 12 / 1_000_000_000 + 1;
+                            let next = (next_step * 1_000_000_000).div_ceil(12);
+                            let delay = std::time::Duration::from_nanos((next - elapsed) as u64);
+                            let owner = state.owner.clone();
+                            drop(state);
+                            window
+                                .spawn(cx, async move |cx| {
+                                    cx.background_executor().timer(delay).await;
+                                    let visible = {
+                                        let mut state = animation.borrow_mut();
+                                        state.pending = false;
+                                        state.visible
+                                    };
+                                    if visible {
+                                        let _ = owner.update(cx, |_, cx| cx.notify());
+                                    }
+                                })
+                                .detach();
+                        },
+                    )
+                    .absolute()
+                    .inset_0(),
+                )
+            })
             .into_any_element()
     }
 
@@ -1182,7 +1267,7 @@ impl Tty7App {
         // Opaque on purpose: the sidebar's own fill goes translucent under a
         // window material, and the logo would show through the disc.
         let surface = cx.theme().sidebar;
-        let badge = indicator.map(|i| Self::status_badge(i, size, surface));
+        let badge = indicator.map(|i| self.status_badge(i, size, surface));
         let tooltip = match avatar {
             TabAvatar::Agent(agent) => Some(match indicator {
                 Some(state) => format!("{} — {}", agent.display_name(), state.label()),

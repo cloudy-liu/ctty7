@@ -847,6 +847,7 @@ pub struct Tty7App {
     pub(crate) right_panel_visible: bool,
     pub(crate) right_panel_tab: RightPanelTab,
     pub(crate) sidebar_collapsed: bool,
+    pub(crate) run_badge_animation: Rc<RefCell<crate::ui::tab_strip::RunBadgeAnimation>>,
     pub(crate) sidebar_scroll: gpui::ScrollHandle,
     pub(crate) reorder: Rc<RefCell<Option<crate::ui::reorder::Reorder>>>,
     /// The pane the pointer is over, so only that one offers its drag handle.
@@ -1464,6 +1465,9 @@ impl Tty7App {
             right_panel_visible,
             right_panel_tab,
             sidebar_collapsed,
+            run_badge_animation: Rc::new(RefCell::new(
+                crate::ui::tab_strip::RunBadgeAnimation::new(cx),
+            )),
             sidebar_scroll: gpui::ScrollHandle::new(),
             reorder: Rc::new(RefCell::new(None)),
             pane_hover: Rc::new(Cell::new(None)),
@@ -7149,6 +7153,7 @@ impl Render for Tty7App {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         #[cfg(test)]
         render_probe::record();
+        self.run_badge_animation.borrow_mut().begin_frame(cx);
         let prof = crate::ui::perf::enabled().then(std::time::Instant::now);
         // Every window's root is this view, so setting the rem here is what
         // makes `ui_font_size` reach the whole interface — the rem ladder
@@ -9973,6 +9978,211 @@ mod ssh_tab_gpui_tests {
             assert_eq!(TabAvatar::choose(agent, None), TabAvatar::Terminal);
             assert_eq!(app.tab_label(tab, 0, Some(window), cx), "My deployment");
         });
+    }
+}
+
+#[cfg(test)]
+mod run_badge_gpui_tests {
+    use super::{Tab, render_probe, test_window};
+    use crate::core::cli_agent::{AgentSessionState, AgentStatus, CLIAgent};
+    use crate::core::config::{Config, TabBarPosition};
+    use crate::daemon::protocol::DaemonMsg;
+    use crate::terminal::view::quiet_test_pane;
+    use crate::ui::pane::{Pane, PaneSlot};
+    use gpui::{Entity, TestAppContext, VisualTestContext};
+    use std::time::Duration;
+
+    fn working_window(
+        cx: &mut TestAppContext,
+        count: usize,
+    ) -> (
+        Entity<super::Tty7App>,
+        VisualTestContext,
+        Vec<crate::daemon::transport::Stream>,
+    ) {
+        let (app, mut vcx) = test_window::harness(cx);
+        vcx.update(|_, cx| {
+            let mut cfg = cx.global::<Config>().clone();
+            cfg.cursor_blink = false;
+            cfg.tab_bar_position = TabBarPosition::Left;
+            cx.set_global(cfg);
+        });
+        let mut streams = app.update_in(&mut vcx, |app, window, cx| {
+            let mut streams = Vec::new();
+            for i in 0..count {
+                let (view, stream) = quiet_test_pane(i as u64 + 1, window, cx);
+                app.tabs.push(Tab::new(Pane::leaf(PaneSlot::Ready(view))));
+                streams.push(stream);
+            }
+            cx.notify();
+            streams
+        });
+        for stream in &mut streams {
+            DaemonMsg::Agent(Some(CLIAgent::Claude))
+                .encode(stream)
+                .unwrap();
+            report(stream, AgentStatus::Working);
+        }
+        for _ in 0..200 {
+            vcx.background_executor.run_until_parked();
+            if app.read_with(&vcx, |app, cx| {
+                app.tabs
+                    .iter()
+                    .all(|tab| tab.agent_status(cx) == Some(AgentStatus::Working))
+            }) {
+                app.update(&mut vcx, |_, cx| cx.notify());
+                vcx.background_executor.run_until_parked();
+                // Drain the pane's initial foreground/status poll before
+                // counting animation draws.
+                draws_over(&mut vcx, 1000);
+                return (app, vcx, streams);
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        panic!("daemon working reports did not reach the window");
+    }
+
+    fn report(stream: &mut crate::daemon::transport::Stream, status: AgentStatus) {
+        DaemonMsg::AgentStatus(Some(AgentSessionState {
+            status,
+            message: None,
+            session_id: Some("run-badge-test".into()),
+            launch_argv: Some(vec!["claude".into()]),
+            unstarted: false,
+            rich: true,
+            cwd: None,
+            activity: 0,
+        }))
+        .encode(stream)
+        .unwrap();
+    }
+
+    fn draws_over(vcx: &mut VisualTestContext, milliseconds: usize) -> u64 {
+        render_probe::arm(u64::MAX);
+        for _ in 0..milliseconds / 10 {
+            vcx.executor().advance_clock(Duration::from_millis(10));
+            vcx.background_executor.run_until_parked();
+        }
+        render_probe::draws()
+    }
+
+    #[gpui::test]
+    fn visible_working_badge_refreshes_at_twelve_steps_per_second(cx: &mut TestAppContext) {
+        let (app, mut vcx, _streams) = working_window(cx, 1);
+        let draws = draws_over(&mut vcx, 1000);
+        assert_eq!(
+            app.read_with(&vcx, |app, cx| app.tabs[0].agent_status(cx)),
+            Some(AgentStatus::Working)
+        );
+        assert_eq!(draws, 12);
+    }
+
+    #[gpui::test]
+    fn several_working_badges_share_the_windows_refresh_rate(cx: &mut TestAppContext) {
+        let (_app, mut vcx, _streams) = working_window(cx, 4);
+        assert_eq!(draws_over(&mut vcx, 1000), 12);
+    }
+
+    #[gpui::test]
+    fn status_reports_stop_rotation_and_working_resumes_it(cx: &mut TestAppContext) {
+        let (app, mut vcx, mut streams) = working_window(cx, 1);
+        for status in [AgentStatus::Waiting, AgentStatus::Done, AgentStatus::Idle] {
+            report(&mut streams[0], status);
+            for _ in 0..200 {
+                if app.read_with(&vcx, |app, cx| app.tabs[0].agent_status(cx)) == Some(status) {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            assert_eq!(
+                app.read_with(&vcx, |app, cx| app.tabs[0].agent_status(cx)),
+                Some(status)
+            );
+            app.update(&mut vcx, |_, cx| cx.notify());
+            vcx.background_executor.run_until_parked();
+            assert!(draws_over(&mut vcx, 1000) <= 1, "{status:?} kept animating");
+
+            report(&mut streams[0], AgentStatus::Working);
+            for _ in 0..200 {
+                if app.read_with(&vcx, |app, cx| app.tabs[0].agent_status(cx))
+                    == Some(AgentStatus::Working)
+                {
+                    break;
+                }
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            app.update(&mut vcx, |_, cx| cx.notify());
+            vcx.background_executor.run_until_parked();
+            draws_over(&mut vcx, 1000);
+            assert_eq!(draws_over(&mut vcx, 1000), 12);
+        }
+    }
+
+    #[gpui::test]
+    fn filtering_and_collapsing_the_sidebar_stop_hidden_badges(cx: &mut TestAppContext) {
+        let (app, mut vcx, _streams) = working_window(cx, 1);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.sidebar_search.update(cx, |search, cx| {
+                search.set_value("no-matching-run-badge", window, cx);
+            });
+            cx.notify();
+        });
+        vcx.background_executor.run_until_parked();
+        assert_eq!(draws_over(&mut vcx, 1000), 0);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.sidebar_search
+                .update(cx, |search, cx| search.set_value("", window, cx));
+            cx.notify();
+        });
+        vcx.background_executor.run_until_parked();
+        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        app.update(&mut vcx, |app, cx| app.toggle_left_panel(cx));
+        vcx.background_executor.run_until_parked();
+        assert_eq!(draws_over(&mut vcx, 1000), 0);
+        app.update(&mut vcx, |app, cx| app.toggle_left_panel(cx));
+        vcx.background_executor.run_until_parked();
+        assert_eq!(draws_over(&mut vcx, 1000), 12);
+    }
+
+    #[gpui::test]
+    fn a_working_badge_clipped_by_sidebar_scroll_stops_until_visible(cx: &mut TestAppContext) {
+        let (app, mut vcx, mut streams) = working_window(cx, 1);
+        vcx.simulate_resize(gpui::size(gpui::px(960.), gpui::px(480.)));
+        app.update_in(&mut vcx, |app, window, cx| {
+            for i in 2..22 {
+                let (view, stream) = quiet_test_pane(i, window, cx);
+                app.tabs.push(Tab::new(Pane::leaf(PaneSlot::Ready(view))));
+                streams.push(stream);
+            }
+            cx.notify();
+        });
+        vcx.background_executor.run_until_parked();
+        draws_over(&mut vcx, 1000);
+        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        app.update(&mut vcx, |app, cx| {
+            app.sidebar_scroll
+                .set_offset(gpui::point(gpui::px(0.), gpui::px(-10000.)));
+            cx.notify();
+        });
+        vcx.background_executor.run_until_parked();
+        assert_eq!(draws_over(&mut vcx, 1000), 0);
+        app.update(&mut vcx, |app, cx| {
+            app.sidebar_scroll
+                .set_offset(gpui::point(gpui::px(0.), gpui::px(0.)));
+            cx.notify();
+        });
+        vcx.background_executor.run_until_parked();
+        assert_eq!(draws_over(&mut vcx, 1000), 12);
+    }
+
+    #[gpui::test]
+    fn top_bar_working_badges_keep_animating_when_the_window_loses_focus(cx: &mut TestAppContext) {
+        let (app, mut vcx, _streams) = working_window(cx, 2);
+        app.update(&mut vcx, |app, cx| app.toggle_tab_sidebar(cx));
+        vcx.background_executor.run_until_parked();
+        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        vcx.deactivate_window();
+        assert_eq!(draws_over(&mut vcx, 1000), 12);
     }
 }
 
