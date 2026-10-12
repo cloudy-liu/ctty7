@@ -1226,20 +1226,20 @@ impl Tty7App {
                         .absolute()
                         .right(px(-5.))
                         .top(px(-4.))
-                        .w(px(18.))
-                        .h(px(10.))
-                        .rounded(px(2.))
+                        .size(px(14.))
+                        .rounded_full()
                         .border_1()
-                        .border_color(cx.theme().muted_foreground.opacity(0.45))
-                        .bg(surface)
+                        .border_color(surface)
+                        .bg(gpui::rgb(0x0078d4))
                         .flex()
                         .items_center()
                         .justify_center()
-                        .text_size(px(7.))
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .line_height(relative(1.))
-                        .text_color(cx.theme().foreground.opacity(0.85))
-                        .child("SSH"),
+                        .child(
+                            gpui::svg()
+                                .path("icons/remote.svg")
+                                .size(px(12.))
+                                .text_color(gpui::white()),
+                        ),
                 )
             })
             .when_some(tooltip, |avatar, tip| {
