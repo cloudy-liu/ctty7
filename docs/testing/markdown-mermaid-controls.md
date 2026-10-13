@@ -1,5 +1,51 @@
 # Mermaid control verification
 
+## Wheel zoom follow-up, 2026-10-14
+
+The wheel handler previously only panned and never changed zoom. Inline diagrams
+now zoom with Ctrl+wheel (or the platform modifier), while expanded diagrams zoom
+with ordinary wheel input. Both paths share the buttons' 25%–800% limits and
+refresh the window after changing the transform. At the initial inline size,
+ordinary wheel input still scrolls the document.
+
+The application reading-view test failed before the fix at `Ctrl+wheel must zoom
+the cached diagram`. A new test of the production expanded dialog failed at
+`wheel must enlarge the expanded diagram`. Both pass after the fix. The dialog
+test also checks pixel wheel events at both zoom limits and Reset relative to
+the viewport, independent of the dialog's entrance animation.
+
+On Windows, `cargo test --locked --bin tty7-app markdown -- --test-threads=1`
+passed 67 tests with two existing opt-in tests ignored. This includes both
+interaction regressions, button zoom, dragging at initial and enlarged sizes,
+directional movement, copying, and ordinary document scrolling. Formatting and
+diff checks passed. These are GPUI interaction tests; this follow-up did not
+repeat native desktop screenshot captures or replace the installed application.
+The focused Mermaid selection passed all 12 tests. `cargo build --locked --bin
+tty7-app` also succeeded, and the copied local test executable matched the build.
+
+## Movement regression, 2026-10-13
+
+The previous panning clamp reduced both movement limits to zero at the initial
+zoom of 1. Fitted inline and expanded diagrams now allow dragging and directional
+movement, while zoomed diagrams retain their edge limits. Wheel input over a
+fitted inline diagram continues scrolling the document.
+
+Mermaid viewport changes explicitly refresh the window after zoom, reset,
+directional movement, dragging, or zoomed scrolling so the cached Markdown
+reading view paints the new transform immediately.
+
+The regression failed before the fix and passed afterwards. The control test now
+opens a Markdown file through the application editor and checks the cached reading
+view, including a redraw between mouse press and release, zoom, dragging at both
+initial and enlarged sizes, reset, copy, and document scrolling. It records the
+transform produced by rendering because GPUI does not retain debug element bounds
+when reusing a cached frame. Zoom-button failure was not reproduced by this test.
+
+On Windows, all 11 Mermaid tests passed. The broader Markdown selection passed
+serially with 66 tests passing and two opt-in tests skipped. A theme-selection test
+failed in the parallel selection and passed in the serial run. Formatting and diff
+checks passed; this follow-up did not repeat the native screenshot captures below.
+
 Verified on Windows on 2026-10-09 at 175% system DPI and 100% application scale,
 using the production Markdown reading view and its native fixture.
 

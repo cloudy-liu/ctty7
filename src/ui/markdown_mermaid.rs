@@ -62,6 +62,8 @@ pub(super) struct DiagramViewer {
     natural_width: Pixels,
     height: Pixels,
     drag: Option<Point<Pixels>>,
+    #[cfg(test)]
+    pub(super) rendered_transform: (f32, Point<Pixels>),
 }
 
 impl DiagramViewer {
@@ -78,18 +80,26 @@ impl DiagramViewer {
             natural_width: px(0.),
             height: px(0.),
             drag: None,
+            #[cfg(test)]
+            rendered_transform: (1., point(px(0.), px(0.))),
         }
     }
 
     fn pan_by(&mut self, delta: Point<Pixels>) -> bool {
         let old = self.pan;
-        let max_x = (self.image_width * (self.zoom - 1.) / 2.).max(px(0.));
-        let max_y = (self.height * (self.zoom - 1.) / 2.).max(px(0.));
+        // Keep fitted diagrams movable without losing the zoomed edge limits.
+        let max_x = (self.image_width * (self.zoom - 1.) / 2.).max(self.image_width / 2.);
+        let max_y = (self.height * (self.zoom - 1.) / 2.).max(self.height / 2.);
         self.pan = point(
             (self.pan.x + delta.x).clamp(-max_x, max_x),
             (self.pan.y + delta.y).clamp(-max_y, max_y),
         );
         self.pan != old
+    }
+
+    fn zoom_by(&mut self, factor: f32) {
+        self.zoom = (self.zoom * factor).clamp(0.25, 8.);
+        self.pan_by(point(px(0.), px(0.)));
     }
 
     fn control(id: &'static str, icon: impl Into<Icon>, label: &'static str, cx: &App) -> Button {
@@ -109,6 +119,10 @@ impl DiagramViewer {
 
 impl Render for DiagramViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(test)]
+        {
+            self.rendered_transform = (self.zoom, self.pan);
+        }
         let scale = window.rem_size() / px(16.);
         if self.natural_width == px(0.) {
             let mut probe = img(self.image.clone()).into_any_element();
@@ -164,11 +178,15 @@ impl Render for DiagramViewer {
             ),
         ]
         .map(|(id, icon, label, x, y)| {
-            Self::control(id, icon, t(label), cx).on_click(cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                this.pan_by(point(px(x * scale), px(y * scale)));
-                cx.notify();
-            }))
+            Self::control(id, icon, t(label), cx).on_click(cx.listener(
+                move |this, _, window, cx| {
+                    cx.stop_propagation();
+                    if this.pan_by(point(px(x * scale), px(y * scale))) {
+                        window.refresh();
+                    }
+                    cx.notify();
+                },
+            ))
         });
         let [up, left, right, down] = controls;
         let zoom_in = Self::control(
@@ -177,10 +195,12 @@ impl Render for DiagramViewer {
             t(L10nKey::MarkdownZoomIn),
             cx,
         )
-        .on_click(cx.listener(|this, _, _, cx| {
+        .on_click(cx.listener(|this, _, window, cx| {
             cx.stop_propagation();
-            this.zoom = (this.zoom * 1.25).min(8.);
-            this.pan_by(point(px(0.), px(0.)));
+            this.zoom_by(1.25);
+            // The Markdown reading pane is cached for fast scrolling. Force the
+            // cached paint to observe viewport-only state changes immediately.
+            window.refresh();
             cx.notify();
         }));
         let zoom_out = Self::control(
@@ -189,10 +209,10 @@ impl Render for DiagramViewer {
             t(L10nKey::MarkdownZoomOut),
             cx,
         )
-        .on_click(cx.listener(|this, _, _, cx| {
+        .on_click(cx.listener(|this, _, window, cx| {
             cx.stop_propagation();
-            this.zoom = (this.zoom / 1.25).max(0.25);
-            this.pan_by(point(px(0.), px(0.)));
+            this.zoom_by(1. / 1.25);
+            window.refresh();
             cx.notify();
         }));
         let reset = Self::control(
@@ -201,10 +221,11 @@ impl Render for DiagramViewer {
             t(L10nKey::Reset),
             cx,
         )
-        .on_click(cx.listener(|this, _, _, cx| {
+        .on_click(cx.listener(|this, _, window, cx| {
             cx.stop_propagation();
             this.zoom = 1.;
             this.pan = point(px(0.), px(0.));
+            window.refresh();
             cx.notify();
         }));
         let toolbar = div()
@@ -258,29 +279,42 @@ impl Render for DiagramViewer {
                     this.drag = Some(event.position);
                 }),
             )
-            .on_mouse_move(cx.listener(|this, event: &gpui::MouseMoveEvent, _, cx| {
-                if event.pressed_button != Some(MouseButton::Left) {
-                    this.drag = None;
-                    return;
-                }
-                if let Some(previous) = this.drag {
-                    this.drag = Some(event.position);
-                    this.pan_by(event.position - previous);
-                    cx.stop_propagation();
-                    cx.notify();
-                }
-            }))
+            .on_mouse_move(
+                cx.listener(|this, event: &gpui::MouseMoveEvent, window, cx| {
+                    if event.pressed_button != Some(MouseButton::Left) {
+                        this.drag = None;
+                        return;
+                    }
+                    if let Some(previous) = this.drag {
+                        this.drag = Some(event.position);
+                        let moved = this.pan_by(event.position - previous);
+                        cx.stop_propagation();
+                        if moved {
+                            window.refresh();
+                            cx.notify();
+                        }
+                    }
+                }),
+            )
             .on_mouse_up(
                 MouseButton::Left,
                 cx.listener(|this, _, _, _| this.drag = None),
             )
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
+            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, window, cx| {
                 let delta = match event.delta {
                     ScrollDelta::Pixels(delta) => delta,
                     ScrollDelta::Lines(delta) => point(px(delta.x * 20.), px(delta.y * 20.)),
                 };
-                if this.pan_by(delta) {
+                if delta.y != px(0.)
+                    && (this.expanded || event.modifiers.control || event.modifiers.platform)
+                {
+                    this.zoom_by(1.25_f32.powf(f32::from(delta.y) / 20.));
                     cx.stop_propagation();
+                    window.refresh();
+                    cx.notify();
+                } else if this.zoom > 1. && this.pan_by(delta) {
+                    cx.stop_propagation();
+                    window.refresh();
                     cx.notify();
                 }
             }))
@@ -476,6 +510,96 @@ fn color_to_hex(color: &Color) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn expanded_mermaid_buttons_and_wheel_repaint_the_diagram(cx: &mut gpui::TestAppContext) {
+        let (_, mut vcx) = crate::ui::app::test_window::harness(cx);
+        vcx.simulate_resize(gpui::size(px(1000.), px(800.)));
+        vcx.update(|window, cx| {
+            super::super::markdown_preview::init(Default::default(), cx);
+            let source = "graph TD; A-->B";
+            let svg =
+                render_mermaid(source, &crate::core::markdown_theme::builtin(), false).unwrap();
+            let aspect = aspect_ratio(&svg);
+            open_diagram(
+                ImageSource::Image(std::sync::Arc::new(gpui::Image::from_bytes(
+                    gpui::ImageFormat::Svg,
+                    svg.into_bytes(),
+                ))),
+                source.into(),
+                aspect,
+                window,
+                cx,
+            );
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            window.refresh();
+            let _ = window.draw(cx);
+        });
+        let fitted = vcx.debug_bounds("diagram-content").unwrap();
+        let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
+        let zoom = vcx.debug_bounds("diagram-zoom-in").unwrap();
+        let reset = vcx.debug_bounds("diagram-reset").unwrap();
+        vcx.simulate_click(zoom.center(), gpui::Modifiers::none());
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(
+            vcx.debug_bounds("diagram-content").unwrap().size.width,
+            fitted.size.width * 1.25
+        );
+        vcx.simulate_event(ScrollWheelEvent {
+            position: viewport.origin + point(px(32.), px(64.)),
+            delta: ScrollDelta::Lines(point(0., 1.)),
+            modifiers: gpui::Modifiers::none(),
+            touch_phase: gpui::TouchPhase::Moved,
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(
+            vcx.debug_bounds("diagram-content").unwrap().size.width > fitted.size.width * 1.25,
+            "wheel must enlarge the expanded diagram"
+        );
+        for (delta, expected) in [(20_000., 8.), (-20_000., 0.25)] {
+            vcx.simulate_event(ScrollWheelEvent {
+                position: viewport.origin + point(px(32.), px(64.)),
+                delta: ScrollDelta::Pixels(point(px(0.), px(delta))),
+                modifiers: gpui::Modifiers::none(),
+                touch_phase: gpui::TouchPhase::Moved,
+            });
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            assert_eq!(
+                vcx.debug_bounds("diagram-content").unwrap().size.width,
+                fitted.size.width * expected
+            );
+        }
+        vcx.simulate_click(reset.center(), gpui::Modifiers::none());
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let restored = vcx.debug_bounds("diagram-content").unwrap();
+        assert_eq!(restored.size, fitted.size);
+        // The dialog can still be animating; reset is relative to its viewport.
+        assert_eq!(
+            restored.origin,
+            vcx.debug_bounds("diagram-viewport").unwrap().origin
+        );
+    }
+
+    #[test]
+    fn fitted_diagrams_can_be_dragged_and_moved_with_the_controls() {
+        for expanded in [false, true] {
+            let mut viewer = DiagramViewer::new("diagram.svg".into(), "".into(), 2., expanded);
+            viewer.image_width = px(600.);
+            viewer.height = px(400.);
+            assert!(viewer.pan_by(point(px(32.), px(-32.))));
+            assert_eq!(viewer.pan, point(px(32.), px(-32.)));
+        }
+    }
 
     #[test]
     fn expanded_viewer_pan_reaches_the_bottom_of_a_zoomed_diagram() {

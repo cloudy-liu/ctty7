@@ -16,6 +16,11 @@ graph TD
 
 The diagram renders as an SVG in the native reading view. Its toolbar copies
 the original source or opens a larger viewer with zoom, pan and reset controls.
+Use the zoom buttons or Ctrl+wheel to zoom an inline diagram. In the expanded
+viewer, ordinary wheel input zooms directly. Drag or use the arrow controls to
+move the diagram, and Reset restores its fitted size and position. Zoom ranges
+from 25% to 800%. At the initial inline size, ordinary wheel input scrolls the
+document.
 Fences accept both LF and Windows CRLF line endings without changing the source
 buffer or the copied diagram code.
 
