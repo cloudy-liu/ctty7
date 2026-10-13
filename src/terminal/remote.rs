@@ -91,6 +91,7 @@ struct ReaderSignals {
     /// (`CSI ? 9001 h`). Sticky across reconnect: the handshake is often not
     /// in a later snapshot.
     win32_input: Arc<AtomicBool>,
+    osc_progress: Arc<Mutex<String>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -517,6 +518,8 @@ pub struct RemoteTerminal {
     /// (`CSI ? 9001 h`). Cloned into each reader so a relink keeps the latch:
     /// the handshake is typically not in a later snapshot.
     win32_input: Arc<AtomicBool>,
+    /// Latest OSC 9;4 report in Herdr's `4;state;value` detection shape.
+    osc_progress: Arc<Mutex<String>>,
     route: PaneRoute,
     proxy: EventProxy,
     reader_thread: Option<JoinHandle<()>>,
@@ -805,6 +808,9 @@ impl RemoteTerminal {
         // carries the agent's events with it, so the outline rebuilds itself
         // from the bytes rather than being kept across the reset.
         self.turns.clear();
+        // Progress belongs to this link's replay. A retired reader must not
+        // publish an old report into the newly attached terminal.
+        self.osc_progress = Arc::new(Mutex::new(String::new()));
 
         let quit = Arc::new(AtomicBool::new(false));
         let reader = Self::spawn_reader(
@@ -831,6 +837,7 @@ impl RemoteTerminal {
                 images: self.images.clone(),
                 turns: self.turns.clone(),
                 win32_input: self.win32_input.clone(),
+                osc_progress: self.osc_progress.clone(),
             },
         );
         self.reader_thread = Some(reader);
@@ -886,6 +893,7 @@ impl RemoteTerminal {
         let images = crate::terminal::images::ImageStore::new();
         let turns = AgentTurns::new();
         let win32_input = Arc::new(AtomicBool::new(false));
+        let osc_progress = Arc::new(Mutex::new(String::new()));
 
         let reader_quit = Arc::new(AtomicBool::new(false));
         let reader_thread = Self::spawn_reader(
@@ -912,6 +920,7 @@ impl RemoteTerminal {
                 images: images.clone(),
                 turns: turns.clone(),
                 win32_input: win32_input.clone(),
+                osc_progress: osc_progress.clone(),
             },
         );
 
@@ -949,6 +958,7 @@ impl RemoteTerminal {
             images,
             turns,
             win32_input,
+            osc_progress,
             route: PaneRoute::Local,
             proxy,
             reader_thread: Some(reader_thread),
@@ -1024,6 +1034,7 @@ impl RemoteTerminal {
                     images,
                     turns,
                     win32_input,
+                    osc_progress,
                 } = signals;
                 crate::core::threads::promote_to_user_interactive();
                 let mut stream = read_half;
@@ -1031,6 +1042,7 @@ impl RemoteTerminal {
                 let mut osc = OscNotifyScanner::default();
                 let mut mode_tok = OscTokenizer::new(&[b"133"]);
                 let mut zle_tok = OscTokenizer::new(&[b"133"]);
+                let mut progress_tok = OscTokenizer::new(&[b"9"]);
                 let mut turn_scan = AgentTurnScanner::new();
                 let mut win32_scan = crate::terminal::win32_input::Win32InputModeScanner::new();
                 let mut pending: Vec<u8> = buffered;
@@ -1114,6 +1126,7 @@ impl RemoteTerminal {
                                 }
                                 let mut notes = Vec::new();
                                 osc.feed(&out_batch, &mut notes);
+                                feed_osc_progress(&mut progress_tok, &out_batch, &osc_progress);
                                 for (title, body) in notes {
                                     notify_desktop(title.as_deref(), &body);
                                 }
@@ -1259,6 +1272,7 @@ impl RemoteTerminal {
                                         );
                                     }
                                 });
+                                feed_osc_progress(&mut progress_tok, &bytes, &osc_progress);
                                 win32_scan.feed(&bytes, |on| {
                                     win32_input.store(on, Ordering::Relaxed);
                                 });
@@ -1363,6 +1377,10 @@ impl RemoteTerminal {
                                     };
                                 }
                                 if active && at_prompt {
+                                    if let Ok(mut progress) = osc_progress.lock() {
+                                        progress.clear();
+                                    }
+                                    progress_tok = OscTokenizer::new(&[b"9"]);
                                     let mut term = term.lock();
                                     if quit.load(Ordering::SeqCst) {
                                         return;
@@ -1411,6 +1429,12 @@ impl RemoteTerminal {
                                 } else {
                                     false
                                 };
+                                if clear_session {
+                                    if let Ok(mut progress) = osc_progress.lock() {
+                                        progress.clear();
+                                    }
+                                    progress_tok = OscTokenizer::new(&[b"9"]);
+                                }
                                 if clear_session && let Ok(mut guard) = agent_session.lock() {
                                     *guard = None;
                                     proxy.send_event(AlacEvent::Wakeup);
@@ -1662,6 +1686,13 @@ impl RemoteTerminal {
 
     pub fn agent_session(&self) -> Option<AgentSessionState> {
         self.agent_session.lock().ok().and_then(|g| g.clone())
+    }
+
+    pub(crate) fn osc_progress(&self) -> String {
+        self.osc_progress
+            .lock()
+            .map(|s| s.clone())
+            .unwrap_or_default()
     }
 
     /// Keep the identity used to resume a dead pane available to its first
@@ -2760,6 +2791,33 @@ fn ensure_notification_app() {
 
 struct OscNotifyScanner {
     tok: OscTokenizer,
+}
+
+fn feed_osc_progress(tok: &mut OscTokenizer, bytes: &[u8], progress: &Mutex<String>) {
+    tok.feed(bytes, |payload| {
+        let Some(report) = std::str::from_utf8(payload)
+            .ok()
+            .and_then(|s| s.strip_prefix("9;4;"))
+        else {
+            return;
+        };
+        let mut fields = report.split(';');
+        if !matches!(fields.next(), Some("0" | "1" | "2" | "3" | "4")) {
+            return;
+        }
+        if let Some(value) = fields.next()
+            && !value
+                .parse::<i16>()
+                .is_ok_and(|value| (-1..=100).contains(&value))
+        {
+            return;
+        }
+        if fields.next().is_none()
+            && let Ok(mut stored) = progress.lock()
+        {
+            *stored = format!("4;{report}");
+        }
+    });
 }
 
 impl Default for OscNotifyScanner {

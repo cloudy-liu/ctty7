@@ -27,6 +27,8 @@ struct Options {
     sidebar: bool,
     output: PathBuf,
     hold_seconds: Option<u64>,
+    #[serde(default)]
+    agent_replay: bool,
 }
 
 struct Fixture {
@@ -63,7 +65,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             crate::register_bundled_fonts(cx);
             let mut config = Config::default();
             config.theme_follow_system = false;
-            config.theme_preset = "light".into();
+            config.theme_preset = if options.agent_replay { "dark" } else { "light" }.into();
             config.install_cli_on_path = false;
             config.cursor_blink = false;
             config.sidebar_width = 260.;
@@ -80,6 +82,12 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             crate::ui::keymap::init(cx);
             let mut views: Vec<Entity<TerminalView>> = Vec::new();
             let mut owner_entity = None;
+            let mut replay_stream = None;
+            let cases = if options.agent_replay {
+                vec![("AGY screen replay", Some(CLIAgent::Antigravity), None)]
+            } else {
+                CASES.to_vec()
+            };
             let handle = cx
                 .open_window(
                     WindowOptions {
@@ -108,7 +116,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                         });
                         let mut streams = Vec::new();
                         owner.update(cx, |app, cx| {
-                            for (index, (name, agent, remote)) in CASES.iter().enumerate() {
+                            for (index, (name, agent, remote)) in cases.iter().enumerate() {
                                 let (view, mut stream) =
                                     quiet_test_pane(index as u64 + 1, window, cx);
                                 if let Some(kind) = remote {
@@ -124,14 +132,16 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                                 DaemonMsg::Agent(*agent).encode(&mut stream).unwrap();
                                 if agent.is_some() {
                                     DaemonMsg::AgentStatus(Some(AgentSessionState {
-                                        status: AgentStatus::Working,
-                                        rich: true,
+                                        status: if options.agent_replay { AgentStatus::Idle } else { AgentStatus::Working },
+                                        rich: !options.agent_replay,
                                         ..Default::default()
                                     }))
                                     .encode(&mut stream)
                                     .unwrap();
                                 }
-                                DaemonMsg::Output(format!(
+                                let output = if options.agent_replay {
+                                    format!("\x1b]0;{name}\x07{}", agy_screen("⠿ The structure of the `view-grouped-container` section is being mapped out.", "Press up to edit queued messages"))
+                                } else { format!(
                                     "\x1b]0;{name}\x07\x1b[1mSSH tab visual acceptance\x1b[0m\r\n\r\n\
                                      Production native UI, identical fixture data.\r\n\
                                      No network SSH connection is opened by this fixture.\r\n\r\n\
@@ -139,15 +149,19 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                                      SSH:   terminal / Codex / Claude Code\r\n\r\n\
                                      Active session: Fix login (SSH, detected Codex)\r\n\r\n\
                                      \x1b[36mdev@dev-box\x1b[0m:/srv/api $ codex\r\n"
-                                ).into_bytes()).encode(&mut stream).unwrap();
+                                ) };
+                                DaemonMsg::Output(output.into_bytes()).encode(&mut stream).unwrap();
                                 app.tabs.push(Tab::new(Pane::leaf(PaneSlot::Ready(view.clone()))));
                                 views.push(view);
                                 streams.push(stream);
                             }
-                            app.active = 4;
+                            app.active = if options.agent_replay { 0 } else { 4 };
                             app.focus_active(window, cx);
                             cx.notify();
                         });
+                        if options.agent_replay {
+                            replay_stream = Some(streams[0].try_clone().unwrap());
+                        }
                         owner_entity = Some(owner.clone());
                         let fixture = cx.new(|_| Fixture { owner, _streams: streams });
                         cx.new(|cx| Root::new(fixture, window, cx))
@@ -160,10 +174,10 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 let deadline = std::time::Instant::now() + Duration::from_secs(20);
                 loop {
                     cx.background_executor().timer(Duration::from_millis(100)).await;
-                    let ready = views.iter().zip(CASES).all(|(view, (name, agent, remote))| {
+                    let ready = views.iter().zip(cases.iter()).all(|(view, (name, agent, remote))| {
                         view.read_with(cx, |view, _| {
-                            view.title == name && view.agent() == agent
-                                && view.remote_context().map(|r| r.kind) == remote
+                            view.title == *name && view.agent() == *agent
+                                && view.remote_context().map(|r| r.kind) == *remote
                         })
                     });
                     if ready { break; }
@@ -178,13 +192,26 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 cx.update_window(handle.into(), |_, window, cx| {
                     window.refresh();
                     let _ = window.draw(cx);
-                    window.set_window_title("SSH tab visual acceptance");
+                    window.set_window_title(if options.agent_replay { "AGY screen replay" } else { "SSH tab visual acceptance" });
                     #[cfg(target_os = "macos")]
                     window.render_to_image().unwrap().save(&options.output).unwrap();
                     #[cfg(not(target_os = "macos"))]
                     let _ = &options.output;
                 }).unwrap();
                 eprintln!("NATIVE_SSH_TABS_READY");
+                if let Some(mut stream) = replay_stream {
+                    // Exercise the normal daemon reader and UI status merge.
+                    // This is a replay of the reported screen shape, not a model request.
+                    for spinner in ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"].iter().cycle().take(600) {
+                        DaemonMsg::Output(agy_screen(&format!("{spinner} The structure of the `view-grouped-container` section is being mapped out."), "Press up to edit queued messages").into_bytes()).encode(&mut stream).unwrap();
+                        cx.background_executor().timer(Duration::from_millis(400)).await;
+                    }
+                    DaemonMsg::Output(agy_screen("Run this command?", "↑/↓ Navigate · tab Amend · f full diff\nesc to cancel").into_bytes()).encode(&mut stream).unwrap();
+                    cx.background_executor().timer(Duration::from_secs(12)).await;
+                    DaemonMsg::Output(agy_screen("⠋ Reviewing the final response", "Press up to edit queued messages").into_bytes()).encode(&mut stream).unwrap();
+                    cx.background_executor().timer(Duration::from_secs(12)).await;
+                    DaemonMsg::Output(agy_screen("The structure has been mapped out. Turn complete.", "? for shortcuts · 2 tasks").into_bytes()).encode(&mut stream).unwrap();
+                }
                 cx.background_executor()
                     .timer(Duration::from_secs(options.hold_seconds.unwrap_or(12)))
                     .await;
@@ -202,4 +229,26 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 cx.update(|cx| cx.quit());
             }).detach();
         });
+}
+
+fn agy_screen(activity: &str, footer: &str) -> String {
+    format!(
+        "\x1b[2J\x1b[HAGY SCREEN REPLAY — no model request\n\n\
+        Reproduces the reported spinner, tool history and queued-input layout.\n\n\
+        > Review the workflow structure\n\n\
+        ○ Thought for 1m 50s\n\
+        ● Explored 1 file\n\
+        ● Ran a validation command\n\
+        ● Explored 1 file\n\
+        ● Killed 1 task\n\
+        {activity}\n\
+        └ Tip: Use /settings to configure your environment.\n\n\
+        ───────────────────────────────────────────────────────────────\n\
+        > add emoji\n\
+        > \n\
+        ───────────────────────────────────────────────────────────────\n\
+        Gemini 3.8 Flash · high\n\
+        {footer}\n"
+    )
+    .replace('\n', "\r\n")
 }

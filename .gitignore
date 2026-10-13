@@ -24,6 +24,7 @@ repomix-output.*
 
 # local freeze-forensics helper — kept on disk, not shipped
 /scripts/diagnose-freeze.sh
+/scripts/__pycache__/
 
 # benchmark harness work dir + generated fixtures (scripts/bench/)
 .bench/
