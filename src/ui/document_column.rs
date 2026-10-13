@@ -963,7 +963,7 @@ mod gpui_tests {
                         scroll.size.width, panel.size.width,
                         "scroll width in {mode:?} with {focus:?}"
                     );
-                    let row = vcx.debug_bounds("diff-row").unwrap();
+                    let row = vcx.debug_bounds("diff-columns").unwrap();
                     let mut card_width = None;
                     for selector in ["diff-card-0", "diff-card-1", "diff-preview-card"] {
                         if let Some(card) = vcx.debug_bounds(selector) {
@@ -981,8 +981,8 @@ mod gpui_tests {
                         "row width in {mode:?} with {focus:?}"
                     );
                     if mode == DiffViewMode::Split {
-                        let old = vcx.debug_bounds("diff-old-cell").unwrap();
-                        let new = vcx.debug_bounds("diff-new-cell").unwrap();
+                        let old = vcx.debug_bounds("diff-old-scroll").unwrap();
+                        let new = vcx.debug_bounds("diff-new-scroll").unwrap();
                         assert!(
                             (old.size.width - new.size.width).abs() <= px(1.),
                             "split cells remain equal"
@@ -1025,11 +1025,11 @@ mod gpui_tests {
             assert_eq!(card.size.width, scroll.size.width - px(32.));
             if expanded {
                 assert_eq!(
-                    vcx.debug_bounds("diff-row").unwrap().size.width,
+                    vcx.debug_bounds("diff-columns").unwrap().size.width,
                     card.size.width - px(2.)
                 );
             } else {
-                assert!(vcx.debug_bounds("diff-row").is_none());
+                assert!(vcx.debug_bounds("diff-columns").is_none());
             }
         }
     }
