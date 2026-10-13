@@ -37,6 +37,10 @@ and OSC rules for Grok, Qwen and Claude.
 The OSC integration test sends real daemon protocol frames through a quiet
 terminal connection and polls `TerminalView::agent_status`. It checks a report
 split across output frames, completion, and working restored from a snapshot.
+An additional connection regression uses the daemon's actual replay order:
+Snapshot, Prompt, then Agent. It failed with empty progress when the agent
+changed while disconnected; progress now survives that first identity frame,
+while later identity changes on the same link still clear it.
 
 ```sh
 python scripts/sync-agent-detection.py --check
@@ -86,9 +90,17 @@ The attached JPG files are original Computer Use captures, without retouching:
 A live Antigravity CLI 1.3.4 session was launched separately with a read-only
 fixture. Its Gemini request failed with HTTP 400, `User location is not
 supported for the API use`. A Claude attempt in plan mode could not construct
-its executor because that plan model was unavailable in settings. Consequently
-the screenshots above prove native screen-pattern replay, not a completed
-live model task. No account, proxy or security settings were changed.
+its executor because that plan model was unavailable in settings. A subsequent
+Claude Sonnet 4.6 session in accept-edits mode completed successfully. Native
+Computer Use observed `run` during tool reads and generation (18:00–18:02 UTC),
+then `idle` after completion (18:03 UTC on 2026-10-13). The task was requested
+to be read-only; AGY nevertheless created an analysis artifact inside the
+ignored test fixture directory. No tracked application files were changed.
+The paired screenshots above prove the exact reported screen-pattern replay;
+the live session separately verifies an actual model task and completion.
+No account or proxy settings were changed.
+
+![Live Claude-backed AGY task completed](images/herdr-agy-live-after-finished.jpg)
 
 Native Computer Use acceptance was performed on Windows. Linux and macOS
 coverage comes from the repository's cross-platform build and test workflow;

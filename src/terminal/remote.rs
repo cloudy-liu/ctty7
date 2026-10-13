@@ -1043,6 +1043,10 @@ impl RemoteTerminal {
                 let mut mode_tok = OscTokenizer::new(&[b"133"]);
                 let mut zle_tok = OscTokenizer::new(&[b"133"]);
                 let mut progress_tok = OscTokenizer::new(&[b"9"]);
+                // Each reader starts with replayed progress before its first
+                // Agent frame. The previous link's retained identity cannot
+                // own (or invalidate) this link's freshly restored progress.
+                let mut progress_agent = None;
                 let mut turn_scan = AgentTurnScanner::new();
                 let mut win32_scan = crate::terminal::win32_input::Win32InputModeScanner::new();
                 let mut pending: Vec<u8> = buffered;
@@ -1429,7 +1433,10 @@ impl RemoteTerminal {
                                 } else {
                                     false
                                 };
-                                if clear_session {
+                                let clear_progress = a.is_none()
+                                    || progress_agent.is_some_and(|old| Some(old) != a);
+                                progress_agent = a;
+                                if clear_progress {
                                     if let Ok(mut progress) = osc_progress.lock() {
                                         progress.clear();
                                     }
@@ -5546,7 +5553,76 @@ mod tests {
 
 #[cfg(test)]
 mod osc_tests {
-    use super::{OscNotifyScanner, parse_osc_notification};
+    use super::*;
+
+    #[test]
+    fn relink_preserves_progress_replayed_before_a_changed_agent() {
+        crate::core::config::pin_test_config_dir();
+        #[cfg(unix)]
+        let pair = || std::os::unix::net::UnixStream::pair().unwrap();
+        #[cfg(windows)]
+        let pair = || {
+            let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+            let client = std::net::TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+            (client, listener.accept().unwrap().0)
+        };
+        let (old_client, mut old_daemon) = pair();
+        let mut term = RemoteTerminal::from_stream(old_client, TermSize::new(80, 24)).unwrap();
+        DaemonMsg::Agent(Some(CLIAgent::Claude))
+            .encode(&mut old_daemon)
+            .unwrap();
+        for _ in 0..200 {
+            if term.foreground_agent() == Some(CLIAgent::Claude) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(term.foreground_agent(), Some(CLIAgent::Claude));
+        let (client, mut daemon) = pair();
+        term.adopt_relink(
+            client,
+            Vec::new(),
+            &PaneRoute::Local,
+            TermSize::new(80, 24),
+            8,
+            16,
+        )
+        .unwrap();
+        // replay_state sends the ring, prompt and current identity in this order.
+        DaemonMsg::Snapshot(b"\x1b]9;4;1;-1\x07".to_vec())
+            .encode(&mut daemon)
+            .unwrap();
+        DaemonMsg::Prompt {
+            active: true,
+            at_prompt: false,
+            last_exit: None,
+        }
+        .encode(&mut daemon)
+        .unwrap();
+        DaemonMsg::Agent(Some(CLIAgent::Grok))
+            .encode(&mut daemon)
+            .unwrap();
+        for _ in 0..200 {
+            if term.foreground_agent() == Some(CLIAgent::Grok) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(term.foreground_agent(), Some(CLIAgent::Grok));
+        assert_eq!(term.osc_progress(), "4;1;-1");
+        // A later identity change on this same link still clears stale progress.
+        DaemonMsg::Agent(Some(CLIAgent::Qwen))
+            .encode(&mut daemon)
+            .unwrap();
+        for _ in 0..200 {
+            if term.foreground_agent() == Some(CLIAgent::Qwen) && term.osc_progress().is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert_eq!(term.foreground_agent(), Some(CLIAgent::Qwen));
+        assert!(term.osc_progress().is_empty());
+    }
 
     fn scan(chunks: &[&[u8]]) -> Vec<(Option<String>, String)> {
         let mut s = OscNotifyScanner::default();
