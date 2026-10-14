@@ -1,7 +1,6 @@
 # Mermaid diagram support
 
-ctty7 renders Mermaid diagrams in Markdown preview. This is available in
-source builds from `main`, after the published v0.1.0 release.
+ctty7 renders Mermaid diagrams in Markdown preview.
 
 ## Usage
 
@@ -14,8 +13,31 @@ graph TD
 ```
 ~~~
 
-The diagram renders as an SVG in the native reading view. Its toolbar copies
-the original source or opens a larger viewer with zoom, pan and reset controls.
+The diagram renders as an SVG in the native reading view. Click its canvas or
+Expand to open a larger viewer. Like GitHub's diagram dialog, the expanded view
+keeps the SVG's natural width, caps it to the reading area's width, and preserves
+the full height. A tall diagram opens at the top with readable nodes and a
+visible vertical scrollbar. It is never shrunk just to fit its entire height.
+Copy preserves the original Mermaid source.
+
+Use the zoom buttons or Ctrl+wheel (Command+wheel on macOS) to zoom around the
+pointer, from 25% to 800%. Ordinary wheel input scrolls an expanded diagram
+without changing its zoom; Shift+wheel scrolls horizontally. Dragging the canvas
+or either scrollbar moves through the same content. Zoom updates the full
+scroll range, so the last node remains reachable. At the initial inline size,
+ordinary wheel input scrolls the document. Reset restores the initial reading
+size and position.
+
+Opening the larger viewer does not necessarily create horizontal overflow.
+Directional buttons are dimmed and disabled when their axis has no scrollable
+content. Zoom in until the diagram is wider than the reading area to use the
+left/right buttons or horizontal scrollbar.
+
+In the focused diagram, `+`/`-` zoom, arrows move, Page Up/Down or Space move by
+a viewport, and End reaches the bottom. Home scrolls the expanded diagram to its
+top while retaining zoom; `0` resets its size and position. Escape
+closes the expanded viewer and returns focus to the reading view. Document
+Home/End shortcuts continue to navigate the reading view.
 Fences accept both LF and Windows CRLF line endings without changing the source
 buffer or the copied diagram code.
 
@@ -85,6 +107,18 @@ The reading view replaces Mermaid fences with loading placeholders and renders
 SVGs on the background executor. Completed images replace the placeholders;
 results from an older document/theme generation are discarded. The current
 view retains its rendered images until content or theme changes replace them.
+Diagram interactions notify the affected view. Expanded dragging does not
+force the entire Markdown document to redraw.
+
+Documents of at least 32 KiB use the component's measured block list. Long
+fixed-width tables cache column and row geometry and paint visible rows. Font,
+theme, width and image changes invalidate the relevant layout. A selection-only
+geometry pass updates offscreen text ranges when selection endpoints change.
+Nested heading links first reveal their containing block, then align the actual
+heading. See the [navigation and performance verification](testing/markdown-navigation-performance.md)
+for the fixture, measurements and native interaction evidence.
+The latest [GitHub-style reading verification](testing/github-mermaid-reading.md)
+records the scroll viewer, compact controls and updated measurements.
 
 ### Source files
 
@@ -140,6 +174,7 @@ listed in [project status](maintenance/status.md).
 
 Expand and source Copy appear at the upper right. Directional movement, Reset,
 and zoom controls appear at the lower right, both inline and in the larger
-viewer. Drag the diagram to move it; Reset restores its initial fit and
-position. Controls follow the active Markdown palette and retain the original
+viewer. Drag the diagram to move it; Reset restores its initial reading size and
+position. Expanded scrollbars stay visible whenever content overflows. Controls
+follow the active Markdown palette and retain the original
 source when copying.
