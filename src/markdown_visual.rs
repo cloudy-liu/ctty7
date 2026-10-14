@@ -21,6 +21,8 @@ struct Options {
     anchor: String,
     #[serde(default)]
     output: Option<PathBuf>,
+    #[serde(default)]
+    profile_output: Option<PathBuf>,
     #[serde(default = "default_hold_seconds")]
     hold_seconds: u64,
 }
@@ -43,7 +45,7 @@ impl Render for Fixture {
             .w(window.viewport_size().width)
             .h(window.viewport_size().height)
             .overflow_hidden()
-            .child(self.reading.clone())
+            .child(AnyView::from(self.reading.clone()).cached(div().size_full().style().clone()))
             .children(Root::render_dialog_layer(window, cx))
     }
 }
@@ -55,6 +57,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
     assert!((400. ..=1600.).contains(&options.height));
     assert!((1. ..=2.).contains(&options.scale));
     let source = std::fs::read_to_string(&options.source).unwrap();
+    let source_bytes = source.len();
     let started = std::time::Instant::now();
     gpui_platform::application().with_assets(crate::ui::assets::Assets)
         .with_quit_mode(QuitMode::Explicit).run(move |cx| {
@@ -111,10 +114,12 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 let deadline = std::time::Instant::now() + Duration::from_secs(20);
                 loop {
                     cx.background_executor().timer(Duration::from_millis(100)).await;
-                    let ready = reading.read_with(cx, |view, cx| !view.is_loading(cx));
+                    let ready = reading.read_with(cx, |view, cx| !view.is_loading(cx)
+                        && !view.pending_diagrams_for_profile());
                     if ready { break; }
                     assert!(std::time::Instant::now() < deadline, "Markdown parse timed out");
                 }
+                let content_ready_ms = started.elapsed().as_secs_f64() * 1000.;
                 cx.background_executor().timer(Duration::from_secs(2)).await;
                 // Navigate after the bounded viewport and scroll extent have been laid out.
                 // This fixture starts a fresh native window for every requested section.
@@ -139,10 +144,10 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                             .expect("requested heading must be laid out");
                         let viewport = view.scroll.bounds();
                         eprintln!("native anchor: requested={}, offset={:?}, target={:?}, viewport={:?}",
-                            options.anchor, view.scroll.offset(), target, viewport);
+                            options.anchor, view.profile_scroll_offset(cx), target, viewport);
                         assert!((viewport.size.height - window.viewport_size().height).abs() < px(2.),
                             "Markdown scroll container must fit the native window");
-                        assert!(view.scroll.offset().y < px(-100.)
+                        assert!(view.profile_scroll_offset(cx).y < px(-100.)
                             && target.top() < viewport.bottom() && target.bottom() > viewport.top(),
                             "requested Markdown heading is outside the captured viewport");
                     }
@@ -161,8 +166,103 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     }
                 }).unwrap();
                 eprintln!("NATIVE_MARKDOWN_READY");
+                if let Some(output) = &options.profile_output {
+                    let mut scroll_frames = Vec::new();
+                    let mut scroll_detail = Vec::new();
+                    let mut offsets = Vec::new();
+                    for frame in 0..110 {
+                        cx.update_window(handle.into(), |_, window, cx| {
+                            // Use the same outer-pane input position as the baseline,
+                            // including when the reading view forwards margin wheel events.
+                            let viewport = window.viewport_size();
+                            let position = point(viewport.width - px(12.), viewport.height / 2.);
+                            let start = std::time::Instant::now();
+                            window.dispatch_event(PlatformInput::ScrollWheel(ScrollWheelEvent {
+                                position,
+                                delta: ScrollDelta::Pixels(point(px(0.), px(if frame < 55 { -120. } else { 120. }))),
+                                modifiers: Modifiers::none(), touch_phase: TouchPhase::Moved,
+                            }), cx);
+                            let _ = window.draw(cx);
+                            let elapsed = start.elapsed().as_secs_f64() * 1000.;
+                            reading.read(cx).verify_profile_scroll_frame(cx);
+                            if frame >= 10 { scroll_frames.push(elapsed); }
+                            scroll_detail.push(serde_json::json!({"frame":frame,"cpu_ms":elapsed,
+                                "offset":f32::from(reading.read(cx).profile_scroll_offset(cx).y)}));
+                            offsets.push(f32::from(reading.read(cx).profile_scroll_offset(cx).y));
+                        }).unwrap();
+                    }
+                    assert!(offsets.iter().copied().reduce(f32::min).unwrap() < -500., "profile must actually scroll");
+                    let viewer = cx.update_window(handle.into(), |_, window, cx| {
+                        let (image, code, aspect) = reading.read(cx).diagram_for_profile(1, cx);
+                        if let ImageSource::Image(data) = &image {
+                            std::fs::write(output.with_extension("svg"), &data.bytes).unwrap();
+                        }
+                        let viewer = crate::ui::markdown_mermaid::open_diagram(image, code, aspect, window, cx);
+                        viewer.update(cx, |viewer, cx| viewer.prepare_profile(cx));
+                        window.refresh();
+                        let _ = window.draw(cx);
+                        viewer
+                    }).unwrap();
+                    cx.background_executor().timer(Duration::from_millis(400)).await;
+                    let mut drag_frames = Vec::new();
+                    cx.update_window(handle.into(), |_, window, cx| {
+                        // A hidden native window does not receive the idle draws
+                        // that normally finish dialog layout. Resolve its size
+                        // before positioning the benchmark away from scroll edges.
+                        window.refresh();
+                        let _ = window.draw(cx);
+                        viewer.update(cx, |viewer, cx| viewer.prepare_profile(cx));
+                        window.refresh();
+                        let _ = window.draw(cx);
+                        let position = viewer.read(cx).profile_bounds().center();
+                        window.dispatch_event(PlatformInput::MouseDown(MouseDownEvent {
+                            position, button: MouseButton::Left, modifiers: Modifiers::none(), click_count: 1, first_mouse: false,
+                        }), cx);
+                    }).unwrap();
+                    for frame in 0..110 {
+                        cx.update_window(handle.into(), |_, window, cx| {
+                            let position = viewer.read(cx).profile_bounds().center() + point(px(0.), px(if frame % 2 == 0 { -24. } else { 24. }));
+                            let start = std::time::Instant::now();
+                            let previous = viewer.read(cx).profile_pan();
+                            window.dispatch_event(PlatformInput::MouseMove(MouseMoveEvent {
+                                position, pressed_button: Some(MouseButton::Left), modifiers: Modifiers::none(),
+                            }), cx);
+                            let _ = window.draw(cx);
+                            viewer.read(cx).verify_profile_frame();
+                            assert_ne!(viewer.read(cx).profile_pan(), previous, "profile drag must move the diagram");
+                            if frame >= 10 { drag_frames.push(start.elapsed().as_secs_f64() * 1000.); }
+                        }).unwrap();
+                    }
+                    let (dpi_scale, viewport) = cx.update_window(handle.into(), |_, window, cx| {
+                        window.dispatch_event(PlatformInput::MouseUp(MouseUpEvent {
+                            position: viewer.read(cx).profile_bounds().center(), button: MouseButton::Left, modifiers: Modifiers::none(), click_count: 1,
+                        }), cx);
+                        (window.scale_factor(), window.viewport_size())
+                    }).unwrap();
+                    let profile = serde_json::json!({
+                        "os": std::env::consts::OS, "dpi_scale": dpi_scale,
+                        "window": [f32::from(viewport.width), f32::from(viewport.height)],
+                        "source_bytes": source_bytes,
+                        "parsed_source_bytes": reading.read_with(cx, |view, cx| view.text.read(cx).source().len()),
+                        "all_content_ready_ms": content_ready_ms,
+                        "scroll_cpu_frame": frame_summary(&mut scroll_frames),
+                        "scroll_detail": scroll_detail,
+                        "expanded_drag_cpu_frame": frame_summary(&mut drag_frames),
+                        "min_scroll_offset": offsets.iter().copied().reduce(f32::min).unwrap(),
+                        "visible_scroll_verified": true,
+                        "measurement": "event dispatch plus GPUI CPU layout/prepaint/paint; excludes present and GPU time",
+                    });
+                    std::fs::write(output, serde_json::to_vec_pretty(&profile).unwrap()).unwrap();
+                    eprintln!("NATIVE_MARKDOWN_PROFILE {profile}");
+                }
                 cx.background_executor().timer(Duration::from_secs(options.hold_seconds.min(600))).await;
                 cx.update(|cx| cx.quit());
             }).detach();
         });
+}
+
+fn frame_summary(samples: &mut [f64]) -> serde_json::Value {
+    samples.sort_by(f64::total_cmp);
+    serde_json::json!({ "samples": samples.len(), "median_ms": samples[samples.len()/2],
+        "p95_ms": samples[samples.len()*95/100], "max_ms": samples[samples.len()-1] })
 }

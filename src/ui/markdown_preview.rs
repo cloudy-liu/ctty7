@@ -520,9 +520,11 @@ pub(crate) struct MarkdownPreview {
     images: HashMap<PathBuf, TextViewImageSource>,
     diagrams: HashMap<String, TextViewImageSource>,
     diagram_views: HashMap<String, Entity<crate::ui::markdown_mermaid::DiagramViewer>>,
+    diagram_subscriptions: Vec<Subscription>,
     reading_extensions: MarkdownExtensions,
     image_bytes: usize,
     pending_anchor: Option<String>,
+    anchor_item_pending: bool,
     last_position: Option<(usize, Pixels)>,
     restore_position: Option<(usize, Pixels)>,
     pub(crate) text: Entity<TextViewState>,
@@ -534,12 +536,44 @@ pub(crate) struct MarkdownPreview {
     style: TextViewStyle,
     available_fonts: Option<Arc<Vec<String>>>,
     mermaid_enabled: bool,
+    virtualized: bool,
     diagram_generation: u64,
     diagram_task: Option<gpui::Task<()>>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl MarkdownPreview {
+    #[cfg(any(test, feature = "markdown-visual-tests"))]
+    pub(crate) fn pending_diagrams_for_profile(&self) -> bool {
+        self.diagrams
+            .values()
+            .any(|image| matches!(image, TextViewImageSource::Loading))
+    }
+
+    #[cfg(feature = "markdown-visual-tests")]
+    pub(crate) fn diagram_for_profile(
+        &self,
+        index: usize,
+        cx: &App,
+    ) -> (gpui::ImageSource, SharedString, f32) {
+        let TextViewImageSource::Ready(image) = &self.diagrams[&format!("ctty7-mermaid://{index}")]
+        else {
+            panic!("profile diagram must be ready");
+        };
+        let gpui::ImageSource::Image(data) = image else {
+            panic!("profile requires an SVG");
+        };
+        let aspect =
+            crate::ui::markdown_mermaid::aspect_ratio(&String::from_utf8_lossy(&data.bytes));
+        let content = self.source.read(cx).text().to_string();
+        let code = Self::mermaid_fences()
+            .captures_iter(&content)
+            .nth(index)
+            .unwrap()[1]
+            .to_owned();
+        (image.clone(), code.into(), aspect)
+    }
+
     pub(crate) fn is_loading(&self, cx: &App) -> bool {
         self.text.read(cx).source().is_empty() && self.source.read(cx).text().len() != 0
     }
@@ -602,9 +636,11 @@ impl MarkdownPreview {
             images: HashMap::new(),
             diagrams: HashMap::new(),
             diagram_views: HashMap::new(),
+            diagram_subscriptions: Vec::new(),
             reading_extensions,
             image_bytes: 0,
             pending_anchor: None,
+            anchor_item_pending: false,
             last_position: None,
             restore_position: None,
             text,
@@ -616,6 +652,7 @@ impl MarkdownPreview {
             style: TextViewStyle::default(),
             available_fonts: None,
             mermaid_enabled,
+            virtualized: content.len() >= 32 * 1024,
             diagram_generation: 0,
             diagram_task: None,
             _subscriptions: subscriptions,
@@ -652,6 +689,10 @@ impl MarkdownPreview {
             .into();
         let viewer =
             cx.new(|_| crate::ui::markdown_mermaid::DiagramViewer::new(image, code, aspect, false));
+        // Invalidate the reading pane's cache when an inline viewport changes.
+        // Expanded viewers live outside that cache and only redraw themselves.
+        self.diagram_subscriptions
+            .push(cx.observe(&viewer, |_, _, cx| cx.notify()));
         self.diagram_views.insert(url.clone(), viewer.clone());
         Some(viewer)
     }
@@ -693,6 +734,7 @@ impl MarkdownPreview {
 
     pub(crate) fn navigate_anchor(&mut self, anchor: String, cx: &mut Context<Self>) {
         self.pending_anchor = Some(anchor);
+        self.anchor_item_pending = false;
         cx.notify();
     }
 
@@ -776,10 +818,69 @@ impl MarkdownPreview {
                     Err(error) => TextViewImageSource::Failed(error.into()),
                 };
                 this.images.insert(path, image);
+                this.reset_virtual_layout(cx);
                 cx.notify();
             },
         );
         TextViewImageSource::Loading
+    }
+
+    fn reading_position(&self, cx: &App) -> Option<(usize, Pixels)> {
+        if self.virtualized {
+            let position = self.text.read(cx).list_state().logical_scroll_top();
+            Some((position.item_ix, position.offset_in_item))
+        } else {
+            self.text
+                .read(cx)
+                .reading_position(self.scroll.bounds().top())
+        }
+    }
+
+    fn reset_virtual_layout(&mut self, cx: &App) {
+        if self.virtualized {
+            let list = self.text.read(cx).list_state();
+            let position = list.logical_scroll_top();
+            list.reset(list.item_count());
+            list.scroll_to(position);
+        }
+    }
+
+    #[cfg(any(test, feature = "markdown-visual-tests"))]
+    pub(crate) fn profile_scroll_offset(&self, cx: &App) -> gpui::Point<Pixels> {
+        if self.virtualized {
+            self.text
+                .read(cx)
+                .list_state()
+                .scroll_px_offset_for_scrollbar()
+        } else {
+            self.scroll.offset()
+        }
+    }
+
+    #[cfg(any(test, feature = "markdown-visual-tests"))]
+    pub(crate) fn profile_scroll_bounds(&self, cx: &App) -> gpui::Bounds<Pixels> {
+        if self.virtualized {
+            self.text.read(cx).list_state().viewport_bounds()
+        } else {
+            self.scroll.bounds()
+        }
+    }
+
+    #[cfg(any(test, feature = "markdown-visual-tests"))]
+    pub(crate) fn verify_profile_scroll_frame(&self, cx: &App) {
+        if self.virtualized {
+            let text = self.text.read(cx);
+            let list = text.list_state();
+            let top = list.logical_scroll_top();
+            let painted = text
+                .block_bounds(top.item_ix)
+                .expect("visible block must be prepainted");
+            let expected = list.viewport_bounds().top() - top.offset_in_item;
+            assert!(
+                (painted.top() - expected).abs() < px(1.),
+                "painted block must follow the scroll offset: {painted:?}, {expected:?}"
+            );
+        }
     }
 
     fn on_key_down(&mut self, event: &gpui::KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -793,6 +894,36 @@ impl MarkdownPreview {
             key.modifiers.control && !key.modifiers.platform
         };
         let modified = key.modifiers.control || key.modifiers.platform;
+        if self.virtualized {
+            let list = self.text.read(cx).list_state();
+            let page = list.viewport_bounds().size.height * 0.9;
+            if modified {
+                match (document_edge, cfg!(target_os = "macos"), key.key.as_str()) {
+                    (true, true, "up") | (true, false, "home") => {
+                        list.scroll_to(Default::default())
+                    }
+                    (true, true, "down") | (true, false, "end") => list.scroll_to_end(),
+                    _ => return,
+                }
+            } else {
+                match key.key.as_str() {
+                    "up" => list.scroll_by(px(-40.)),
+                    "down" => list.scroll_by(px(40.)),
+                    "pageup" => list.scroll_by(-page),
+                    "pagedown" => list.scroll_by(page),
+                    "space" if key.modifiers.shift => list.scroll_by(-page),
+                    "space" => list.scroll_by(page),
+                    "home" => list.scroll_to(Default::default()),
+                    "end" => list.scroll_to_end(),
+                    _ => return,
+                }
+            }
+            cx.stop_propagation();
+            self.restore_position = None;
+            self.pending_anchor = None;
+            cx.notify();
+            return;
+        }
         let page = self.scroll.bounds().size.height * 0.9;
         let offset = self.scroll.offset();
         let y = if modified {
@@ -818,6 +949,8 @@ impl MarkdownPreview {
             offset.x,
             y.clamp(-self.scroll.max_offset().y, px(0.)),
         ));
+        self.restore_position = None;
+        self.pending_anchor = None;
         cx.stop_propagation();
         cx.notify();
     }
@@ -846,10 +979,13 @@ impl MarkdownPreview {
     }
 
     fn start_diagrams(&mut self, content: String, cx: &mut Context<Self>) {
+        self.restore_position = self.reading_position(cx).or(self.last_position);
+        self.virtualized = content.len() >= 32 * 1024;
         let content = markdown_frontmatter::preprocess(&content).into_owned();
         self.diagram_generation = self.diagram_generation.wrapping_add(1);
         self.diagram_task.take();
         self.diagram_views.clear();
+        self.diagram_subscriptions.clear();
         let (processed, count) = if self.mermaid_enabled {
             Self::mermaid_placeholders(&content)
         } else {
@@ -867,6 +1003,7 @@ impl MarkdownPreview {
             text.set_text(&processed, cx);
             cx.notify();
         });
+        self.reset_virtual_layout(cx);
         if count == 0 {
             return;
         }
@@ -882,11 +1019,7 @@ impl MarkdownPreview {
                 if this.diagram_generation != generation {
                     return;
                 }
-                this.restore_position = this
-                    .text
-                    .read(cx)
-                    .reading_position(this.scroll.bounds().top())
-                    .or(this.last_position);
+                this.restore_position = this.reading_position(cx).or(this.last_position);
                 this.diagrams = diagrams
                     .into_iter()
                     .map(|(url, svg)| {
@@ -902,6 +1035,7 @@ impl MarkdownPreview {
                     text.set_text(&processed, cx);
                     cx.notify();
                 });
+                this.reset_virtual_layout(cx);
                 cx.notify();
             });
         }));
@@ -1054,11 +1188,7 @@ impl Render for MarkdownPreview {
             body_font.clone(),
         );
         if self.style_key.as_ref() != Some(&key) {
-            self.restore_position = self
-                .text
-                .read(cx)
-                .reading_position(self.scroll.bounds().top())
-                .or(self.last_position);
+            self.restore_position = self.reading_position(cx).or(self.last_position);
             self.style = reading_style(&entry, dark, scale, mono);
             if entry.theme.typography.resolve_font_stack {
                 self.style.code_block.text.font_family = Some(code_font.clone());
@@ -1072,6 +1202,7 @@ impl Render for MarkdownPreview {
                 self.start_diagrams(content, cx);
             }
             self.style_key = Some(key);
+            self.reset_virtual_layout(cx);
         }
         let palette = entry.theme.palette(dark);
         let reading_foreground = if dark && entry.theme.id == markdown_theme::DEFAULT_ID {
@@ -1109,6 +1240,7 @@ impl Render for MarkdownPreview {
         let link_owner = cx.weak_entity();
         let image_owner = cx.weak_entity();
         let text = TextView::new(&self.text)
+            .scrollable(self.virtualized)
             .markdown_extensions(self.reading_extensions.clone())
             .selectable(true)
             .style(self.style.clone())
@@ -1144,6 +1276,7 @@ impl Render for MarkdownPreview {
         card.style().text.font_fallbacks =
             Some(gpui::FontFallbacks::from_fonts(typography.fonts.clone()));
         let card = card
+            .when(self.virtualized, |el| el.size_full())
             .when(!compact, |el| {
                 el.rounded(px(layout.radius * scale))
                     .border(px(layout.paper_border_width))
@@ -1162,51 +1295,82 @@ impl Render for MarkdownPreview {
             .child(text);
         let entity = cx.weak_entity();
         let scroll = self.scroll.clone();
-        let scroll_area = crate::ui::scrollbar::with_vertical_scrollbar(
-            "markdown-reading-scrollbar",
-            div()
-                .id("markdown-reading")
-                .size_full()
-                .key_context("MarkdownPreview")
-                .bg(reading_background)
-                .overflow_y_scroll()
-                .track_scroll(&scroll)
-                .p(px(outer))
-                .on_key_down(cx.listener(Self::on_key_down))
-                .child(card)
-                .child(
-                    gpui::canvas(
-                        move |_, window, cx| {
-                            let _ = entity.update(cx, |this, cx| {
-                                // Observe layout without adding a viewport-sized child
-                                // after the document. Read the viewport from the handle.
-                                let bounds = this.scroll.bounds();
-                                if this.width != bounds.size.width {
-                                    this.width = bounds.size.width;
-                                    this.restore_position =
-                                        this.restore_position.or(this.last_position);
-                                    cx.notify();
-                                    return;
-                                }
-                                // An anchor requested while opening the file must wait
-                                // for its initial background parse and first layout.
-                                if this.is_loading(cx) {
-                                    return;
-                                }
-                                if let Some(anchor) = this.pending_anchor.take() {
+        let scroll_area = div()
+            .id("markdown-reading")
+            .size_full()
+            .key_context("MarkdownPreview")
+            .bg(reading_background)
+            .when(!self.virtualized, |el| el.overflow_y_scroll())
+            .track_scroll(&scroll)
+            .p(px(outer))
+            .on_key_down(cx.listener(Self::on_key_down))
+            .when(self.virtualized, |el| {
+                el.on_scroll_wheel(cx.listener(|this, event: &gpui::ScrollWheelEvent, _, cx| {
+                    let list = this.text.read(cx).list_state();
+                    if event.modifiers.control
+                        || event.modifiers.platform
+                        || list.viewport_bounds().contains(&event.position)
+                    {
+                        return;
+                    }
+                    let delta = match event.delta {
+                        gpui::ScrollDelta::Pixels(delta) => delta.y,
+                        gpui::ScrollDelta::Lines(delta) => px(delta.y * 20.),
+                    };
+                    list.scroll_by(-delta);
+                    cx.stop_propagation();
+                    cx.notify();
+                }))
+            })
+            .child(card)
+            .child(
+                gpui::canvas(
+                    move |_, window, cx| {
+                        let _ = entity.update(cx, |this, cx| {
+                            // Observe layout without adding a viewport-sized child
+                            // after the document. Read the viewport from the handle.
+                            let bounds = this.scroll.bounds();
+                            if this.width != bounds.size.width {
+                                this.width = bounds.size.width;
+                                this.restore_position =
+                                    this.restore_position.or(this.last_position);
+                                this.reset_virtual_layout(cx);
+                                cx.notify();
+                                return;
+                            }
+                            // An anchor requested while opening the file must wait
+                            // for its initial background parse and first layout.
+                            if this.is_loading(cx) {
+                                return;
+                            }
+                            if this.virtualized {
+                                let text = this.text.read(cx);
+                                let list = text.list_state();
+                                if let Some(anchor) = this.pending_anchor.clone() {
                                     this.restore_position = None;
                                     if anchor.is_empty() {
-                                        this.scroll.set_offset(point(px(0.), px(0.)));
-                                    } else if let Some(target) =
-                                        this.text.read(cx).anchor_bounds(&anchor)
-                                    {
-                                        let offset = this.scroll.offset();
-                                        let y = offset.y - (target.top() - bounds.top()) + px(12.);
-                                        this.scroll.set_offset(point(
-                                            offset.x,
-                                            y.clamp(-this.scroll.max_offset().y, px(0.)),
-                                        ));
+                                        list.scroll_to(Default::default());
+                                        this.pending_anchor = None;
+                                    } else if this.anchor_item_pending {
+                                        // The containing block is now laid out. A heading
+                                        // deep inside a quote/list needs its exact position.
+                                        if let Some(target) = text.anchor_bounds(&anchor) {
+                                            list.scroll_by(
+                                                target.top()
+                                                    - list.viewport_bounds().top()
+                                                    - px(12.),
+                                            );
+                                        }
+                                        this.pending_anchor = None;
+                                        this.anchor_item_pending = false;
+                                    } else if let Some(item_ix) = text.anchor_index(&anchor) {
+                                        list.scroll_to(gpui::ListOffset {
+                                            item_ix,
+                                            offset_in_item: px(0.),
+                                        });
+                                        this.anchor_item_pending = true;
                                     } else {
+                                        this.pending_anchor = None;
                                         window.push_notification(
                                             format!(
                                                 "#{anchor}: {}",
@@ -1218,31 +1382,73 @@ impl Render for MarkdownPreview {
                                     cx.notify();
                                     return;
                                 }
-                                if let Some((index, inside)) = this.restore_position.take() {
-                                    if let Some(target) = this.text.read(cx).block_bounds(index) {
-                                        let offset = this.scroll.offset();
-                                        let y = offset.y + bounds.top() - inside - target.top();
-                                        let y = y.clamp(-this.scroll.max_offset().y, px(0.));
-                                        if (y - offset.y).abs() > px(0.1) {
-                                            this.scroll.set_offset(point(offset.x, y));
-                                            cx.notify();
-                                            return;
-                                        }
+                                if let Some((item_ix, offset_in_item)) =
+                                    this.restore_position.take()
+                                {
+                                    list.scroll_to(gpui::ListOffset {
+                                        item_ix,
+                                        offset_in_item,
+                                    });
+                                    cx.notify();
+                                    return;
+                                }
+                                this.last_position = this.reading_position(cx);
+                                return;
+                            }
+                            if let Some(anchor) = this.pending_anchor.take() {
+                                this.restore_position = None;
+                                if anchor.is_empty() {
+                                    this.scroll.set_offset(point(px(0.), px(0.)));
+                                } else if let Some(target) =
+                                    this.text.read(cx).anchor_bounds(&anchor)
+                                {
+                                    let offset = this.scroll.offset();
+                                    let y = offset.y - (target.top() - bounds.top()) + px(12.);
+                                    this.scroll.set_offset(point(
+                                        offset.x,
+                                        y.clamp(-this.scroll.max_offset().y, px(0.)),
+                                    ));
+                                } else {
+                                    window.push_notification(
+                                        format!("#{anchor}: {}", t(L10nKey::MarkdownAnchorMissing)),
+                                        cx,
+                                    );
+                                }
+                                cx.notify();
+                                return;
+                            }
+                            if let Some((index, inside)) = this.restore_position.take() {
+                                if let Some(target) = this.text.read(cx).block_bounds(index) {
+                                    let offset = this.scroll.offset();
+                                    let y = offset.y + bounds.top() - inside - target.top();
+                                    let y = y.clamp(-this.scroll.max_offset().y, px(0.));
+                                    if (y - offset.y).abs() > px(0.1) {
+                                        this.scroll.set_offset(point(offset.x, y));
+                                        cx.notify();
+                                        return;
                                     }
                                 }
-                                this.last_position =
-                                    this.text.read(cx).reading_position(bounds.top());
-                            });
-                        },
-                        |_, _, _, _| {},
-                    )
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size(px(0.)),
-                ),
-            &scroll,
-        );
+                            }
+                            this.last_position = this.text.read(cx).reading_position(bounds.top());
+                        });
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .top_0()
+                .left_0()
+                .size(px(0.)),
+            );
+        let scroll_area = if self.virtualized {
+            scroll_area.into_any_element()
+        } else {
+            crate::ui::scrollbar::with_vertical_scrollbar(
+                "markdown-reading-scrollbar",
+                scroll_area,
+                &scroll,
+            )
+            .into_any_element()
+        };
         // Cached views lay out their contents as a root; provide the definite
         // flex-column height required by the shared scrollbar wrapper.
         div().flex().flex_col().size_full().child(scroll_area)
@@ -2392,34 +2598,42 @@ mod tests {
     }
     #[gpui::test]
     fn inline_mermaid_controls_zoom_pan_reset_and_copy(cx: &mut TestAppContext) {
-        let (app, _owner_window) = crate::ui::app::test_window::harness(cx);
-        cx.update(|cx| init(Default::default(), cx));
+        let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
         let code = "flowchart LR\n A --> B\n";
-        let content = format!("# Controls\n\nWords to select.\n\n```mermaid\n{code}```\n");
-        let window = cx.add_window(|window, cx| {
-            let source = cx.new(|cx| {
-                let mut source = InputState::new(window, cx).multi_line(true);
-                source.set_value(content, window, cx);
-                source
-            });
-            let reading = cx.new(|cx| {
-                MarkdownPreview::new(
-                    source,
-                    tty7_core::host::local::LocalHost::new(),
-                    PathBuf::from("/repo/controls.md"),
-                    app.downgrade(),
-                    true,
-                    cx,
-                )
-            });
-            gpui_component::Root::new(reading, window, cx)
+        let content = format!(
+            "# Controls\n\nWords to select.\n\n```mermaid\n{code}```\n\n{}",
+            "After the diagram.\n\n".repeat(80)
+        );
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("controls.md");
+        std::fs::write(&path, content).unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            init(Default::default(), cx);
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = app.tabs.len() - 1;
+            app.editor_open_on_host(tty7_core::host::local::LocalHost::new(), &path, window, cx);
         });
-        window
-            .update(cx, |_, window, _| window.activate_window())
-            .unwrap();
-        let mut vcx = VisualTestContext::from_window(window.into(), cx);
         vcx.simulate_resize(gpui::size(px(1000.), px(800.)));
-        settle(&mut vcx, |cx| cx.debug_bounds("diagram-zoom-in").is_some());
+        settle(&mut vcx, |cx| {
+            cx.update(|window, cx| {
+                window.refresh();
+                let _ = window.draw(cx);
+            });
+            cx.debug_bounds("diagram-zoom-in").is_some()
+        });
+        let preview = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .clone()
+                .unwrap()
+        });
+        let viewer = preview.read_with(&vcx, |this, _| {
+            this.diagram_views.values().next().unwrap().clone()
+        });
         let zoom = vcx
             .debug_bounds("diagram-zoom-in")
             .expect("inline diagrams need zoom controls");
@@ -2428,29 +2642,176 @@ mod tests {
         assert!(zoom.size.width >= px(32.) && zoom.size.height >= px(32.));
         assert!(zoom.center().y > viewport.center().y && expand.center().y < viewport.center().y);
         let fit = vcx.debug_bounds("diagram-content").unwrap();
-        vcx.simulate_click(zoom.center(), gpui::Modifiers::none());
+        let right = vcx.debug_bounds("diagram-pan-right").unwrap();
+        let reset = vcx.debug_bounds("diagram-reset").unwrap();
+        let copy = vcx.debug_bounds("copy-diagram").unwrap();
+        vcx.simulate_mouse_move(zoom.center(), None, gpui::Modifiers::none());
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        vcx.simulate_mouse_down(
+            zoom.center(),
+            gpui::MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        vcx.simulate_mouse_up(
+            zoom.center(),
+            gpui::MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
         vcx.run_until_parked();
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
-        let enlarged = vcx.debug_bounds("diagram-content").unwrap();
-        assert!(enlarged.size.width > fit.size.width);
-        let right = vcx.debug_bounds("diagram-pan-right").unwrap();
+        viewer.read_with(&vcx, |viewer, _| {
+            assert!(
+                viewer.rendered_transform.0 > 1.,
+                "zoom must reach the rendered cached diagram"
+            )
+        });
         vcx.simulate_click(right.center(), gpui::Modifiers::none());
         vcx.run_until_parked();
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
-        assert!(vcx.debug_bounds("diagram-content").unwrap().left() < enlarged.left());
-        let reset = vcx.debug_bounds("diagram-reset").unwrap();
+        viewer.read_with(&vcx, |viewer, _| {
+            assert!(
+                viewer.rendered_transform.1.x < px(-1.),
+                "pan must reach the rendered cached diagram"
+            )
+        });
+        let before_drag = viewer.read_with(&vcx, |viewer, _| viewer.rendered_transform.1);
+        let drag_start = viewport.origin + point(px(32.), px(64.));
+        let drag_delta = point(px(10.), px(10.));
+        vcx.simulate_mouse_down(drag_start, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        vcx.simulate_mouse_move(
+            drag_start + drag_delta,
+            gpui::MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        viewer.read_with(&vcx, |viewer, _| {
+            assert_eq!(
+                viewer.rendered_transform.1,
+                before_drag + drag_delta,
+                "dragging must repaint the cached diagram"
+            )
+        });
+        vcx.simulate_mouse_up(
+            drag_start + drag_delta,
+            gpui::MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
         vcx.simulate_click(reset.center(), gpui::Modifiers::none());
         vcx.run_until_parked();
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
+        viewer.read_with(&vcx, |viewer, _| {
+            assert_eq!(viewer.rendered_transform, (1., point(px(0.), px(0.))))
+        });
+        vcx.update(|window, cx| {
+            window.refresh();
+            let _ = window.draw(cx);
+        });
         assert_eq!(vcx.debug_bounds("diagram-content").unwrap(), fit);
-        let copy = vcx.debug_bounds("copy-diagram").unwrap();
+        vcx.simulate_click(right.center(), gpui::Modifiers::none());
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        viewer.read_with(&vcx, |viewer, _| {
+            assert!(
+                viewer.rendered_transform.1.x < px(-1.),
+                "fitted diagrams must also support panning"
+            )
+        });
+        let fitted_pan = viewer.read_with(&vcx, |viewer, _| viewer.rendered_transform.1);
+        vcx.simulate_mouse_down(drag_start, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.simulate_mouse_move(
+            drag_start + drag_delta,
+            gpui::MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        viewer.read_with(&vcx, |viewer, _| {
+            assert_eq!(viewer.rendered_transform.1, fitted_pan + drag_delta)
+        });
+        vcx.simulate_mouse_up(
+            drag_start + drag_delta,
+            gpui::MouseButton::Left,
+            gpui::Modifiers::none(),
+        );
+        vcx.simulate_keystrokes("0");
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        viewer.read_with(&vcx, |viewer, _| {
+            assert_eq!(
+                viewer.rendered_transform,
+                (1., point(px(0.), px(0.))),
+                "0 must reset a fitted inline diagram after dragging"
+            )
+        });
         vcx.simulate_click(copy.center(), gpui::Modifiers::none());
         vcx.update(|_, cx| assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), code));
+        let scroll_before_zoom = preview.read_with(&vcx, |preview, _| preview.scroll.offset());
+        vcx.simulate_event(gpui::ScrollWheelEvent {
+            position: drag_start,
+            delta: gpui::ScrollDelta::Lines(point(0., 1.)),
+            modifiers: gpui::Modifiers {
+                control: true,
+                ..gpui::Modifiers::none()
+            },
+            touch_phase: gpui::TouchPhase::Moved,
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        viewer.read_with(&vcx, |viewer, _| {
+            assert!(
+                viewer.rendered_transform.0 > 1.,
+                "Ctrl+wheel must zoom the cached diagram"
+            )
+        });
+        preview.read_with(&vcx, |preview, _| {
+            assert_eq!(
+                preview.scroll.offset(),
+                scroll_before_zoom,
+                "diagram zoom must not scroll the document"
+            )
+        });
+        vcx.simulate_click(reset.center(), gpui::Modifiers::none());
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let pan_before_wheel = viewer.read_with(&vcx, |viewer, _| viewer.rendered_transform.1);
+        vcx.simulate_event(gpui::ScrollWheelEvent {
+            position: drag_start,
+            delta: gpui::ScrollDelta::Lines(point(0., -1.)),
+            modifiers: gpui::Modifiers::none(),
+            touch_phase: gpui::TouchPhase::Moved,
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        viewer.read_with(&vcx, |viewer, _| {
+            assert_eq!(viewer.rendered_transform.1, pan_before_wheel)
+        });
+        preview.read_with(&vcx, |preview, _| {
+            assert!(
+                preview.scroll.offset().y < px(-1.),
+                "fitted diagrams must let the document scroll"
+            )
+        });
     }
 }
