@@ -1,7 +1,6 @@
 # Mermaid diagram support
 
-ctty7 renders Mermaid diagrams in Markdown preview. This is available in
-source builds from `main`, after the published v0.1.0 release.
+ctty7 renders Mermaid diagrams in Markdown preview.
 
 ## Usage
 
@@ -14,13 +13,20 @@ graph TD
 ```
 ~~~
 
-The diagram renders as an SVG in the native reading view. Its toolbar copies
-the original source or opens a larger viewer with zoom, pan and reset controls.
-Use the zoom buttons or Ctrl+wheel to zoom an inline diagram. In the expanded
-viewer, ordinary wheel input zooms directly. Drag or use the arrow controls to
-move the diagram, and Reset restores its fitted size and position. Zoom ranges
-from 25% to 800%. At the initial inline size, ordinary wheel input scrolls the
-document.
+The diagram renders as an SVG in the native reading view. Click its canvas or
+Expand to open a larger viewer; dragging the canvas moves it. Copy preserves
+the original Mermaid source.
+
+Use the zoom buttons or Ctrl+wheel (Command+wheel on macOS) to zoom around the
+pointer, from 25% to 800%. Ordinary wheel input pans an expanded diagram without
+changing its zoom; Shift+wheel pans horizontally. At the initial inline size,
+ordinary wheel input scrolls the document. Reset restores the fitted size and
+position.
+
+In the focused diagram, `+`/`-` zoom, arrows move, Page Up/Down or Space move by
+a viewport, End reaches the bottom, and Home or `0` restores the fit. Escape
+closes the expanded viewer and returns focus to the reading view. Document
+Home/End shortcuts continue to navigate the reading view.
 Fences accept both LF and Windows CRLF line endings without changing the source
 buffer or the copied diagram code.
 
@@ -90,6 +96,16 @@ The reading view replaces Mermaid fences with loading placeholders and renders
 SVGs on the background executor. Completed images replace the placeholders;
 results from an older document/theme generation are discarded. The current
 view retains its rendered images until content or theme changes replace them.
+Diagram interactions notify the affected view. Expanded dragging does not
+force the entire Markdown document to redraw.
+
+Documents of at least 32 KiB use the component's measured block list. Long
+fixed-width tables cache column and row geometry and paint visible rows. Font,
+theme, width and image changes invalidate the relevant layout. A selection-only
+geometry pass updates offscreen text ranges when selection endpoints change.
+Nested heading links first reveal their containing block, then align the actual
+heading. See the [navigation and performance verification](testing/markdown-navigation-performance.md)
+for the fixture, measurements and native interaction evidence.
 
 ### Source files
 

@@ -1,5 +1,10 @@
 # Mermaid control verification
 
+The current wheel, canvas and long-document behavior is verified in
+[Markdown navigation and performance](markdown-navigation-performance.md).
+The records below describe earlier checkpoints, including the expanded-wheel
+zoom behavior that was subsequently replaced by ordinary-wheel panning.
+
 ## Wheel zoom follow-up, 2026-10-14
 
 The wheel handler previously only panned and never changed zoom. Inline diagrams
