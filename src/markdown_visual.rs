@@ -206,6 +206,14 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     cx.background_executor().timer(Duration::from_millis(400)).await;
                     let mut drag_frames = Vec::new();
                     cx.update_window(handle.into(), |_, window, cx| {
+                        // A hidden native window does not receive the idle draws
+                        // that normally finish dialog layout. Resolve its size
+                        // before positioning the benchmark away from scroll edges.
+                        window.refresh();
+                        let _ = window.draw(cx);
+                        viewer.update(cx, |viewer, cx| viewer.prepare_profile(cx));
+                        window.refresh();
+                        let _ = window.draw(cx);
                         let position = viewer.read(cx).profile_bounds().center();
                         window.dispatch_event(PlatformInput::MouseDown(MouseDownEvent {
                             position, button: MouseButton::Left, modifiers: Modifiers::none(), click_count: 1, first_mouse: false,
