@@ -8,7 +8,7 @@ use gpui::{
     div, img, point, prelude::*, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, WindowExt as _,
+    ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     scroll::{Scrollbar, ScrollbarShow},
 };
@@ -293,7 +293,13 @@ impl DiagramViewer {
         cx.notify();
     }
 
-    fn control(id: &'static str, icon: impl Into<Icon>, label: &'static str, cx: &App) -> Button {
+    fn control(
+        id: &'static str,
+        icon: impl Into<Icon>,
+        label: &'static str,
+        compact_size: Option<Pixels>,
+        cx: &App,
+    ) -> Button {
         let theme = super::markdown_preview::current(cx).theme;
         let palette = theme.palette(cx.theme().mode.is_dark());
         Button::new(id)
@@ -305,6 +311,7 @@ impl DiagramViewer {
             .border_color(super::markdown_preview::color(palette.border))
             .text_color(super::markdown_preview::color(palette.muted))
             .tooltip(label)
+            .when_some(compact_size, |button, size| button.with_size(size))
     }
 }
 
@@ -343,6 +350,14 @@ impl Render for DiagramViewer {
         } else {
             (image_width / self.aspect).clamp(px(200. * scale), px(600. * scale))
         };
+        // Fit the copy button, three navigation rows and their insets without
+        // clipping controls when a short window uses a large interface font.
+        let controls_scale = if self.expanded {
+            scale.min(self.height / px(176.)).min(width / px(152.))
+        } else {
+            scale
+        };
+        let compact_size = (controls_scale < scale).then_some(px(32. * controls_scale));
         let controls = [
             (
                 "diagram-pan-up",
@@ -374,18 +389,21 @@ impl Render for DiagramViewer {
             ),
         ]
         .map(|(id, icon, label, x, y)| {
-            Self::control(id, icon, t(label), cx).on_click(cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                if this.pan_by(point(px(x * scale), px(y * scale))) {
-                    cx.notify();
-                }
-            }))
+            Self::control(id, icon, t(label), compact_size, cx).on_click(cx.listener(
+                move |this, _, _, cx| {
+                    cx.stop_propagation();
+                    if this.pan_by(point(px(x * scale), px(y * scale))) {
+                        cx.notify();
+                    }
+                },
+            ))
         });
         let [up, left, right, down] = controls;
         let zoom_in = Self::control(
             "diagram-zoom-in",
             Icon::default().path("icons/diagram-zoom-in.svg"),
             t(L10nKey::MarkdownZoomIn),
+            compact_size,
             cx,
         )
         .on_click(cx.listener(|this, _, _, cx| {
@@ -397,6 +415,7 @@ impl Render for DiagramViewer {
             "diagram-zoom-out",
             Icon::default().path("icons/diagram-zoom-out.svg"),
             t(L10nKey::MarkdownZoomOut),
+            compact_size,
             cx,
         )
         .on_click(cx.listener(|this, _, _, cx| {
@@ -408,6 +427,7 @@ impl Render for DiagramViewer {
             "diagram-reset",
             Icon::default().path("icons/diagram-reset.svg"),
             t(L10nKey::Reset),
+            compact_size,
             cx,
         )
         .on_click(cx.listener(|this, _, _, cx| {
@@ -424,6 +444,7 @@ impl Render for DiagramViewer {
                         "expand-diagram",
                         Icon::default().path("icons/diagram-expand.svg"),
                         t(L10nKey::MarkdownExpandDiagram),
+                        compact_size,
                         cx,
                     )
                     .on_click(cx.listener(|this, _, window, cx| {
@@ -443,6 +464,7 @@ impl Render for DiagramViewer {
                     "copy-diagram",
                     IconName::Copy,
                     t(L10nKey::EditorCopyCode),
+                    compact_size,
                     cx,
                 )
                 .on_click(cx.listener(|this, _, _, cx| {
@@ -600,34 +622,41 @@ impl Render for DiagramViewer {
             .child(
                 div()
                     .absolute()
-                    .top_2()
-                    .right(px(if expanded { 24. } else { 8. } * scale))
+                    .top(px(8. * controls_scale))
+                    .right(px(if expanded { 24. } else { 8. } * controls_scale))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(toolbar),
             )
             .child(
                 div()
                     .absolute()
-                    .bottom(px(if expanded { 24. } else { 8. } * scale))
-                    .right(px(if expanded { 24. } else { 8. } * scale))
+                    .bottom(px(if expanded { 24. } else { 8. } * controls_scale))
+                    .right(px(if expanded { 24. } else { 8. } * controls_scale))
                     .flex()
                     .flex_col()
-                    .gap_1()
+                    .gap(px(4. * controls_scale))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(
                         div()
                             .flex()
-                            .gap_1()
-                            .child(div().w_8())
+                            .gap(px(4. * controls_scale))
+                            .child(div().w(px(32. * controls_scale)))
                             .child(up)
                             .child(zoom_in),
                     )
-                    .child(div().flex().gap_1().child(left).child(reset).child(right))
                     .child(
                         div()
                             .flex()
-                            .gap_1()
-                            .child(div().w_8())
+                            .gap(px(4. * controls_scale))
+                            .child(left)
+                            .child(reset)
+                            .child(right),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(4. * controls_scale))
+                            .child(div().w(px(32. * controls_scale)))
                             .child(down)
                             .child(zoom_out),
                     ),
@@ -882,7 +911,7 @@ mod tests {
                 <= px(1.),
             "dragging the actual scrollbar must reach the last node"
         );
-        vcx.update(|window, _| window.set_rem_size(px(32.)));
+        vcx.update(|_, cx| cx.global_mut::<crate::core::config::Config>().ui_font_size = 32.);
         vcx.simulate_resize(gpui::size(px(400.), px(300.)));
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
@@ -894,6 +923,11 @@ mod tests {
         assert!(
             vcx.debug_bounds("diagram-zoom-out").unwrap().bottom() <= px(284.),
             "bottom controls must remain visible in a short window"
+        );
+        assert!(
+            vcx.debug_bounds("diagram-zoom-in").unwrap().top()
+                >= vcx.debug_bounds("diagram-viewport").unwrap().top(),
+            "top controls must fit inside the short viewer"
         );
         assert!(
             vcx.debug_bounds("diagram-viewport").unwrap().size.width <= px(400.),
