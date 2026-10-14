@@ -524,6 +524,7 @@ pub(crate) struct MarkdownPreview {
     reading_extensions: MarkdownExtensions,
     image_bytes: usize,
     pending_anchor: Option<String>,
+    anchor_item_pending: bool,
     last_position: Option<(usize, Pixels)>,
     restore_position: Option<(usize, Pixels)>,
     pub(crate) text: Entity<TextViewState>,
@@ -639,6 +640,7 @@ impl MarkdownPreview {
             reading_extensions,
             image_bytes: 0,
             pending_anchor: None,
+            anchor_item_pending: false,
             last_position: None,
             restore_position: None,
             text,
@@ -732,6 +734,7 @@ impl MarkdownPreview {
 
     pub(crate) fn navigate_anchor(&mut self, anchor: String, cx: &mut Context<Self>) {
         self.pending_anchor = Some(anchor);
+        self.anchor_item_pending = false;
         cx.notify();
     }
 
@@ -860,6 +863,23 @@ impl MarkdownPreview {
             self.text.read(cx).list_state().viewport_bounds()
         } else {
             self.scroll.bounds()
+        }
+    }
+
+    #[cfg(any(test, feature = "markdown-visual-tests"))]
+    pub(crate) fn verify_profile_scroll_frame(&self, cx: &App) {
+        if self.virtualized {
+            let text = self.text.read(cx);
+            let list = text.list_state();
+            let top = list.logical_scroll_top();
+            let painted = text
+                .block_bounds(top.item_ix)
+                .expect("visible block must be prepainted");
+            let expected = list.viewport_bounds().top() - top.offset_in_item;
+            assert!(
+                (painted.top() - expected).abs() < px(1.),
+                "painted block must follow the scroll offset: {painted:?}, {expected:?}"
+            );
         }
     }
 
@@ -1326,16 +1346,31 @@ impl Render for MarkdownPreview {
                             if this.virtualized {
                                 let text = this.text.read(cx);
                                 let list = text.list_state();
-                                if let Some(anchor) = this.pending_anchor.take() {
+                                if let Some(anchor) = this.pending_anchor.clone() {
                                     this.restore_position = None;
                                     if anchor.is_empty() {
                                         list.scroll_to(Default::default());
+                                        this.pending_anchor = None;
+                                    } else if this.anchor_item_pending {
+                                        // The containing block is now laid out. A heading
+                                        // deep inside a quote/list needs its exact position.
+                                        if let Some(target) = text.anchor_bounds(&anchor) {
+                                            list.scroll_by(
+                                                target.top()
+                                                    - list.viewport_bounds().top()
+                                                    - px(12.),
+                                            );
+                                        }
+                                        this.pending_anchor = None;
+                                        this.anchor_item_pending = false;
                                     } else if let Some(item_ix) = text.anchor_index(&anchor) {
                                         list.scroll_to(gpui::ListOffset {
                                             item_ix,
                                             offset_in_item: px(0.),
                                         });
+                                        this.anchor_item_pending = true;
                                     } else {
+                                        this.pending_anchor = None;
                                         window.push_notification(
                                             format!(
                                                 "#{anchor}: {}",

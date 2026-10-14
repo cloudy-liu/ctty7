@@ -2499,19 +2499,20 @@ mod tests {
         let ready_ms = start.elapsed().as_secs_f64() * 1000.;
         let mut samples = Vec::new();
         let mut min_offset = px(0.);
-        for frame in 0..100 {
+        for frame in 0..110 {
             let start = std::time::Instant::now();
             vcx.simulate_event(gpui::ScrollWheelEvent {
                 position: gpui::point(px(1100.), px(500.)),
                 delta: gpui::ScrollDelta::Pixels(gpui::point(
                     px(0.),
-                    px(if frame < 50 { -120. } else { 120. }),
+                    px(if frame < 55 { -120. } else { 120. }),
                 )),
                 modifiers: gpui::Modifiers::none(),
                 touch_phase: gpui::TouchPhase::Moved,
             });
             vcx.update(|window, cx| {
                 let _ = window.draw(cx);
+                reading.read(cx).verify_profile_scroll_frame(cx);
             });
             min_offset = min_offset
                 .min(reading.read_with(&vcx, |view, cx| view.profile_scroll_offset(cx).y));
@@ -2618,8 +2619,9 @@ mod tests {
     fn markdown_link_click_survives_a_frame_between_press_and_release(cx: &mut TestAppContext) {
         let (app, mut vcx) = markdown_window(cx);
         let content = format!(
-            "# Links\n\n[Jump](#target)\n\n{}\n# Target\n",
-            "Paragraph.\n\n".repeat(80)
+            "# Links\n\n[Jump](#target)\n\n{}> # Target\n\n{}",
+            "> Paragraph in a long blockquote.\n>\n".repeat(80),
+            "Paragraph after the target.\n\n".repeat(1400)
         );
         app.update_in(&mut vcx, |app, window, cx| {
             app.editor_install_file(
@@ -2674,8 +2676,12 @@ mod tests {
             });
         }
         assert!(
-            reading.read_with(&vcx, |view, _| view.scroll.offset().y < px(-300.)),
-            "a real click must still navigate when the UI repaints before release"
+            reading.read_with(&vcx, |view, cx| view
+                .text
+                .read(cx)
+                .anchor_bounds("target")
+                .is_some_and(|target| target.intersects(&view.profile_scroll_bounds(cx)))),
+            "a real click must reveal a deeply nested heading after a repaint"
         );
     }
 

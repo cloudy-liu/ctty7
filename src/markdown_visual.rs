@@ -182,6 +182,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                             }), cx);
                             let _ = window.draw(cx);
                             let elapsed = start.elapsed().as_secs_f64() * 1000.;
+                            reading.read(cx).verify_profile_scroll_frame(cx);
                             if frame >= 10 { scroll_frames.push(elapsed); }
                             scroll_detail.push(serde_json::json!({"frame":frame,"cpu_ms":elapsed,
                                 "offset":f32::from(reading.read(cx).profile_scroll_offset(cx).y)}));
@@ -238,6 +239,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                         "scroll_detail": scroll_detail,
                         "expanded_drag_cpu_frame": frame_summary(&mut drag_frames),
                         "min_scroll_offset": offsets.iter().copied().reduce(f32::min).unwrap(),
+                        "visible_scroll_verified": true,
                         "measurement": "event dispatch plus GPUI CPU layout/prepaint/paint; excludes present and GPU time",
                     });
                     std::fs::write(output, serde_json::to_vec_pretty(&profile).unwrap()).unwrap();
