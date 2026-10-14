@@ -332,7 +332,13 @@ impl Render for DiagramViewer {
         };
         self.image_width = image_width;
         self.height = if self.expanded {
-            let max_height = window.viewport_size().height * 0.75;
+            // The dialog starts 10% down the window and adds 32px padding,
+            // two border pixels, a one-rem title and a half-rem gap. Keep
+            // another 16px below it so the scrollbar and controls stay visible.
+            let max_height =
+                (window.viewport_size().height * 0.9 - px(50.) - window.rem_size() * 1.5)
+                    .min(window.viewport_size().height * 0.75)
+                    .max(px(1.));
             (image_width / self.aspect).clamp(px(200. * scale).min(max_height), max_height)
         } else {
             (image_width / self.aspect).clamp(px(200. * scale), px(600. * scale))
@@ -877,13 +883,17 @@ mod tests {
             "dragging the actual scrollbar must reach the last node"
         );
         vcx.update(|window, _| window.set_rem_size(px(32.)));
-        vcx.simulate_resize(gpui::size(px(400.), px(400.)));
+        vcx.simulate_resize(gpui::size(px(400.), px(300.)));
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
         assert!(
-            vcx.debug_bounds("diagram-viewport").unwrap().size.height <= px(300.),
+            vcx.debug_bounds("diagram-viewport").unwrap().bottom() <= px(284.),
             "a large text scale in a short window must keep the viewer within the window"
+        );
+        assert!(
+            vcx.debug_bounds("diagram-zoom-out").unwrap().bottom() <= px(284.),
+            "bottom controls must remain visible in a short window"
         );
         assert!(
             vcx.debug_bounds("diagram-viewport").unwrap().size.width <= px(400.),
