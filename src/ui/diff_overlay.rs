@@ -8,6 +8,7 @@ use gpui::{
 };
 use gpui_component::button::Button;
 use gpui_component::menu::ContextMenuExt as _;
+use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 
 use crate::core::config::{Config, DiffViewMode};
@@ -30,6 +31,12 @@ use crate::ui::rounding;
 use crate::ui::rounding::RoundedCorners as _;
 use crate::ui::scm::path::relative_time;
 use crate::ui::scm::status::status_glyph;
+
+const SPLIT_GUTTER_WIDTH: f32 = 42.;
+const UNIFIED_GUTTER_WIDTH: f32 = 34.;
+const DIFF_MARKER_WIDTH: f32 = 12.;
+const DIFF_DIVIDER_WIDTH: f32 = 1.;
+const DIFF_LINE_END_PADDING: f32 = 4.;
 
 pub(crate) enum DiffLoad {
     Loading,
@@ -471,7 +478,7 @@ impl Tty7App {
                 let path = untracked_focus(snap, overlay.focus.as_deref()).unwrap();
                 match &overlay.preview {
                     Some((held, Some(file))) if held == path => {
-                        self.diff_preview_card(file.as_ref(), &overlay.scroll, cx)
+                        self.diff_preview_card(file.as_ref(), &overlay.scroll, window, cx)
                     }
                     Some((held, None)) if held == path => {
                         self.diff_message(t(L10nKey::DiffReadFailed), cx)
@@ -484,6 +491,7 @@ impl Tty7App {
                 &overlay.expanded,
                 focused_file(snap, overlay),
                 &overlay.scroll,
+                window,
                 cx,
             ),
         };
@@ -868,6 +876,7 @@ impl Tty7App {
         &self,
         file: &FileDiff,
         scroll: &gpui::ScrollHandle,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let mode = view_mode(cx);
@@ -876,7 +885,7 @@ impl Tty7App {
             .p_4()
             .w_full()
             // `usize::MAX` keeps the element ids clear of the real list's.
-            .child(self.diff_file_card(usize::MAX, file, true, mode, cx));
+            .child(self.diff_file_card(usize::MAX, file, true, mode, window, cx));
         crate::ui::scrollbar::with_vertical_scrollbar(
             "diff-overlay-scrollbar",
             div()
@@ -911,6 +920,7 @@ impl Tty7App {
         expanded: &HashMap<String, bool>,
         focused: Option<usize>,
         scroll: &gpui::ScrollHandle,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let stats = snap.stats();
@@ -934,7 +944,7 @@ impl Tty7App {
             } else {
                 file_expanded(file, expanded, oversized)
             };
-            list = list.child(self.diff_file_card(idx, file, is_expanded, mode, cx));
+            list = list.child(self.diff_file_card(idx, file, is_expanded, mode, window, cx));
         }
         if focused.is_none() && snap.files.len() > shown {
             let rest = snap.files.len() - shown;
@@ -1000,6 +1010,7 @@ impl Tty7App {
         file: &FileDiff,
         expanded: bool,
         mode: DiffViewMode,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) -> gpui::Div {
         let palette = diff_palette(cx);
@@ -1123,7 +1134,6 @@ impl Tty7App {
             .child(header);
 
         if has_body {
-            let mut body = v_flex().w_full();
             let hunks: Vec<_> = file
                 .hunks
                 .iter()
@@ -1143,40 +1153,154 @@ impl Tty7App {
                     .rposition(|(_, rows)| !rows.is_empty())
                     .map(|h| (h, hunks[h].1.len() - 1))
             };
-            for (h, (hunk, rows)) in hunks.iter().enumerate() {
-                body = body.child(
-                    div()
-                        .w_full()
-                        .px_2()
-                        .py_0p5()
-                        .bg(palette.header)
-                        .text_xs()
-                        .font_family(self.font_family.clone())
-                        .text_color(palette.hunk)
-                        .truncate()
-                        .child(hunk.header.clone()),
-                );
-                match rows {
-                    HunkRows::Split(rows) => {
-                        for (r, row) in rows.iter().enumerate() {
-                            body = body.child(self.diff_split_row(
-                                row,
-                                closing_row == Some((h, r)),
-                                cx,
-                            ));
+            let font = gpui::Font {
+                family: self.font_family.clone().into(),
+                ..Default::default()
+            };
+            let font_size = window.rem_size().as_f32() * 0.75;
+            let sides: &[Option<Side>] = match mode {
+                DiffViewMode::Split => &[Some(Side::Old), Some(Side::New)],
+                DiffViewMode::Unified => &[None],
+            };
+            let mut columns = h_flex()
+                .debug_selector(|| "diff-columns".into())
+                .w_full()
+                .items_stretch();
+            for &side in sides {
+                let mut body = v_flex().w_full().flex_shrink_0();
+                let measure = |text: &str| {
+                    crate::ui::tab_strip::measure_text(window.text_system(), &font, font_size, text)
+                };
+                let mut width = 0_f32;
+                for (h, (hunk, rows)) in hunks.iter().enumerate() {
+                    width = width.max(measure(&hunk.header) + 16.);
+                    body = body.child(
+                        div()
+                            .w_full()
+                            .flex_shrink_0()
+                            .px_2()
+                            .py_0p5()
+                            .bg(palette.header)
+                            .text_xs()
+                            .font_family(self.font_family.clone())
+                            .text_color(palette.hunk)
+                            .whitespace_nowrap()
+                            .child(hunk.header.clone()),
+                    );
+                    match rows {
+                        HunkRows::Split(rows) => {
+                            let side = side.expect("split column");
+                            for (r, row) in rows.iter().enumerate() {
+                                let cell = match side {
+                                    Side::Old => row.left.as_ref(),
+                                    Side::New => row.right.as_ref(),
+                                };
+                                if let Some(cell) = cell {
+                                    width = width.max(
+                                        measure(&split_text(cell, side))
+                                            + SPLIT_GUTTER_WIDTH
+                                            + DIFF_LINE_END_PADDING,
+                                    );
+                                }
+                                let radius = if closing_row == Some((h, r)) {
+                                    rounding::inner_radius(
+                                        rounding::CARD_RADIUS,
+                                        rounding::HAIRLINE,
+                                    )
+                                } else {
+                                    px(0.)
+                                };
+                                body = body.child(
+                                    self.diff_split_cell(cell, side, radius, cx)
+                                        .flex_none()
+                                        .w_full()
+                                        .h(px(19.))
+                                        .text_xs()
+                                        .font_family(self.font_family.clone()),
+                                );
+                            }
                         }
-                    }
-                    HunkRows::Unified(rows) => {
-                        for (r, row) in rows.iter().enumerate() {
-                            body = body.child(self.diff_unified_row(
-                                row,
-                                closing_row == Some((h, r)),
-                                cx,
-                            ));
+                        HunkRows::Unified(rows) => {
+                            for (r, row) in rows.iter().enumerate() {
+                                width = width.max(
+                                    measure(&row.text)
+                                        + UNIFIED_GUTTER_WIDTH * 2.
+                                        + DIFF_DIVIDER_WIDTH
+                                        + DIFF_MARKER_WIDTH
+                                        + DIFF_LINE_END_PADDING,
+                                );
+                                body = body.child(
+                                    self.diff_unified_row(row, closing_row == Some((h, r)), cx)
+                                        .flex_shrink_0(),
+                                );
+                            }
                         }
                     }
                 }
+                let key = match side {
+                    Some(Side::Old) => "diff-old-scroll",
+                    Some(Side::New) => "diff-new-scroll",
+                    None => "diff-unified-scroll",
+                };
+                let scroll = window
+                    .use_keyed_state((key, idx), cx, |_, _| gpui::ScrollHandle::new())
+                    .read(cx)
+                    .clone();
+                if side == Some(Side::New) {
+                    columns = columns.child(
+                        div()
+                            .flex_shrink_0()
+                            .w(px(DIFF_DIVIDER_WIDTH))
+                            .bg(palette.border),
+                    );
+                }
+                columns = columns.child(
+                    div()
+                        .relative()
+                        .flex_1()
+                        .min_w_0()
+                        .pb(px(12.))
+                        .child(
+                            div()
+                                .id((key, idx))
+                                .debug_selector(move || key.into())
+                                .relative()
+                                .w_full()
+                                // Keep the wheel hitbox on the viewport as its content moves.
+                                .overflow_hidden()
+                                .track_scroll(&scroll)
+                                .on_scroll_wheel(cx.listener({
+                                    let scroll = scroll.clone();
+                                    move |_, event: &gpui::ScrollWheelEvent, window, cx| {
+                                        let delta = event.delta.pixel_delta(window.line_height());
+                                        // Vertical gestures continue to the file list.
+                                        if delta.x.abs() > delta.y.abs() {
+                                            let mut offset = scroll.offset();
+                                            offset.x += delta.x;
+                                            scroll.set_offset(offset);
+                                            cx.notify();
+                                            cx.stop_propagation();
+                                        }
+                                    }
+                                }))
+                                .child(body.min_w(px(width.ceil()))),
+                        )
+                        .child(
+                            div()
+                                .debug_selector(|| "diff-horizontal-scrollbar".into())
+                                .absolute()
+                                .bottom_0()
+                                .w_full()
+                                .h(px(12.))
+                                .child(
+                                    Scrollbar::horizontal(&scroll)
+                                        .id((key, idx))
+                                        .scrollbar_show(ScrollbarShow::Always),
+                                ),
+                        ),
+                );
             }
+            card = card.child(columns);
             if let Some(reason) = file.truncated {
                 let note = match reason {
                     Truncation::PerFile => t_fmt(
@@ -1185,7 +1309,7 @@ impl Tty7App {
                     ),
                     Truncation::Budget => t(L10nKey::DiffTruncatedBudget).to_string(),
                 };
-                body = body.child(
+                card = card.child(
                     div()
                         .w_full()
                         .px_2()
@@ -1195,7 +1319,6 @@ impl Tty7App {
                         .child(note),
                 );
             }
-            card = card.child(body);
         }
         card
     }
@@ -1241,25 +1364,6 @@ impl Tty7App {
             .into_any_element()
     }
 
-    fn diff_split_row(&self, row: &SplitRow, closes_card: bool, cx: &Context<Self>) -> gpui::Div {
-        let palette = diff_palette(cx);
-        let radius = if closes_card {
-            rounding::inner_radius(rounding::CARD_RADIUS, rounding::HAIRLINE)
-        } else {
-            px(0.)
-        };
-        h_flex()
-            .debug_selector(|| "diff-row".into())
-            .w_full()
-            .h(px(19.))
-            .items_stretch()
-            .text_xs()
-            .font_family(self.font_family.clone())
-            .child(self.diff_split_cell(row.left.as_ref(), Side::Old, radius, cx))
-            .child(div().flex_shrink_0().w(px(1.)).bg(palette.border))
-            .child(self.diff_split_cell(row.right.as_ref(), Side::New, radius, cx))
-    }
-
     fn diff_split_cell(
         &self,
         cell: Option<&SplitCell>,
@@ -1284,17 +1388,17 @@ impl Tty7App {
         let Some(cell) = cell else {
             return base.bg(palette.header);
         };
-        let (marker, foreground, background) = match (cell.changed, side) {
-            (true, Side::Old) => ("−", palette.removed, palette.removed_background),
-            (true, Side::New) => ("+", palette.added, palette.added_background),
-            (false, _) => (" ", palette.foreground, palette.background),
+        let (foreground, background) = match (cell.changed, side) {
+            (true, Side::Old) => (palette.removed, palette.removed_background),
+            (true, Side::New) => (palette.added, palette.added_background),
+            (false, _) => (palette.foreground, palette.background),
         };
         base.bg(background)
             .text_color(foreground)
             .child(
                 h_flex()
                     .flex_shrink_0()
-                    .w(px(42.))
+                    .w(px(SPLIT_GUTTER_WIDTH))
                     .justify_end()
                     .pr_1p5()
                     .text_color(palette.muted)
@@ -1304,8 +1408,12 @@ impl Tty7App {
                 div()
                     .flex_1()
                     .min_w_0()
-                    .truncate()
-                    .child(format!("{marker} {}", cell.text)),
+                    .whitespace_nowrap()
+                    .debug_selector(move || match side {
+                        Side::Old => "diff-old-text".into(),
+                        Side::New => "diff-new-text".into(),
+                    })
+                    .child(split_text(cell, side)),
             )
     }
 
@@ -1343,7 +1451,7 @@ impl Tty7App {
         let gutter = |no: Option<u32>| {
             h_flex()
                 .flex_shrink_0()
-                .w(px(34.))
+                .w(px(UNIFIED_GUTTER_WIDTH))
                 .justify_end()
                 .pr_1p5()
                 .text_color(palette.muted)
@@ -1365,16 +1473,29 @@ impl Tty7App {
             // The split view's centre rule, in the one place it still means the
             // same thing: everything left of it is a number, everything right
             // of it is the file.
-            .child(div().flex_shrink_0().w(px(1.)).h_full().bg(palette.border))
             .child(
                 div()
                     .flex_shrink_0()
-                    .w(px(12.))
+                    .w(px(DIFF_DIVIDER_WIDTH))
+                    .h_full()
+                    .bg(palette.border),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .w(px(DIFF_MARKER_WIDTH))
                     .text_center()
                     .text_color(foreground)
                     .child(unified_marker(row.kind)),
             )
-            .child(div().flex_1().min_w_0().truncate().child(row.text.clone()))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .whitespace_nowrap()
+                    .debug_selector(|| "diff-unified-text".into())
+                    .child(row.text.clone()),
+            )
     }
 
     fn diff_untracked_section(&self, snap: &DiffSnapshot, cx: &Context<Self>) -> AnyElement {
@@ -1487,6 +1608,15 @@ fn unified_marker(kind: LineKind) -> &'static str {
         LineKind::Removed => "−",
         LineKind::Context => "",
     }
+}
+
+fn split_text(cell: &SplitCell, side: Side) -> String {
+    let marker = match (cell.changed, side) {
+        (true, Side::Old) => "−",
+        (true, Side::New) => "+",
+        (false, _) => " ",
+    };
+    format!("{marker} {}", cell.text)
 }
 
 /// The git status decoration shared across the app.
@@ -2734,6 +2864,173 @@ mod github_theme_gpui_tests {
     use gpui::{TestAppContext, point, size};
     use gpui_component::{Theme, ThemeMode};
 
+    struct LongDiff {
+        app: gpui::Entity<Tty7App>,
+        file: FileDiff,
+        mode: DiffViewMode,
+        vertical: gpui::ScrollHandle,
+    }
+
+    impl gpui::Render for LongDiff {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            let card = self.app.update(cx, |app, cx| {
+                app.diff_file_card(0, &self.file, true, self.mode, window, cx)
+            });
+            div()
+                .id("test-diff-scroll")
+                .w(window.viewport_size().width.min(px(600.)))
+                .h(px(250.))
+                .overflow_y_scroll()
+                .track_scroll(&self.vertical)
+                .child(card)
+        }
+    }
+
+    #[gpui::test]
+    fn long_diff_lines_can_scroll_to_the_end_in_both_views(cx: &mut TestAppContext) {
+        let (app, _) = test_window::harness(cx);
+        let text = format!("\t{}END", "长文字 with spaces ".repeat(80));
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            let mut file = git_diff::synthesize_added(
+                "long.txt",
+                text.as_bytes(),
+                &git_diff::DiffBudget::SINGLE_FILE,
+            );
+            file.hunks[0].lines.insert(
+                0,
+                git_diff::DiffLine {
+                    kind: LineKind::Removed,
+                    old_no: Some(1),
+                    new_no: None,
+                    text: text.clone(),
+                },
+            );
+            let (_, vcx) = cx.add_window_view(|_, _| LongDiff {
+                app: app.clone(),
+                file,
+                mode,
+                vertical: gpui::ScrollHandle::new(),
+            });
+            vcx.run_until_parked();
+            assert!(
+                vcx.debug_bounds("diff-horizontal-scrollbar").is_some(),
+                "long lines need a horizontal scrollbar in {mode:?}",
+            );
+            let columns: &[(&str, &str)] = match mode {
+                DiffViewMode::Split => &[
+                    ("diff-old-scroll", "diff-old-text"),
+                    ("diff-new-scroll", "diff-new-text"),
+                ],
+                DiffViewMode::Unified => &[("diff-unified-scroll", "diff-unified-text")],
+            };
+            for &(viewport, text) in columns {
+                let viewport = vcx.debug_bounds(viewport).expect("scroll viewport");
+                let before = vcx.debug_bounds(text).expect("long text");
+                assert!(before.right() > viewport.right(), "fixture must overflow");
+                vcx.simulate_event(gpui::ScrollWheelEvent {
+                    position: viewport.center(),
+                    delta: gpui::ScrollDelta::Pixels(point(px(-100_000.), px(0.))),
+                    ..Default::default()
+                });
+                vcx.run_until_parked();
+                let end = vcx.debug_bounds(text).expect("scrolled text");
+                assert!(
+                    end.left() < before.left(),
+                    "horizontal wheel must move text"
+                );
+                assert!(
+                    end.right() <= viewport.right() + px(1.),
+                    "line ending must be reachable in {mode:?}"
+                );
+                vcx.simulate_event(gpui::ScrollWheelEvent {
+                    position: viewport.center(),
+                    delta: gpui::ScrollDelta::Pixels(point(px(80.), px(0.))),
+                    ..Default::default()
+                });
+                vcx.run_until_parked();
+                assert!(
+                    vcx.debug_bounds(text).unwrap().left() > end.left(),
+                    "horizontal wheel must return from the line ending"
+                );
+                vcx.simulate_event(gpui::ScrollWheelEvent {
+                    position: viewport.center(),
+                    delta: gpui::ScrollDelta::Pixels(point(px(-80.), px(0.))),
+                    ..Default::default()
+                });
+                vcx.run_until_parked();
+                vcx.simulate_event(gpui::ScrollWheelEvent {
+                    position: viewport.center(),
+                    delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-40.))),
+                    ..Default::default()
+                });
+                vcx.run_until_parked();
+                assert_eq!(
+                    vcx.debug_bounds(text).unwrap().left(),
+                    end.left(),
+                    "vertical wheel must not scroll sideways"
+                );
+            }
+            let &(viewport_selector, text_selector) = columns.last().unwrap();
+            let bar = vcx.debug_bounds("diff-horizontal-scrollbar").unwrap();
+            let start = point(bar.left() + px(1.), bar.center().y);
+            vcx.simulate_click(start, gpui::Modifiers::none());
+            vcx.run_until_parked();
+            let start_text = vcx.debug_bounds(text_selector).unwrap();
+            let viewport = vcx.debug_bounds(viewport_selector).unwrap();
+            assert!(
+                start_text.left() >= viewport.left(),
+                "scrollbar track click returns to the start"
+            );
+            let thumb = point(bar.left() + px(20.), bar.center().y);
+            let end = point(bar.right() - px(1.), bar.center().y);
+            vcx.simulate_mouse_down(thumb, gpui::MouseButton::Left, gpui::Modifiers::none());
+            // The shared scrollbar throttles drag updates using a real clock.
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            vcx.simulate_mouse_move(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.run_until_parked();
+            assert!(
+                vcx.debug_bounds(text_selector).unwrap().right() <= viewport.right() + px(1.),
+                "dragging the horizontal scrollbar reaches the line ending"
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn horizontal_diff_viewports_leave_vertical_wheel_to_the_file_list(cx: &mut TestAppContext) {
+        let (app, _) = test_window::harness(cx);
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            let vertical = gpui::ScrollHandle::new();
+            let text = format!("{}\n", "long text ".repeat(100)).repeat(40);
+            let (_, vcx) = cx.add_window_view(|_, _| LongDiff {
+                app: app.clone(),
+                file: git_diff::synthesize_added(
+                    "long.txt",
+                    text.as_bytes(),
+                    &git_diff::DiffBudget::SINGLE_FILE,
+                ),
+                mode,
+                vertical: vertical.clone(),
+            });
+            vcx.run_until_parked();
+            let selector = match mode {
+                DiffViewMode::Split => "diff-new-scroll",
+                DiffViewMode::Unified => "diff-unified-scroll",
+            };
+            let viewport = vcx.debug_bounds(selector).unwrap();
+            vcx.simulate_event(gpui::ScrollWheelEvent {
+                position: point(viewport.center().x, px(80.)),
+                delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-40.))),
+                ..Default::default()
+            });
+            vcx.run_until_parked();
+            assert!(
+                vertical.offset().y < px(0.),
+                "the file list must still scroll vertically in {mode:?}"
+            );
+        }
+    }
+
     // Independent expectations from the approved GitHub reference colors.
     #[gpui::test]
     fn rendered_changes_use_github_colors_in_both_modes(cx: &mut TestAppContext) {
@@ -2820,14 +3117,14 @@ mod github_theme_gpui_tests {
             let file =
                 git_diff::synthesize_added("new.txt", b"new\n", &git_diff::DiffBudget::SINGLE_FILE);
             for mode in [DiffViewMode::Unified, DiffViewMode::Split] {
-                let mut card = app.update_in(&mut vcx, |app, _, cx| {
-                    app.diff_file_card(0, &file, true, mode, cx)
+                let mut card = app.update_in(&mut vcx, |app, window, cx| {
+                    app.diff_file_card(0, &file, false, mode, window, cx)
                 });
                 assert_eq!(card.style().background, Some(expected_bg.clone()));
                 assert_eq!(card.style().text.color, Some(expected_fg));
                 assert_eq!(card.style().border_color, Some(gpui::rgb(border).into()));
-                // Interactive cards need a rendering view; the open-overlay
-                // mode-switch test draws these same cards in their real host.
+                // Inspect the card shell here. Expanded scroll state needs a
+                // rendering view, exercised by the window tests above.
             }
         }
     }
