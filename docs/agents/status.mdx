@@ -47,6 +47,12 @@ install. So tty7 also reads the bottom of each agent's pane with
 [herdr's detection manifests](https://herdr.dev/docs/agents/): per-agent rules
 that recognise a spinner, an approval prompt or an idle input box.
 
+The window also reads the agent's current terminal title and OSC 9;4 progress
+reports. Antigravity's live spinner can contain a thought summary, and its
+permission, question and project-trust dialogs are recognized as waiting for
+input. Background task counts alone do not keep Antigravity or Grok marked
+as working after the foreground turn returns to its prompt.
+
 Claude Code, Codex, Gemini, Amp, OpenCode, Copilot CLI, Cursor, Droid, Pi,
 Hermes, Antigravity, Grok Build, Qwen Code and Kimi Code have manifests. When
 the screen shows clear evidence of a state, the screen wins; when it shows none,

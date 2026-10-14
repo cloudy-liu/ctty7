@@ -42,6 +42,10 @@ jobs:
         with:
           components: rustfmt
       - run: cargo fmt --check
+      - name: Check all pinned agent detection manifests
+        run: |
+          python3 scripts/sync-agent-detection.py --check
+          python3 -m unittest discover -s scripts -p 'test_sync_agent_detection.py'
 
   # `ui::` and `terminal::` must not reach the filesystem or git
   # directly, because once a workspace can be remote those calls answer for the
