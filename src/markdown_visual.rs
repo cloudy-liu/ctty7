@@ -172,8 +172,10 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     let mut offsets = Vec::new();
                     for frame in 0..110 {
                         cx.update_window(handle.into(), |_, window, cx| {
-                            let bounds = reading.read(cx).profile_scroll_bounds(cx);
-                            let position = point(bounds.right() - px(12.), bounds.center().y);
+                            // Use the same outer-pane input position as the baseline,
+                            // including when the reading view forwards margin wheel events.
+                            let viewport = window.viewport_size();
+                            let position = point(viewport.width - px(12.), viewport.height / 2.);
                             let start = std::time::Instant::now();
                             window.dispatch_event(PlatformInput::ScrollWheel(ScrollWheelEvent {
                                 position,
