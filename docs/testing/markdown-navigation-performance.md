@@ -1,5 +1,9 @@
 # Markdown navigation and performance verification
 
+This is the historical canvas implementation record. See the
+[GitHub-style reading verification](github-mermaid-reading.md) for the newer
+scroll viewer, current controls and subsequent native measurements.
+
 Verified on Windows on 2026-10-14. The final local composition includes fork main,
 the diff changes from #147, Markdown navigation/performance from #148, and supported
 Herdr detection from #149. Tested composition: `462be3e3fc79cecff8209dfdfb63b8c6c4e761b8`.
