@@ -2696,8 +2696,13 @@ impl TerminalView {
     }
 
     pub(super) fn key_flags(&self) -> super::input::KeyFlags {
+        // Herdr owns the outer console even when an agent owns a nested pane.
+        // Bare LF becomes Ctrl+Enter in ConPTY, so preserve modified Enter
+        // as a key record when Herdr has requested win32-input-mode.
         let win32_input = self.terminal.win32_input_mode()
-            && self.input_agent() == Some(crate::core::cli_agent::CLIAgent::Codex);
+            && (self.input_agent() == Some(crate::core::cli_agent::CLIAgent::Codex)
+                || self.foreground_app()
+                    == Some(crate::core::foreground_app::ForegroundApp::Herdr));
         super::input::KeyFlags::from_mode(self.terminal.term.lock().mode())
             .with_win32_input(win32_input)
     }
@@ -14231,6 +14236,92 @@ mod native_history_gpui_tests {
 
     fn key(spec: &str) -> gpui::Keystroke {
         gpui::Keystroke::parse(spec).expect("valid keystroke spec")
+    }
+
+    #[gpui::test]
+    fn herdr_enter_chords_follow_host_keyboard_protocol(cx: &mut TestAppContext) {
+        use crate::core::cli_agent::CLIAgent;
+        use crate::core::foreground_app::ForegroundApp;
+
+        for (agent, suspended, win32, kitty) in [
+            (None, false, true, false),
+            (Some(CLIAgent::Claude), false, true, false),
+            (Some(CLIAgent::Codex), true, true, false),
+            (None, false, true, true),
+            (None, false, false, false),
+        ] {
+            let (window, mut daemon) = harness(cx);
+            cx.update(|cx| crate::ui::keymap::init(cx));
+            DaemonMsg::ForegroundApp(Some(ForegroundApp::Herdr))
+                .encode(&mut daemon)
+                .unwrap();
+            DaemonMsg::Agent(agent).encode(&mut daemon).unwrap();
+            DaemonMsg::AgentInputSuspended(suspended)
+                .encode(&mut daemon)
+                .unwrap();
+            let mut output = b"\x1b[?1049h".to_vec();
+            if win32 {
+                output.extend_from_slice(b"\x1b[?9001h");
+            }
+            if kitty {
+                output.extend_from_slice(b"\x1b[>1u");
+            }
+            DaemonMsg::Output(output).encode(&mut daemon).unwrap();
+            let mut ready = false;
+            for _ in 0..200 {
+                cx.run_until_parked();
+                ready = window
+                    .update(cx, |view, _, _| {
+                        view.foreground_app() == Some(ForegroundApp::Herdr)
+                            && view.agent() == agent
+                            && view.terminal.agent_input_suspended() == suspended
+                            && view.on_alt_screen()
+                            && view.terminal.win32_input_mode() == win32
+                            && view.key_flags().kitty_active() == kitty
+                    })
+                    .unwrap();
+                if ready {
+                    break;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
+            }
+            assert!(ready, "Herdr's input state must reach the terminal view");
+            daemon
+                .set_read_timeout(Some(std::time::Duration::from_secs(1)))
+                .unwrap();
+            window
+                .update(cx, |view, window, cx| {
+                    assert!(!view.input_active(), "Herdr owns terminal input");
+                    window.activate_window();
+                    view.focus_handle.focus(window, cx);
+                })
+                .unwrap();
+
+            let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+            let shift: &[u8] = if kitty {
+                b"\x1b[13;2u"
+            } else if win32 {
+                b"\x1b[13;28;13;1;16;1_\x1b[13;28;13;0;16;1_"
+            } else {
+                b"\n"
+            };
+            let alt: &[u8] = if kitty {
+                b"\x1b[13;3u"
+            } else if win32 {
+                b"\x1b[13;28;13;1;2;1_\x1b[13;28;13;0;2;1_"
+            } else {
+                b"\x1b\r"
+            };
+            for (chord, expected) in [("shift-enter", shift), ("alt-enter", alt), ("enter", b"\r")]
+            {
+                vcx.simulate_keystrokes(chord);
+                assert_eq!(
+                    next_input(&mut daemon),
+                    expected,
+                    "{chord}: agent={agent:?}, suspended={suspended}, win32={win32}, kitty={kitty}"
+                );
+            }
+        }
     }
 
     #[cfg(not(target_os = "macos"))]
