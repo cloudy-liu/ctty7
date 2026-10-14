@@ -14,17 +14,23 @@ graph TD
 ~~~
 
 The diagram renders as an SVG in the native reading view. Click its canvas or
-Expand to open a larger viewer; dragging the canvas moves it. Copy preserves
-the original Mermaid source.
+Expand to open a larger viewer. Like GitHub's diagram dialog, the expanded view
+keeps the SVG's natural width, caps it to the reading area's width, and preserves
+the full height. A tall diagram opens at the top with readable nodes and a
+visible vertical scrollbar. It is never shrunk just to fit its entire height.
+Copy preserves the original Mermaid source.
 
 Use the zoom buttons or Ctrl+wheel (Command+wheel on macOS) to zoom around the
-pointer, from 25% to 800%. Ordinary wheel input pans an expanded diagram without
-changing its zoom; Shift+wheel pans horizontally. At the initial inline size,
-ordinary wheel input scrolls the document. Reset restores the fitted size and
-position.
+pointer, from 25% to 800%. Ordinary wheel input scrolls an expanded diagram
+without changing its zoom; Shift+wheel scrolls horizontally. Dragging the canvas
+or either scrollbar moves through the same content. Zoom updates the full
+scroll range, so the last node remains reachable. At the initial inline size,
+ordinary wheel input scrolls the document. Reset restores the initial reading
+size and position.
 
 In the focused diagram, `+`/`-` zoom, arrows move, Page Up/Down or Space move by
-a viewport, End reaches the bottom, and Home or `0` restores the fit. Escape
+a viewport, and End reaches the bottom. Home scrolls the expanded diagram to its
+top while retaining zoom; `0` resets its size and position. Escape
 closes the expanded viewer and returns focus to the reading view. Document
 Home/End shortcuts continue to navigate the reading view.
 Fences accept both LF and Windows CRLF line endings without changing the source
@@ -161,6 +167,7 @@ listed in [project status](maintenance/status.md).
 
 Expand and source Copy appear at the upper right. Directional movement, Reset,
 and zoom controls appear at the lower right, both inline and in the larger
-viewer. Drag the diagram to move it; Reset restores its initial fit and
-position. Controls follow the active Markdown palette and retain the original
+viewer. Drag the diagram to move it; Reset restores its initial reading size and
+position. Expanded scrollbars stay visible whenever content overflows. Controls
+follow the active Markdown palette and retain the original
 source when copying.

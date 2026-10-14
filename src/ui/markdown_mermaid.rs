@@ -4,12 +4,13 @@ use crate::core::markdown_theme::{Color, Theme};
 use crate::ui::i18n::{L10nKey, t};
 use gpui::{
     App, AvailableSpace, Context, ImageSource, MouseButton, ObjectFit, Pixels, Point, Render,
-    ScrollDelta, ScrollWheelEvent, SharedString, StyledImage as _, Window, canvas, div, img, point,
-    prelude::*, px,
+    ScrollDelta, ScrollHandle, ScrollWheelEvent, SharedString, StyledImage as _, Window, canvas,
+    div, img, point, prelude::*, px,
 };
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, WindowExt as _,
     button::{Button, ButtonVariants as _},
+    scroll::{Scrollbar, ScrollbarShow},
 };
 use merman::render::{
     HeadlessRenderer, HostThemeAppearance, HostThemeOutput, HostThemeProfile, HostThemeRoles,
@@ -39,13 +40,12 @@ pub(crate) fn open_diagram(
     window: &mut Window,
     cx: &mut App,
 ) -> gpui::Entity<DiagramViewer> {
-    let width = (window.viewport_size().width * 0.95).min(px(1300.));
     let viewer = cx.new(|_| DiagramViewer::new(image, code, aspect, true));
     let dialog_viewer = viewer.clone();
-    window.open_dialog(cx, move |dialog, _, _| {
+    window.open_dialog(cx, move |dialog, window, _| {
         let viewer = dialog_viewer.clone();
         dialog
-            .width(width)
+            .width((window.viewport_size().width * 0.9).min(px(1300.)))
             .title("Mermaid")
             .content(move |content, _, _| content.child(viewer.clone()))
     });
@@ -66,6 +66,7 @@ pub(crate) struct DiagramViewer {
     expanded: bool,
     zoom: f32,
     pan: Point<Pixels>,
+    scroll: ScrollHandle,
     width: Pixels,
     image_width: Pixels,
     natural_width: Pixels,
@@ -77,6 +78,8 @@ pub(crate) struct DiagramViewer {
     viewport: gpui::Bounds<Pixels>,
     #[cfg(any(test, feature = "markdown-visual-tests"))]
     pub(super) rendered_transform: (f32, Point<Pixels>),
+    #[cfg(any(test, feature = "markdown-visual-tests"))]
+    rendered_image: gpui::Bounds<Pixels>,
 }
 
 impl DiagramViewer {
@@ -88,6 +91,7 @@ impl DiagramViewer {
             expanded,
             zoom: 1.,
             pan: point(px(0.), px(0.)),
+            scroll: ScrollHandle::new(),
             width: px(0.),
             image_width: px(0.),
             natural_width: px(0.),
@@ -99,12 +103,16 @@ impl DiagramViewer {
             viewport: Default::default(),
             #[cfg(any(test, feature = "markdown-visual-tests"))]
             rendered_transform: (1., point(px(0.), px(0.))),
+            #[cfg(any(test, feature = "markdown-visual-tests"))]
+            rendered_image: Default::default(),
         }
     }
 
     #[cfg(feature = "markdown-visual-tests")]
     pub(crate) fn prepare_profile(&mut self, cx: &mut Context<Self>) {
         self.zoom = 4.;
+        let max = self.scroll_limit();
+        self.scroll.set_offset(-max / 2.);
         cx.notify();
     }
 
@@ -115,19 +123,63 @@ impl DiagramViewer {
 
     #[cfg(feature = "markdown-visual-tests")]
     pub(crate) fn profile_pan(&self) -> Point<Pixels> {
-        self.pan
+        self.offset()
     }
 
     #[cfg(feature = "markdown-visual-tests")]
     pub(crate) fn verify_profile_frame(&self) {
         assert_eq!(
             self.rendered_transform,
-            (self.zoom, self.pan),
+            (self.zoom, self.offset()),
             "the drawn transform must follow the input; a stale cached frame is not a fast frame"
         );
+        let expected = self.viewport.origin
+            + self.offset()
+            + point(
+                (self.width - self.image_width * self.zoom).max(px(0.)) / 2.,
+                px(0.),
+            );
+        assert!((self.rendered_image.origin.x - expected.x).abs() < px(1.));
+        assert!((self.rendered_image.origin.y - expected.y).abs() < px(1.));
+    }
+
+    fn offset(&self) -> Point<Pixels> {
+        if self.expanded {
+            self.scroll.offset()
+        } else {
+            self.pan
+        }
+    }
+
+    fn image_height(&self) -> Pixels {
+        if self.expanded {
+            self.image_width / self.aspect
+        } else {
+            self.height
+        }
+    }
+
+    fn scroll_limit(&self) -> Point<Pixels> {
+        point(
+            (self.image_width * self.zoom - self.width).max(px(0.)),
+            (self.image_height() * self.zoom - self.height).max(px(0.)),
+        )
+    }
+
+    fn set_scroll_offset(&self, offset: Point<Pixels>) {
+        let max = self.scroll_limit();
+        self.scroll.set_offset(point(
+            offset.x.clamp(-max.x, px(0.)),
+            offset.y.clamp(-max.y, px(0.)),
+        ));
     }
 
     fn pan_by(&mut self, delta: Point<Pixels>) -> bool {
+        if self.expanded {
+            let old = self.scroll.offset();
+            self.set_scroll_offset(old + delta);
+            return self.scroll.offset() != old;
+        }
         let old = self.pan;
         // Keep fitted diagrams movable without losing the zoomed edge limits.
         let max_x = (self.image_width * (self.zoom - 1.) / 2.).max(self.image_width / 2.);
@@ -145,7 +197,26 @@ impl DiagramViewer {
 
     fn zoom_at(&mut self, factor: f32, position: Point<Pixels>) {
         let previous = self.zoom;
+        let anchor = position - self.viewport.origin;
+        let image_point = (anchor
+            - self.offset()
+            - point(
+                (self.width - self.image_width * previous).max(px(0.)) / 2.,
+                px(0.),
+            ))
+            / previous;
         self.zoom = (self.zoom * factor).clamp(0.25, 8.);
+        if self.expanded {
+            self.set_scroll_offset(
+                anchor
+                    - image_point * self.zoom
+                    - point(
+                        (self.width - self.image_width * self.zoom).max(px(0.)) / 2.,
+                        px(0.),
+                    ),
+            );
+            return;
+        }
         let anchor = position - self.viewport.center();
         self.pan = anchor + (self.pan - anchor) * (self.zoom / previous);
         self.pan_by(point(px(0.), px(0.)));
@@ -154,6 +225,7 @@ impl DiagramViewer {
     fn reset(&mut self) {
         self.zoom = 1.;
         self.pan = point(px(0.), px(0.));
+        self.scroll.set_offset(point(px(0.), px(0.)));
     }
 
     fn on_key_down(&mut self, event: &gpui::KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
@@ -167,6 +239,9 @@ impl DiagramViewer {
         match key {
             "+" | "=" => self.zoom_by(1.25),
             "-" => self.zoom_by(1. / 1.25),
+            "home" if self.expanded => self
+                .scroll
+                .set_offset(point(self.scroll.offset().x, px(0.))),
             "0" | "home" if self.expanded || self.zoom != 1. => self.reset(),
             "up" if self.expanded || self.zoom > 1. => {
                 self.pan_by(point(px(0.), px(64.)));
@@ -195,6 +270,29 @@ impl DiagramViewer {
         cx.notify();
     }
 
+    fn on_wheel(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        let delta = match event.delta {
+            ScrollDelta::Pixels(delta) => delta,
+            ScrollDelta::Lines(delta) => point(px(delta.x * 20.), px(delta.y * 20.)),
+        };
+        if delta.y != px(0.) && (event.modifiers.control || event.modifiers.platform) {
+            self.zoom_at(1.1_f32.powf(f32::from(delta.y) / 40.), event.position);
+        } else if self.expanded || self.zoom > 1. {
+            let delta = if event.modifiers.shift && delta.x == px(0.) {
+                point(delta.y, px(0.))
+            } else {
+                delta
+            };
+            if !self.pan_by(delta) && !self.expanded {
+                return;
+            }
+        } else {
+            return;
+        }
+        cx.stop_propagation();
+        cx.notify();
+    }
+
     fn control(id: &'static str, icon: impl Into<Icon>, label: &'static str, cx: &App) -> Button {
         let theme = super::markdown_preview::current(cx).theme;
         let palette = theme.palette(cx.theme().mode.is_dark());
@@ -213,10 +311,6 @@ impl DiagramViewer {
 impl Render for DiagramViewer {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let focus = self.focus.get_or_insert_with(|| cx.focus_handle()).clone();
-        #[cfg(any(test, feature = "markdown-visual-tests"))]
-        {
-            self.rendered_transform = (self.zoom, self.pan);
-        }
         let scale = window.rem_size() / px(16.);
         if self.natural_width == px(0.) {
             let mut probe = img(self.image.clone()).into_any_element();
@@ -229,15 +323,17 @@ impl Render for DiagramViewer {
         } else {
             window.viewport_size().width - px(64.)
         };
-        let available = (width - px(120. * scale)).max(px(64. * scale));
-        let image_width = if self.natural_width > px(0.) && !self.expanded {
-            available.min(self.natural_width)
+        let available =
+            (width - px(if self.expanded { 32. } else { 120. } * scale)).max(px(64. * scale));
+        let image_width = if self.natural_width > px(0.) {
+            available.min(self.natural_width * if self.expanded { scale } else { 1. })
         } else {
             available
         };
         self.image_width = image_width;
         self.height = if self.expanded {
-            window.viewport_size().height * 0.65
+            let max_height = window.viewport_size().height * 0.75;
+            (image_width / self.aspect).clamp(px(200. * scale).min(max_height), max_height)
         } else {
             (image_width / self.aspect).clamp(px(200. * scale), px(600. * scale))
         };
@@ -349,6 +445,75 @@ impl Render for DiagramViewer {
                 })),
             );
         let owner = cx.weak_entity();
+        #[cfg(any(test, feature = "markdown-visual-tests"))]
+        let painted_owner = owner.clone();
+        let wheel_owner = owner.clone();
+        let expanded = self.expanded;
+        let image_height = self.image_height() * self.zoom;
+        let scaled_width = image_width * self.zoom;
+        let content = div()
+            .id("diagram-content")
+            .debug_selector(|| "diagram-content".into())
+            .absolute()
+            .left(if expanded {
+                (width - scaled_width).max(px(0.)) / 2.
+            } else {
+                self.pan.x + (width - scaled_width) / 2.
+            })
+            .top(if expanded {
+                px(0.)
+            } else {
+                self.pan.y + self.height * (1. - self.zoom) / 2.
+            })
+            .w(scaled_width)
+            .h(image_height)
+            .child(
+                img(self.image.clone())
+                    .id("diagram-image")
+                    .debug_selector(|| "diagram-image".into())
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .min_w_0()
+                    .min_h_0()
+                    .w(scaled_width)
+                    .h(image_height)
+                    .object_fit(ObjectFit::Contain),
+            );
+        #[cfg(any(test, feature = "markdown-visual-tests"))]
+        let content = content.child(
+            canvas(
+                move |bounds, _, cx| {
+                    let _ = painted_owner.update(cx, |this, _| {
+                        this.rendered_image = bounds;
+                        this.rendered_transform = (this.zoom, this.offset());
+                    });
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        );
+        let content = if expanded {
+            div()
+                .id("diagram-scroll")
+                .size_full()
+                .overflow_scroll()
+                .track_scroll(&self.scroll)
+                .child(
+                    div()
+                        .relative()
+                        .flex_none()
+                        .w(scaled_width.max(width))
+                        .h(image_height.max(self.height))
+                        .child(content),
+                )
+                .into_any_element()
+        } else {
+            content.into_any_element()
+        };
         div()
             .id("diagram-viewport")
             .debug_selector(|| "diagram-viewport".into())
@@ -413,62 +578,32 @@ impl Render for DiagramViewer {
                     }
                 }))
             })
-            .on_scroll_wheel(cx.listener(|this, event: &ScrollWheelEvent, _, cx| {
-                let delta = match event.delta {
-                    ScrollDelta::Pixels(delta) => delta,
-                    ScrollDelta::Lines(delta) => point(px(delta.x * 20.), px(delta.y * 20.)),
-                };
-                if delta.y != px(0.) && (event.modifiers.control || event.modifiers.platform) {
-                    this.zoom_at(1.1_f32.powf(f32::from(delta.y) / 40.), event.position);
-                    cx.stop_propagation();
-                    cx.notify();
-                } else if this.expanded || this.zoom > 1. {
-                    let delta = if event.modifiers.shift && delta.x == px(0.) {
-                        point(delta.y, px(0.))
-                    } else {
-                        delta
-                    };
-                    if !this.pan_by(delta) && !this.expanded {
-                        return;
-                    }
-                    cx.stop_propagation();
-                    cx.notify();
-                }
-            }))
-            .child(
-                div()
-                    .id("diagram-content")
-                    .debug_selector(|| "diagram-content".into())
-                    .absolute()
-                    .left(self.pan.x + (width - image_width * self.zoom) / 2.)
-                    .top(self.pan.y + self.height * (1. - self.zoom) / 2.)
-                    .w(image_width * self.zoom)
-                    .h(self.height * self.zoom)
-                    .child(
-                        img(self.image.clone())
-                            .id("diagram-image")
-                            .debug_selector(|| "diagram-image".into())
-                            .absolute()
-                            .min_w_0()
-                            .min_h_0()
-                            .w(image_width * self.zoom)
-                            .h(self.height * self.zoom)
-                            .object_fit(ObjectFit::Contain),
+            .when(!expanded, |el| {
+                el.on_scroll_wheel(cx.listener(|this, event, _, cx| this.on_wheel(event, cx)))
+            })
+            .child(content)
+            .when(expanded, |el| {
+                el.child(
+                    div().absolute().top_0().left_0().size_full().child(
+                        Scrollbar::new(&self.scroll)
+                            .id("diagram-scrollbar")
+                            .scrollbar_show(ScrollbarShow::Always),
                     ),
-            )
+                )
+            })
             .child(
                 div()
                     .absolute()
                     .top_2()
-                    .right_2()
+                    .right(px(if expanded { 24. } else { 8. } * scale))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .child(toolbar),
             )
             .child(
                 div()
                     .absolute()
-                    .bottom_2()
-                    .right_2()
+                    .bottom(px(if expanded { 24. } else { 8. } * scale))
+                    .right(px(if expanded { 24. } else { 8. } * scale))
                     .flex()
                     .flex_col()
                     .gap_1()
@@ -502,9 +637,24 @@ impl Render for DiagramViewer {
                             }
                         });
                     },
-                    |_, _, _, _| {},
+                    move |bounds, _, window, _| {
+                        if expanded {
+                            let owner = wheel_owner.clone();
+                            // Capture modifier/shift input before GPUI's default scroll
+                            // listener so one event changes the shared offset only once.
+                            window.on_mouse_event(move |event: &ScrollWheelEvent, phase, _, cx| {
+                                if phase == gpui::DispatchPhase::Capture
+                                    && bounds.contains(&event.position)
+                                {
+                                    let _ = owner.update(cx, |this, cx| this.on_wheel(event, cx));
+                                }
+                            });
+                        }
+                    },
                 )
                 .absolute()
+                .top_0()
+                .left_0()
                 .size_full(),
             )
     }
@@ -636,6 +786,112 @@ mod tests {
     use super::*;
 
     #[gpui::test]
+    fn expanded_tall_diagram_opens_at_readable_size_and_scrolls_to_its_end(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (_, mut vcx) = crate::ui::app::test_window::harness(cx);
+        vcx.simulate_resize(gpui::size(px(1000.), px(800.)));
+        vcx.update(|window, cx| {
+            super::super::markdown_preview::init(Default::default(), cx);
+            let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="320" height="4000" viewBox="0 0 320 4000"><text x="20" y="40" font-size="16">First readable node</text><text x="20" y="3980" font-size="16">LAST_NODE</text></svg>"#;
+            open_diagram(
+                ImageSource::Image(std::sync::Arc::new(gpui::Image::from_bytes(
+                    gpui::ImageFormat::Svg,
+                    svg.to_vec(),
+                ))),
+                "tall diagram".into(),
+                320. / 4000.,
+                window,
+                cx,
+            );
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            window.refresh();
+            let _ = window.draw(cx);
+        });
+        let image = vcx.debug_bounds("diagram-image").unwrap();
+        let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
+        assert!(
+            image.size.height >= px(4000.),
+            "opening a tall diagram must retain its readable size instead of fitting its height"
+        );
+        assert!(image.size.height > viewport.size.height * 4.);
+        vcx.simulate_event(ScrollWheelEvent {
+            position: viewport.center(),
+            delta: ScrollDelta::Pixels(point(px(0.), px(-100_000.))),
+            modifiers: gpui::Modifiers::none(),
+            touch_phase: gpui::TouchPhase::Moved,
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let last = vcx.debug_bounds("diagram-image").unwrap();
+        let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
+        assert_eq!(
+            last.size, image.size,
+            "ordinary scrolling preserves the reading size"
+        );
+        assert!((last.bottom() - viewport.bottom()).abs() <= px(1.));
+        vcx.simulate_keystrokes("home");
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
+        let thumb_start = point(viewport.right() - px(8.), viewport.top() + px(24.));
+        let thumb_end = point(viewport.right() - px(8.), viewport.bottom() - px(20.));
+        vcx.simulate_event(gpui::MouseDownEvent {
+            position: thumb_start,
+            button: MouseButton::Left,
+            modifiers: gpui::Modifiers::none(),
+            click_count: 1,
+            first_mouse: false,
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        // The shared scrollbar throttles native thumb updates to 120 Hz.
+        std::thread::sleep(std::time::Duration::from_millis(12));
+        vcx.simulate_event(gpui::MouseMoveEvent {
+            position: thumb_end,
+            pressed_button: Some(MouseButton::Left),
+            modifiers: gpui::Modifiers::none(),
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        vcx.simulate_event(gpui::MouseUpEvent {
+            position: thumb_end,
+            button: MouseButton::Left,
+            modifiers: gpui::Modifiers::none(),
+            click_count: 1,
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(
+            (vcx.debug_bounds("diagram-image").unwrap().bottom()
+                - vcx.debug_bounds("diagram-viewport").unwrap().bottom())
+            .abs()
+                <= px(1.),
+            "dragging the actual scrollbar must reach the last node"
+        );
+        vcx.update(|window, _| window.set_rem_size(px(32.)));
+        vcx.simulate_resize(gpui::size(px(400.), px(400.)));
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(
+            vcx.debug_bounds("diagram-viewport").unwrap().size.height <= px(300.),
+            "a large text scale in a short window must keep the viewer within the window"
+        );
+        assert!(
+            vcx.debug_bounds("diagram-viewport").unwrap().size.width <= px(400.),
+            "the expanded dialog must follow a narrowed window"
+        );
+    }
+
+    #[gpui::test]
     fn mermaid_unmodified_wheel_pans_a_tall_diagram_to_the_bottom(cx: &mut gpui::TestAppContext) {
         let (_, mut vcx) = crate::ui::app::test_window::harness(cx);
         vcx.simulate_resize(gpui::size(px(1000.), px(800.)));
@@ -727,9 +983,10 @@ mod tests {
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
-        assert_eq!(
-            vcx.debug_bounds("diagram-content").unwrap().size.width,
-            fitted.size.width * 1.25
+        assert!(
+            (vcx.debug_bounds("diagram-content").unwrap().size.width - fitted.size.width * 1.25)
+                .abs()
+                <= px(1.)
         );
         vcx.simulate_event(ScrollWheelEvent {
             position: viewport.origin + point(px(32.), px(64.)),
@@ -760,9 +1017,11 @@ mod tests {
             vcx.update(|window, cx| {
                 let _ = window.draw(cx);
             });
-            assert_eq!(
-                vcx.debug_bounds("diagram-content").unwrap().size.width,
-                fitted.size.width * expected
+            assert!(
+                (vcx.debug_bounds("diagram-content").unwrap().size.width
+                    - fitted.size.width * expected)
+                    .abs()
+                    <= px(1.)
             );
         }
         vcx.simulate_click(reset.center(), gpui::Modifiers::none());
@@ -785,19 +1044,17 @@ mod tests {
     }
 
     #[test]
-    fn fitted_diagrams_can_be_dragged_and_moved_with_the_controls() {
-        for expanded in [false, true] {
-            let mut viewer = DiagramViewer::new("diagram.svg".into(), "".into(), 2., expanded);
-            viewer.image_width = px(600.);
-            viewer.height = px(400.);
-            assert!(viewer.pan_by(point(px(32.), px(-32.))));
-            assert_eq!(viewer.pan, point(px(32.), px(-32.)));
-        }
+    fn fitted_inline_diagrams_can_be_dragged_and_moved_with_the_controls() {
+        let mut viewer = DiagramViewer::new("diagram.svg".into(), "".into(), 2., false);
+        viewer.image_width = px(600.);
+        viewer.height = px(400.);
+        assert!(viewer.pan_by(point(px(32.), px(-32.))));
+        assert_eq!(viewer.pan, point(px(32.), px(-32.)));
     }
 
     #[test]
     fn zoom_preserves_the_diagram_point_under_the_pointer() {
-        let mut viewer = DiagramViewer::new("diagram.svg".into(), "".into(), 2., true);
+        let mut viewer = DiagramViewer::new("diagram.svg".into(), "".into(), 2., false);
         viewer.viewport =
             gpui::Bounds::new(point(px(40.), px(60.)), gpui::size(px(600.), px(400.)));
         viewer.image_width = px(480.);
@@ -810,17 +1067,19 @@ mod tests {
     }
 
     #[test]
-    fn expanded_viewer_pan_reaches_the_bottom_of_a_zoomed_diagram() {
-        let mut viewer = DiagramViewer::new("diagram.svg".into(), "".into(), 2., true);
-        viewer.image_width = px(600.);
+    fn expanded_zoom_preserves_the_vertical_reading_anchor() {
+        let mut viewer = DiagramViewer::new("diagram.svg".into(), "".into(), 0.4, true);
+        viewer.viewport =
+            gpui::Bounds::new(point(px(40.), px(60.)), gpui::size(px(600.), px(400.)));
+        viewer.width = px(600.);
+        viewer.image_width = px(480.);
         viewer.height = px(400.);
-        viewer.zoom = 4.;
-
-        viewer.pan_by(point(px(0.), px(-10_000.)));
-
-        let top = viewer.pan.y + viewer.height * (1. - viewer.zoom) / 2.;
-        let bottom = top + viewer.height * viewer.zoom;
-        assert_eq!(bottom, viewer.height);
+        viewer.scroll.set_offset(point(px(0.), px(-200.)));
+        let pointer = point(px(340.), px(150.));
+        let before = (pointer.y - viewer.viewport.top() - viewer.scroll.offset().y) / viewer.zoom;
+        viewer.zoom_at(1.25, pointer);
+        let after = (pointer.y - viewer.viewport.top() - viewer.scroll.offset().y) / viewer.zoom;
+        assert_eq!(before, after);
     }
 
     #[test]
