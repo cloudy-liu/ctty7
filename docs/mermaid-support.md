@@ -28,6 +28,11 @@ scroll range, so the last node remains reachable. At the initial inline size,
 ordinary wheel input scrolls the document. Reset restores the initial reading
 size and position.
 
+Opening the larger viewer does not necessarily create horizontal overflow.
+Directional buttons are dimmed and disabled when their axis has no scrollable
+content. Zoom in until the diagram is wider than the reading area to use the
+left/right buttons or horizontal scrollbar.
+
 In the focused diagram, `+`/`-` zoom, arrows move, Page Up/Down or Space move by
 a viewport, and End reaches the bottom. Home scrolls the expanded diagram to its
 top while retaining zoom; `0` resets its size and position. Escape
@@ -112,6 +117,8 @@ geometry pass updates offscreen text ranges when selection endpoints change.
 Nested heading links first reveal their containing block, then align the actual
 heading. See the [navigation and performance verification](testing/markdown-navigation-performance.md)
 for the fixture, measurements and native interaction evidence.
+The latest [GitHub-style reading verification](testing/github-mermaid-reading.md)
+records the scroll viewer, compact controls and updated measurements.
 
 ### Source files
 

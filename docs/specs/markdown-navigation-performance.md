@@ -21,6 +21,9 @@ and a final `DOCUMENT_END_MARKER`. It contains real Markdown and Mermaid source.
 - Reset restores the initial reading size and position. Home scrolls to the
   top of an expanded diagram without resetting zoom; End reaches the bottom.
   Zoom buttons, keyboard navigation, and Escape remain usable.
+- Expanded direction buttons are disabled when their axis has no scrollable
+  overflow. Opening a diagram does not itself imply horizontal overflow;
+  zooming beyond the available width enables left/right navigation.
 - The wide diagram's `WIDE_END_24`, tall diagram's `TALL_END_36`, and long sequence's
   final message must be reachable after enlarging the diagram.
 - A diagram update invalidates its containing reading view rather than forcing

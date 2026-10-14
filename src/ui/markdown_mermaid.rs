@@ -8,7 +8,7 @@ use gpui::{
     div, img, point, prelude::*, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _,
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     scroll::{Scrollbar, ScrollbarShow},
 };
@@ -389,14 +389,22 @@ impl Render for DiagramViewer {
             ),
         ]
         .map(|(id, icon, label, x, y)| {
-            Self::control(id, icon, t(label), compact_size, cx).on_click(cx.listener(
-                move |this, _, _, cx| {
+            let limit = self.scroll_limit();
+            let disabled = self.expanded
+                && if x != 0. {
+                    limit.x == px(0.)
+                } else {
+                    limit.y == px(0.)
+                };
+            Self::control(id, icon, t(label), compact_size, cx)
+                .disabled(disabled)
+                .when(disabled, |button| button.opacity(0.4))
+                .on_click(cx.listener(move |this, _, _, cx| {
                     cx.stop_propagation();
                     if this.pan_by(point(px(x * scale), px(y * scale))) {
                         cx.notify();
                     }
-                },
-            ))
+                }))
         });
         let [up, left, right, down] = controls;
         let zoom_in = Self::control(
@@ -936,6 +944,82 @@ mod tests {
     }
 
     #[gpui::test]
+    fn expanded_horizontal_buttons_move_only_after_zoom_creates_overflow(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (_, mut vcx) = crate::ui::app::test_window::harness(cx);
+        vcx.simulate_resize(gpui::size(px(1000.), px(800.)));
+        vcx.update(|window, cx| {
+            super::super::markdown_preview::init(Default::default(), cx);
+            let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="900" viewBox="0 0 1600 900"><text x="20" y="40">LEFT</text><text x="1500" y="40">RIGHT</text></svg>"#;
+            open_diagram(
+                ImageSource::Image(std::sync::Arc::new(gpui::Image::from_bytes(
+                    gpui::ImageFormat::Svg,
+                    svg.to_vec(),
+                ))),
+                "wide diagram".into(),
+                1600. / 900.,
+                window,
+                cx,
+            );
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            window.refresh();
+            let _ = window.draw(cx);
+        });
+        let initial = vcx.debug_bounds("diagram-image").unwrap();
+        let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
+        assert!(initial.size.width <= viewport.size.width);
+        let button = vcx.debug_bounds("diagram-pan-right").unwrap().center();
+        vcx.simulate_click(button, gpui::Modifiers::none());
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(
+            vcx.debug_bounds("diagram-image").unwrap().origin.x,
+            initial.origin.x
+        );
+
+        let button = vcx.debug_bounds("diagram-zoom-in").unwrap().center();
+        vcx.simulate_click(button, gpui::Modifiers::none());
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let zoomed = vcx.debug_bounds("diagram-image").unwrap();
+        assert!(zoomed.size.width > viewport.size.width);
+        let button = vcx.debug_bounds("diagram-pan-right").unwrap().center();
+        vcx.simulate_click(button, gpui::Modifiers::none());
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let moved = vcx.debug_bounds("diagram-image").unwrap();
+        assert!(
+            moved.left() < zoomed.left(),
+            "Right must reveal content on the right after zoom"
+        );
+        assert_eq!(moved.size, zoomed.size);
+        let button = vcx.debug_bounds("diagram-pan-left").unwrap().center();
+        vcx.simulate_click(button, gpui::Modifiers::none());
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(
+            (vcx.debug_bounds("diagram-image").unwrap().left() - zoomed.left()).abs() <= px(1.)
+        );
+        for _ in 0..20 {
+            let button = vcx.debug_bounds("diagram-pan-right").unwrap().center();
+            vcx.simulate_click(button, gpui::Modifiers::none());
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        }
+        assert!(
+            (vcx.debug_bounds("diagram-image").unwrap().right() - viewport.right()).abs() <= px(1.)
+        );
+    }
+
+    #[gpui::test]
     fn mermaid_unmodified_wheel_pans_a_tall_diagram_to_the_bottom(cx: &mut gpui::TestAppContext) {
         let (_, mut vcx) = crate::ui::app::test_window::harness(cx);
         vcx.simulate_resize(gpui::size(px(1000.), px(800.)));
@@ -1022,7 +1106,6 @@ mod tests {
         let fitted = vcx.debug_bounds("diagram-content").unwrap();
         let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
         let zoom = vcx.debug_bounds("diagram-zoom-in").unwrap();
-        let reset = vcx.debug_bounds("diagram-reset").unwrap();
         vcx.simulate_click(zoom.center(), gpui::Modifiers::none());
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
@@ -1068,6 +1151,8 @@ mod tests {
                     <= px(1.)
             );
         }
+        // Resolve the current button after the dialog's opening animation.
+        let reset = vcx.debug_bounds("diagram-reset").unwrap();
         vcx.simulate_click(reset.center(), gpui::Modifiers::none());
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
