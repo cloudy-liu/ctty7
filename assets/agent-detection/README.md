@@ -5,9 +5,14 @@ These TOML files come from [herdr](https://github.com/herdrdev/herdr)
 version `2026.10.01.1`), licensed under the Apache License 2.0. `codex.toml`
 adds tty7's `ready_prompt` rule for the visible
 input prompt and shortcuts footer; preserve this extension when updating
-the upstream rules. The other manifests are copied unchanged.
+the upstream rules. The other upstream manifests are copied unchanged.
 `copilot.toml` is herdr's `github-copilot.toml`, renamed after
 tty7's slug.
+
+`extensions/cursor.toml` adds rules for a running spinner or an approval
+prompt after Herdr's `│` pane divider. The engine appends them to Cursor's
+upstream rules with the same priorities and detection regions. Keep this
+local extension separate when updating the upstream files.
 
 Each file lists rules that classify a coding agent's pane as `working`,
 `blocked` or `idle`, based on what the agent's TUI is showing at the bottom of
