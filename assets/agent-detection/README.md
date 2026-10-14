@@ -13,6 +13,10 @@ input prompt and shortcuts footer. The engine appends it after upstream
 Codex rules; working and approval rules retain their higher priority.
 Keep local extensions separate when updating the upstream files.
 
+`extensions/cursor.toml` adds rules for a running spinner or an approval
+prompt after Herdr's `│` pane divider. The engine appends them to Cursor's
+upstream rules with the same priorities and detection regions.
+
 Check the complete set offline with Python 3.11 or newer:
 
 ```sh

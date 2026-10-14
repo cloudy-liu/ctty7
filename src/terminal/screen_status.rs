@@ -553,12 +553,19 @@ fn compiled(agent: CLIAgent) -> Option<&'static CompiledManifest> {
             let mut manifest = compile(source)
                 .inspect_err(|e| log::warn!("{} screen manifest: {e}", agent.slug()))
                 .ok()?;
-            if agent == CLIAgent::Codex {
-                let extension = compile(include_str!(
+            let extension_source = match agent {
+                CLIAgent::Cursor => Some(include_str!(
+                    "../../assets/agent-detection/extensions/cursor.toml"
+                )),
+                CLIAgent::Codex => Some(include_str!(
                     "../../assets/agent-detection/extensions/codex.toml"
-                ))
-                .inspect_err(|e| log::warn!("codex's local extension: {e}"))
-                .ok()?;
+                )),
+                _ => None,
+            };
+            if let Some(source) = extension_source {
+                let extension = compile(source)
+                    .inspect_err(|e| log::warn!("{}'s local extension: {e}", agent.slug()))
+                    .ok()?;
                 manifest.rules.extend(extension.rules);
             }
             Some(manifest)
@@ -1009,6 +1016,79 @@ mod tests {
             "  Run this command?\n  $ cargo test\n  Waiting for approval\n  Run (once) (y)\n  Skip (esc or n)\n",
         );
         assert_eq!(blocked.state, ScreenState::Blocked);
+    }
+
+    #[test]
+    fn cursor_running_inside_herdr_reaches_the_sidebar_as_working() {
+        // Reconstructed from Cursor 2026.10.14 inside Herdr: the outer terminal
+        // includes Herdr's sidebar and divider before Cursor's live footer.
+        let text = concat!(
+            "  ctty7                    │ $ git branch -vv\n",
+            "  working · cursor         │   322 output lines hidden · ctrl+o to expand\n",
+            "                           │ ?? .release-verify/\n",
+            "                           │ ?? .release-verify2/\n",
+            "                           │\n",
+            "                           │ ⠋ Running 591 tokens\n",
+            "                           │ Tip: Hit shift+tab to enable Plan Mode for large or complex changes.\n",
+            "                           │\n",
+            "                           │ → Add a follow-up\n",
+        );
+        assert_eq!(
+            screen(CLIAgent::Cursor, "⠋ Running 591 tokens\n").state,
+            ScreenState::Working,
+            "Cursor's standalone footer is recognized"
+        );
+        assert_eq!(
+            screen(CLIAgent::Cursor, "│ ⠋ Running 591 tokens\n").state,
+            ScreenState::Working,
+            "a single Herdr divider reproduces the missed running state"
+        );
+        let mut tracker = Tracker::default();
+        tracker.apply(screen(CLIAgent::Cursor, text));
+        assert_eq!(tracker.status(), evidenced(AgentStatus::Working));
+        assert_eq!(
+            merge(
+                CLIAgent::Cursor,
+                Some(&session(AgentStatus::Idle, true)),
+                tracker.status(),
+            ),
+            Some(AgentStatus::Working),
+            "Cursor's running footer must reach the outer sidebar through Herdr's divider"
+        );
+    }
+
+    #[test]
+    fn cursor_nested_spinner_requires_a_pane_boundary_and_live_footer() {
+        for prefix in ["", "  ", "│ ", "  ctty7 │ ", "  ctty7 │ shell │ "] {
+            let reading = screen(CLIAgent::Cursor, &format!("{prefix}⠋ Running 591 tokens\n"));
+            assert_eq!(reading.state, ScreenState::Working, "prefix: {prefix:?}");
+            assert!(reading.matched);
+        }
+        for text in [
+            "  working · cursor │ → Add a follow-up\n",
+            "│ Running 591 tokens\n",
+            "│ The previous status was ⠋ Running 591 tokens\n",
+            "quoted ⠋ Running 591 tokens\n",
+            "│ ⠋ Running 591 tokens\n│ one\n│ two\n│ three\n│ four\n│ five\n│ six\n│ seven\n│ → Add a follow-up\n",
+        ] {
+            assert_eq!(
+                screen(CLIAgent::Cursor, text).state,
+                ScreenState::Idle,
+                "{text}"
+            );
+        }
+    }
+
+    #[test]
+    fn cursor_nested_approval_takes_priority_over_a_running_spinner() {
+        for prompt in ["Allow command (y)", "→ Run command (y)"] {
+            let reading = screen(
+                CLIAgent::Cursor,
+                &format!("ctty7 │ ⠋ Running 591 tokens\n      │ {prompt}\n"),
+            );
+            assert_eq!(reading.state, ScreenState::Blocked, "{prompt}");
+            assert!(reading.matched);
+        }
     }
 
     #[test]
