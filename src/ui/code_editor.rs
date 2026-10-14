@@ -2461,6 +2461,225 @@ mod tests {
     }
 
     #[gpui::test]
+    #[ignore = "manual fixed-document frame benchmark; run with --ignored --nocapture"]
+    fn markdown_large_document_frame_profile(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        vcx.simulate_resize(gpui::size(px(1200.), px(850.)));
+        let source = include_str!("../../tests/fixtures/markdown/large-navigation.md");
+        let start = std::time::Instant::now();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/large-navigation.md".into(),
+                source.into(),
+                None,
+                window,
+                cx,
+            );
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let response_ms = start.elapsed().as_secs_f64() * 1000.;
+        let reading = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .as_ref()
+                .unwrap()
+                .clone()
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            reading.read_with(cx, |view, cx| {
+                !view.is_loading(cx) && !view.pending_diagrams_for_profile()
+            })
+        });
+        let ready_ms = start.elapsed().as_secs_f64() * 1000.;
+        let mut samples = Vec::new();
+        let mut min_offset = px(0.);
+        for frame in 0..100 {
+            let start = std::time::Instant::now();
+            vcx.simulate_event(gpui::ScrollWheelEvent {
+                position: gpui::point(px(1100.), px(500.)),
+                delta: gpui::ScrollDelta::Pixels(gpui::point(
+                    px(0.),
+                    px(if frame < 50 { -120. } else { 120. }),
+                )),
+                modifiers: gpui::Modifiers::none(),
+                touch_phase: gpui::TouchPhase::Moved,
+            });
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            min_offset = min_offset
+                .min(reading.read_with(&vcx, |view, cx| view.profile_scroll_offset(cx).y));
+            if frame >= 10 {
+                samples.push(start.elapsed().as_secs_f64() * 1000.);
+            }
+        }
+        samples.sort_by(f64::total_cmp);
+        assert!(
+            min_offset < px(-500.),
+            "the benchmark must navigate the actual reading pane"
+        );
+        eprintln!(
+            "MARKDOWN_FRAME_PROFILE {}",
+            serde_json::json!({
+                "source_bytes": source.len(), "window": [1200, 850], "samples": samples.len(),
+                "first_response_ms": response_ms, "all_diagrams_ready_ms": ready_ms,
+                "scroll_cpu_frame_median_ms": samples[samples.len()/2],
+                "scroll_cpu_frame_p95_ms": samples[samples.len()*95/100],
+                "scroll_cpu_frame_max_ms": samples[samples.len()-1],
+            })
+        );
+    }
+
+    #[gpui::test]
+    fn large_markdown_virtualizes_offscreen_blocks_and_keeps_end_navigation(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, mut vcx) = markdown_window(cx);
+        vcx.simulate_resize(gpui::size(px(1200.), px(850.)));
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/large-navigation.md".into(),
+                include_str!("../../tests/fixtures/markdown/large-navigation.md").into(),
+                None,
+                window,
+                cx,
+            );
+        });
+        let reading = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .as_ref()
+                .unwrap()
+                .clone()
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            reading.read_with(cx, |view, cx| {
+                !view.is_loading(cx) && !view.pending_diagrams_for_profile()
+            })
+        });
+        assert!(
+            reading.read_with(&vcx, |view, cx| view
+                .text
+                .read(cx)
+                .anchor_bounds("document-end")
+                .is_none()),
+            "the final heading must not be prepainted while the viewport is at the beginning"
+        );
+        vcx.update(|window, cx| window.focus(&reading.read(cx).focus_handle(cx), cx));
+        vcx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-down"
+        } else {
+            "ctrl-end"
+        });
+        for _ in 0..3 {
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        }
+        reading.read_with(&vcx, |view, cx| {
+            let target = view
+                .text
+                .read(cx)
+                .anchor_bounds("document-end")
+                .expect("End must lay out the final heading");
+            assert!(
+                target.intersects(&view.scroll.bounds()),
+                "End must reveal the final document section"
+            );
+        });
+        reading.update(&mut vcx, |view, cx| {
+            view.navigate_anchor("wide-flowchart".into(), cx)
+        });
+        for _ in 0..3 {
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        }
+        reading.read_with(&vcx, |view, cx| {
+            let target = view.text.read(cx).anchor_bounds("wide-flowchart").unwrap();
+            assert!(
+                target.intersects(&view.scroll.bounds()),
+                "links must reach an offscreen heading"
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn markdown_link_click_survives_a_frame_between_press_and_release(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let content = format!(
+            "# Links\n\n[Jump](#target)\n\n{}\n# Target\n",
+            "Paragraph.\n\n".repeat(80)
+        );
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/links.md".into(),
+                content,
+                None,
+                window,
+                cx,
+            );
+        });
+        let reading = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .as_ref()
+                .unwrap()
+                .clone()
+        });
+        wait_for_markdown(&mut vcx, |cx| {
+            reading.read_with(cx, |view, cx| !view.is_loading(cx))
+        });
+        for _ in 0..3 {
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        }
+        let bounds =
+            reading.read_with(&vcx, |view, cx| view.text.read(cx).block_bounds(1).unwrap());
+        let position = gpui::point(bounds.left() + px(20.), bounds.center().y);
+        vcx.simulate_event(gpui::MouseDownEvent {
+            position,
+            button: gpui::MouseButton::Left,
+            modifiers: gpui::Modifiers::none(),
+            click_count: 1,
+            first_mouse: false,
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        vcx.simulate_event(gpui::MouseUpEvent {
+            position,
+            button: gpui::MouseButton::Left,
+            modifiers: gpui::Modifiers::none(),
+            click_count: 1,
+        });
+        for _ in 0..3 {
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        }
+        assert!(
+            reading.read_with(&vcx, |view, _| view.scroll.offset().y < px(-300.)),
+            "a real click must still navigate when the UI repaints before release"
+        );
+    }
+
+    #[gpui::test]
     fn markdown_opens_in_preview_and_preserves_edit_undo_save_and_focus(cx: &mut TestAppContext) {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("README.MARKDOWN");
