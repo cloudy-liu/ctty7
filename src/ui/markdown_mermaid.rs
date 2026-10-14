@@ -242,7 +242,8 @@ impl DiagramViewer {
             "home" if self.expanded => self
                 .scroll
                 .set_offset(point(self.scroll.offset().x, px(0.))),
-            "0" | "home" if self.expanded || self.zoom != 1. => self.reset(),
+            "0" => self.reset(),
+            "home" if self.zoom != 1. => self.reset(),
             "up" if self.expanded || self.zoom > 1. => {
                 self.pan_by(point(px(0.), px(64.)));
             }

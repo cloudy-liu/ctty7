@@ -2751,6 +2751,17 @@ mod tests {
             gpui::MouseButton::Left,
             gpui::Modifiers::none(),
         );
+        vcx.simulate_keystrokes("0");
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        viewer.read_with(&vcx, |viewer, _| {
+            assert_eq!(
+                viewer.rendered_transform,
+                (1., point(px(0.), px(0.))),
+                "0 must reset a fitted inline diagram after dragging"
+            )
+        });
         vcx.simulate_click(copy.center(), gpui::Modifiers::none());
         vcx.update(|_, cx| assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), code));
         let scroll_before_zoom = preview.read_with(&vcx, |preview, _| preview.scroll.offset());
