@@ -24,6 +24,9 @@ use crate::terminal::git_diff::{
 const MAX_PREVIEW_BYTES: u64 = 4 * 1024 * 1024;
 use crate::ui::app::Tty7App;
 use crate::ui::diff_rows::{Side, SplitCell, SplitRow, UnifiedRow, split_hunk, unified_rows};
+use crate::ui::diff_selection::{
+    DiffSelection, SelectionLine, selectable_card, selectable_viewport,
+};
 use crate::ui::document_column::DocumentChrome;
 use crate::ui::i18n::{L10nKey, t, t_fmt, t_plural};
 use crate::ui::right_panel::info_chip;
@@ -1162,11 +1165,43 @@ impl Tty7App {
                 DiffViewMode::Split => &[Some(Side::Old), Some(Side::New)],
                 DiffViewMode::Unified => &[None],
             };
+            let selection = window.use_keyed_state(
+                SharedString::from(format!("diff-selection:{}", file.path)),
+                cx,
+                |_, cx| DiffSelection::new(cx),
+            );
+            selection.update(cx, |state, _| {
+                state.configure(
+                    mode,
+                    sides
+                        .iter()
+                        .map(|side| {
+                            file.hunks
+                                .iter()
+                                .flat_map(|hunk| &hunk.lines)
+                                .filter(|line| match side {
+                                    Some(Side::Old) => line.kind != LineKind::Added,
+                                    Some(Side::New) => line.kind != LineKind::Removed,
+                                    None => true,
+                                })
+                                .map(|line| SharedString::from(line.text.clone()))
+                                .collect()
+                        })
+                        .collect(),
+                )
+            });
+            card = selectable_card(card, &selection, cx);
+            let vertical = self
+                .tabs
+                .get(self.active)
+                .and_then(|tab| tab.diff_overlay.as_ref())
+                .map(|overlay| overlay.scroll.clone());
             let mut columns = h_flex()
                 .debug_selector(|| "diff-columns".into())
                 .w_full()
                 .items_stretch();
-            for &side in sides {
+            for (column, &side) in sides.iter().enumerate() {
+                let mut row_index = 0;
                 let mut body = v_flex().w_full().flex_shrink_0();
                 let measure = |text: &str| {
                     crate::ui::tab_strip::measure_text(window.text_system(), &font, font_size, text)
@@ -1211,13 +1246,28 @@ impl Tty7App {
                                     px(0.)
                                 };
                                 body = body.child(
-                                    self.diff_split_cell(cell, side, radius, cx)
-                                        .flex_none()
-                                        .w_full()
-                                        .h(px(19.))
-                                        .text_xs()
-                                        .font_family(self.font_family.clone()),
+                                    self.diff_split_cell_selected(
+                                        cell,
+                                        side,
+                                        radius,
+                                        cell.map(|_| SelectionLine {
+                                            state: selection.clone(),
+                                            column,
+                                            row: row_index,
+                                            font: font.clone(),
+                                            font_size: px(font_size),
+                                        }),
+                                        cx,
+                                    )
+                                    .flex_none()
+                                    .w_full()
+                                    .h(px(19.))
+                                    .text_xs()
+                                    .font_family(self.font_family.clone()),
                                 );
+                                if cell.is_some() {
+                                    row_index += 1;
+                                }
                             }
                         }
                         HunkRows::Unified(rows) => {
@@ -1230,9 +1280,21 @@ impl Tty7App {
                                         + DIFF_LINE_END_PADDING,
                                 );
                                 body = body.child(
-                                    self.diff_unified_row(row, closing_row == Some((h, r)), cx)
-                                        .flex_shrink_0(),
+                                    self.diff_unified_row_selected(
+                                        row,
+                                        closing_row == Some((h, r)),
+                                        Some(SelectionLine {
+                                            state: selection.clone(),
+                                            column,
+                                            row: row_index,
+                                            font: font.clone(),
+                                            font_size: px(font_size),
+                                        }),
+                                        cx,
+                                    )
+                                    .flex_shrink_0(),
                                 );
+                                row_index += 1;
                             }
                         }
                     }
@@ -1260,7 +1322,7 @@ impl Tty7App {
                         .flex_1()
                         .min_w_0()
                         .pb(px(12.))
-                        .child(
+                        .child(selectable_viewport(
                             div()
                                 .id((key, idx))
                                 .debug_selector(move || key.into())
@@ -1284,7 +1346,12 @@ impl Tty7App {
                                     }
                                 }))
                                 .child(body.min_w(px(width.ceil()))),
-                        )
+                            &selection,
+                            column,
+                            scroll.clone(),
+                            vertical.clone(),
+                            cx,
+                        ))
                         .child(
                             div()
                                 .debug_selector(|| "diff-horizontal-scrollbar".into())
@@ -1364,11 +1431,23 @@ impl Tty7App {
             .into_any_element()
     }
 
+    #[cfg(test)]
     fn diff_split_cell(
         &self,
         cell: Option<&SplitCell>,
         side: Side,
         outer_radius: Pixels,
+        cx: &Context<Self>,
+    ) -> gpui::Div {
+        self.diff_split_cell_selected(cell, side, outer_radius, None, cx)
+    }
+
+    fn diff_split_cell_selected(
+        &self,
+        cell: Option<&SplitCell>,
+        side: Side,
+        outer_radius: Pixels,
+        selection: Option<SelectionLine>,
         cx: &Context<Self>,
     ) -> gpui::Div {
         let palette = diff_palette(cx);
@@ -1393,6 +1472,7 @@ impl Tty7App {
             (true, Side::New) => (palette.added, palette.added_background),
             (false, _) => (palette.foreground, palette.background),
         };
+        let text = SharedString::from(split_text(cell, side));
         base.bg(background)
             .text_color(foreground)
             .child(
@@ -1413,7 +1493,10 @@ impl Tty7App {
                         Side::Old => "diff-old-text".into(),
                         Side::New => "diff-new-text".into(),
                     })
-                    .child(split_text(cell, side)),
+                    .when_some(selection, |el, line| {
+                        line.attach(el, text.clone(), text.len() - cell.text.len())
+                    })
+                    .child(text),
             )
     }
 
@@ -1431,10 +1514,21 @@ impl Tty7App {
     /// own rather than riding in the text: with three kinds of line stacked in
     /// one column, an inlined marker would leave the context lines' code
     /// starting two characters left of everything else.
+    #[cfg(test)]
     fn diff_unified_row(
         &self,
         row: &UnifiedRow,
         closes_card: bool,
+        cx: &Context<Self>,
+    ) -> gpui::Div {
+        self.diff_unified_row_selected(row, closes_card, None, cx)
+    }
+
+    fn diff_unified_row_selected(
+        &self,
+        row: &UnifiedRow,
+        closes_card: bool,
+        selection: Option<SelectionLine>,
         cx: &Context<Self>,
     ) -> gpui::Div {
         let palette = diff_palette(cx);
@@ -1494,6 +1588,9 @@ impl Tty7App {
                     .min_w_0()
                     .whitespace_nowrap()
                     .debug_selector(|| "diff-unified-text".into())
+                    .when_some(selection, |el, line| {
+                        line.attach(el, row.text.clone().into(), 0)
+                    })
                     .child(row.text.clone()),
             )
     }
@@ -2864,11 +2961,202 @@ mod github_theme_gpui_tests {
     use gpui::{TestAppContext, point, size};
     use gpui_component::{Theme, ThemeMode};
 
+    #[gpui::test]
+    fn diff_character_selection_copies_partial_lines_in_both_views(cx: &mut TestAppContext) {
+        let (app, _) = test_window::harness(cx);
+        let mut failures = Vec::new();
+        for (mode, selector, prefix) in [
+            (DiffViewMode::Split, "diff-old-text", "− "),
+            (DiffViewMode::Split, "diff-new-text", "+ "),
+            (DiffViewMode::Unified, "diff-unified-text", ""),
+        ] {
+            let mut file = git_diff::synthesize_added(
+                "selection.txt",
+                b"before selected after\n",
+                &git_diff::DiffBudget::SINGLE_FILE,
+            );
+            file.hunks[0].lines.insert(
+                0,
+                git_diff::DiffLine {
+                    kind: LineKind::Removed,
+                    old_no: Some(1),
+                    new_no: None,
+                    text: "before selected after".into(),
+                },
+            );
+            let (_, vcx) = cx.add_window_view(|_, _| LongDiff {
+                app: app.clone(),
+                file,
+                mode,
+                vertical: gpui::ScrollHandle::new(),
+            });
+            vcx.run_until_parked();
+            vcx.update(|_, cx| {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string("UNCHANGED".into()))
+            });
+            let bounds = vcx.debug_bounds(selector).expect("visible diff text");
+            let (start_x, end_x) = vcx.update(|window, cx| {
+                let font = gpui::Font {
+                    family: app.read(cx).font_family.clone().into(),
+                    ..Default::default()
+                };
+                let size = window.rem_size().as_f32() * 0.75;
+                let width = |text: &str| {
+                    crate::ui::tab_strip::measure_text(window.text_system(), &font, size, text)
+                };
+                (
+                    width(&format!("{prefix}before ")),
+                    width(&format!("{prefix}before selected")),
+                )
+            });
+            let start = point(bounds.left() + px(start_x), bounds.center().y);
+            let end = point(bounds.left() + px(end_x), bounds.center().y);
+            vcx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.simulate_mouse_move(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.run_until_parked();
+            vcx.simulate_keystrokes("secondary-c");
+            let copied = vcx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()));
+            if copied.as_deref() != Some("selected") {
+                failures.push(format!("{selector}: {copied:?}"));
+            }
+        }
+        assert!(
+            failures.is_empty(),
+            "partial diff selection failed: {failures:?}"
+        );
+    }
+
     struct LongDiff {
         app: gpui::Entity<Tty7App>,
         file: FileDiff,
         mode: DiffViewMode,
         vertical: gpui::ScrollHandle,
+    }
+
+    #[gpui::test]
+    fn diff_character_selection_copies_unicode_across_lines_and_backwards(cx: &mut TestAppContext) {
+        let (app, _) = test_window::harness(cx);
+        let first = "before 中👩‍💻\tend";
+        let second = "\tsecond after";
+        for (mode, column, prefix) in [
+            (DiffViewMode::Split, 0, "− "),
+            (DiffViewMode::Split, 1, "+ "),
+            (DiffViewMode::Unified, 0, ""),
+        ] {
+            let mut file = git_diff::synthesize_added(
+                "selection.txt",
+                format!("{first}\n{second}\n").as_bytes(),
+                &git_diff::DiffBudget::SINGLE_FILE,
+            );
+            for (index, text) in [first, second].into_iter().enumerate() {
+                file.hunks[0].lines.insert(
+                    index,
+                    git_diff::DiffLine {
+                        kind: LineKind::Removed,
+                        old_no: Some(index as u32 + 1),
+                        new_no: None,
+                        text: text.into(),
+                    },
+                );
+            }
+            file.hunks[0].lines.insert(
+                2,
+                git_diff::DiffLine {
+                    kind: LineKind::Removed,
+                    old_no: Some(3),
+                    new_no: None,
+                    text: "obsolete padding".into(),
+                },
+            );
+            file.hunks.push(git_diff::Hunk {
+                header: "@@ -4 +3 @@".into(),
+                lines: vec![git_diff::DiffLine {
+                    kind: LineKind::Context,
+                    old_no: Some(4),
+                    new_no: Some(3),
+                    text: "tail".into(),
+                }],
+            });
+            let (_, vcx) = cx.add_window_view(|_, _| LongDiff {
+                app: app.clone(),
+                file,
+                mode,
+                vertical: gpui::ScrollHandle::new(),
+            });
+            vcx.run_until_parked();
+            let a = vcx
+                .debug_bounds(if column == 0 {
+                    "diff-selection-text-0-0"
+                } else {
+                    "diff-selection-text-1-0"
+                })
+                .unwrap();
+            let b = vcx
+                .debug_bounds(if column == 0 {
+                    "diff-selection-text-0-1"
+                } else {
+                    "diff-selection-text-1-1"
+                })
+                .unwrap();
+            let (x, y) = vcx.update(|window, cx| {
+                let font = gpui::Font {
+                    family: app.read(cx).font_family.clone().into(),
+                    ..Default::default()
+                };
+                let size = window.rem_size().as_f32() * 0.75;
+                let width = |text: &str| {
+                    crate::ui::tab_strip::measure_text(window.text_system(), &font, size, text)
+                };
+                (
+                    width(&format!("{prefix}before ")),
+                    width(&format!("{prefix}    second")),
+                )
+            });
+            let start = point(a.left() + px(x), a.center().y);
+            let end = point(b.left() + px(y), b.center().y);
+            for (a, b) in [(start, end), (end, start)] {
+                vcx.simulate_mouse_down(a, gpui::MouseButton::Left, gpui::Modifiers::none());
+                vcx.simulate_mouse_move(b, gpui::MouseButton::Left, gpui::Modifiers::none());
+                vcx.simulate_mouse_up(b, gpui::MouseButton::Left, gpui::Modifiers::none());
+                vcx.run_until_parked();
+                vcx.simulate_keystrokes("secondary-c");
+                let text = vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap());
+                assert_eq!(text, "中👩‍💻\tend\n\tsecond", "{mode:?} column {column}");
+            }
+            vcx.simulate_click(start, gpui::Modifiers::none());
+            vcx.simulate_keystrokes("shift-right shift-right secondary-c");
+            let text = vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap());
+            assert_eq!(
+                text, "中👩‍💻",
+                "keyboard selection must keep graphemes intact"
+            );
+            if mode == DiffViewMode::Split && column == 1 {
+                let tail = vcx.debug_bounds("diff-selection-text-1-2").unwrap();
+                let width = vcx.update(|window, cx| {
+                    let font = gpui::Font {
+                        family: app.read(cx).font_family.clone().into(),
+                        ..Default::default()
+                    };
+                    crate::ui::tab_strip::measure_text(
+                        window.text_system(),
+                        &font,
+                        window.rem_size().as_f32() * 0.75,
+                        "  tail",
+                    )
+                });
+                let tail = point(tail.left() + px(width), tail.center().y);
+                vcx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::none());
+                vcx.simulate_mouse_move(tail, gpui::MouseButton::Left, gpui::Modifiers::none());
+                vcx.simulate_mouse_up(tail, gpui::MouseButton::Left, gpui::Modifiers::none());
+                vcx.simulate_keystrokes("secondary-c");
+                assert_eq!(
+                    vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap()),
+                    "中👩‍💻\tend\n\tsecond after\ntail",
+                    "padding and hunk headers are not source text"
+                );
+            }
+        }
     }
 
     impl gpui::Render for LongDiff {
@@ -2883,6 +3171,94 @@ mod github_theme_gpui_tests {
                 .overflow_y_scroll()
                 .track_scroll(&self.vertical)
                 .child(card)
+        }
+    }
+
+    #[gpui::test]
+    fn diff_character_selection_tracks_horizontal_scroll_and_edge_drag(cx: &mut TestAppContext) {
+        let (app, _) = test_window::harness(cx);
+        let text = format!("{}END", "x".repeat(300));
+        for (mode, column, viewport, prefix) in [
+            (DiffViewMode::Split, 0, "diff-old-scroll", "− "),
+            (DiffViewMode::Split, 1, "diff-new-scroll", "+ "),
+            (DiffViewMode::Unified, 0, "diff-unified-scroll", ""),
+        ] {
+            let mut file = git_diff::synthesize_added(
+                "long.txt",
+                text.as_bytes(),
+                &git_diff::DiffBudget::SINGLE_FILE,
+            );
+            file.hunks[0].lines.insert(
+                0,
+                git_diff::DiffLine {
+                    kind: LineKind::Removed,
+                    old_no: Some(1),
+                    new_no: None,
+                    text: text.clone(),
+                },
+            );
+            let (_, vcx) = cx.add_window_view(|_, _| LongDiff {
+                app: app.clone(),
+                file,
+                mode,
+                vertical: gpui::ScrollHandle::new(),
+            });
+            vcx.run_until_parked();
+            let viewport = vcx.debug_bounds(viewport).unwrap();
+            vcx.simulate_event(gpui::ScrollWheelEvent {
+                position: viewport.center(),
+                delta: gpui::ScrollDelta::Pixels(point(px(-100_000.), px(0.))),
+                ..Default::default()
+            });
+            vcx.run_until_parked();
+            let selector = if column == 0 {
+                "diff-selection-text-0-0"
+            } else {
+                "diff-selection-text-1-0"
+            };
+            let bounds = vcx.debug_bounds(selector).unwrap();
+            let (a, b) = vcx.update(|window, cx| {
+                let font = gpui::Font {
+                    family: app.read(cx).font_family.clone().into(),
+                    ..Default::default()
+                };
+                let size = window.rem_size().as_f32() * 0.75;
+                let width = |text: &str| {
+                    crate::ui::tab_strip::measure_text(window.text_system(), &font, size, text)
+                };
+                (
+                    width(&format!("{prefix}{}", "x".repeat(300))),
+                    width(&format!("{prefix}{text}")),
+                )
+            });
+            let start = point(bounds.left() + px(a), bounds.center().y);
+            let end = point(bounds.left() + px(b), bounds.center().y);
+            vcx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.simulate_mouse_move(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.simulate_keystrokes("secondary-c");
+            assert_eq!(
+                vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap()),
+                "END"
+            );
+            vcx.simulate_mouse_down(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+            let outside = point(viewport.left() - px(30.), end.y);
+            vcx.simulate_mouse_move(outside, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.run_until_parked();
+            vcx.executor()
+                .advance_clock(std::time::Duration::from_millis(32));
+            vcx.run_until_parked();
+            assert!(
+                vcx.debug_bounds(selector).unwrap().left() > bounds.left(),
+                "edge selection must scroll back along a long line"
+            );
+            vcx.simulate_mouse_up(outside, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.simulate_keystrokes("secondary-c");
+            let copied = vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap());
+            assert!(
+                copied.starts_with('x') && copied.ends_with("END"),
+                "{copied:?}"
+            );
         }
     }
 

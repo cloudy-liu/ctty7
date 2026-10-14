@@ -32,6 +32,56 @@ fn harness(
     (window, view, stream)
 }
 
+#[gpui::test]
+fn agent_lifecycle_osc_progress_drives_live_and_replayed_status(cx: &mut TestAppContext) {
+    use crate::core::cli_agent::CLIAgent;
+
+    let (window, view, mut daemon) = harness(cx);
+    DaemonMsg::Agent(Some(CLIAgent::Grok))
+        .encode(&mut daemon)
+        .unwrap();
+    // The report crosses output frames, as it can cross PTY reads or SSH packets.
+    DaemonMsg::Output(b"\x1b]9;4;1;".to_vec())
+        .encode(&mut daemon)
+        .unwrap();
+    for (frame, expected) in [
+        (
+            DaemonMsg::Output(b"-1\x1b\\".to_vec()),
+            AgentStatus::Working,
+        ),
+        (
+            DaemonMsg::Output(b"\x1b]9;4;0;0\x07".to_vec()),
+            AgentStatus::Done,
+        ),
+        (
+            DaemonMsg::Snapshot(b"\x1b]9;4;1;-1\x07".to_vec()),
+            AgentStatus::Working,
+        ),
+    ] {
+        frame.encode(&mut daemon).unwrap();
+        let mut observed = false;
+        for _ in 0..200 {
+            cx.run_until_parked();
+            observed = window
+                .update(cx, |_, window, cx| {
+                    view.update(cx, |pane, cx| {
+                        pane.poll_foreground(window, cx);
+                        pane.agent_status() == Some(expected)
+                    })
+                })
+                .unwrap();
+            if observed {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(
+            observed,
+            "OSC progress must reach the displayed {expected:?} status"
+        );
+    }
+}
+
 fn report(
     status: AgentStatus,
     daemon: &mut crate::daemon::transport::Stream,

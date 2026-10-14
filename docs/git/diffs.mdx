@@ -27,6 +27,21 @@ the two. The choice is global — one setting for every diff, the same call VS
 Code's `diffEditor.renderSideBySide` makes — and persists as `diff_view` in
 `config.json`.
 
+## Selecting and copying code
+
+Code can be selected at any character boundary, including across lines, and
+copied with <kbd>Ctrl</kbd>+<kbd>C</kbd> or <kbd>Cmd</kbd>+<kbd>C</kbd> on macOS.
+Right-click the code for **Copy** and **Select All**. In a side-by-side diff,
+the selection stays in the column where the drag started and within one file.
+
+Shift-click extends the selection. Double-click selects a word, triple-click
+selects a line, and Shift with the arrow keys, Home, or End adjusts the range.
+Dragging past the viewport scrolls the code to continue selecting.
+
+Copied text contains the original code, including tabs. Line numbers, diff
+markers, hunk headers, and empty padding cells are excluded. Switching view
+mode or changing the displayed code clears the selection.
+
 ## What it shows
 
 - Every changed file, with its status and `+N −M`

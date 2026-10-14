@@ -7,9 +7,8 @@
 //! a set of text matches over one region of the live bottom of the pane, and
 //! the highest-priority rule that matches names the state.
 //!
-//! The manifests in `assets/agent-detection/` are herdr's own, copied without
-//! changes except for tty7's Codex ready-prompt rule (Apache-2.0; see the
-//! README there). Cursor's nested-pane rules live in `extensions/cursor.toml`.
+//! The manifests in `assets/agent-detection/` are herdr's own, with tty7's
+//! additions kept in `extensions/` (Apache-2.0; see the README there).
 //! The matcher and region functions below follow herdr's
 //! `src/detect/manifest.rs`, because a manifest
 //! means only what its engine makes it mean.
@@ -22,6 +21,8 @@ use regex::Regex;
 use serde::Deserialize;
 
 use crate::core::cli_agent::{AgentSessionState, AgentStatus, CLIAgent};
+
+const MANIFEST_ENGINE_VERSION: u32 = 3;
 
 /// What one look at the screen says.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Deserialize)]
@@ -50,6 +51,7 @@ pub(crate) struct Reading {
 pub(crate) struct Input<'a> {
     pub(crate) screen: &'a str,
     pub(crate) osc_title: &'a str,
+    pub(crate) osc_progress: &'a str,
 }
 
 /// Classify a screen for `agent`. `None` when herdr has no manifest for it.
@@ -183,7 +185,7 @@ pub(crate) struct Tracker {
     agent: Option<CLIAgent>,
     /// What the last reading looked at, so an unchanged screen is not read
     /// again.
-    seen: Option<(u64, String)>,
+    seen: Option<(u64, String, String)>,
     status: Option<ScreenStatus>,
     held_idle: u8,
 }
@@ -197,6 +199,7 @@ impl Tracker {
         agent: Option<CLIAgent>,
         seq: u64,
         title: &str,
+        progress: &str,
         screen: impl FnOnce() -> String,
     ) {
         if agent != self.agent {
@@ -211,15 +214,16 @@ impl Tracker {
         let unchanged = self
             .seen
             .as_ref()
-            .is_some_and(|(s, t)| *s == seq && t == title);
+            .is_some_and(|(s, t, p)| *s == seq && t == title && p == progress);
         if unchanged && self.held_idle == 0 {
             return;
         }
-        self.seen = Some((seq, title.to_string()));
+        self.seen = Some((seq, title.to_string(), progress.to_string()));
         let screen = screen();
         let input = Input {
             screen: &screen,
             osc_title: title,
+            osc_progress: progress,
         };
         if let Some(reading) = read(agent, &input) {
             self.apply(reading);
@@ -331,6 +335,8 @@ pub(crate) fn detection_text<T: EventListener>(term: &Term<T>) -> String {
 #[derive(Deserialize)]
 struct Manifest {
     #[serde(default)]
+    min_engine_version: Option<u32>,
+    #[serde(default)]
     rules: Vec<Rule>,
 }
 
@@ -387,8 +393,7 @@ struct CompiledRule {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Region {
     OscTitle,
-    /// The OSC 9;4 progress report. tty7 does not track it, so the rules that
-    /// look here never match.
+    /// The OSC 9;4 progress report, separate from the visible screen text.
     OscProgress,
     WholeRecent,
     AfterLastPromptMarker,
@@ -439,7 +444,7 @@ impl Region {
         let content = input.screen;
         match self {
             Region::OscTitle => input.osc_title,
-            Region::OscProgress => "",
+            Region::OscProgress => input.osc_progress,
             Region::WholeRecent => content,
             Region::AfterLastPromptMarker => after_last_prompt_marker(content),
             Region::BeforeCurrentPromptMarker => before_current_prompt_marker(content),
@@ -517,6 +522,9 @@ impl CompiledGate {
 
 fn compile(source: &str) -> Result<CompiledManifest, String> {
     let manifest: Manifest = toml::from_str(source).map_err(|e| e.to_string())?;
+    if manifest.min_engine_version.unwrap_or(1) > MANIFEST_ENGINE_VERSION {
+        return Err("manifest requires a newer detection engine".to_string());
+    }
     let rules = manifest
         .rules
         .iter()
@@ -545,12 +553,19 @@ fn compiled(agent: CLIAgent) -> Option<&'static CompiledManifest> {
             let mut manifest = compile(source)
                 .inspect_err(|e| log::warn!("{} screen manifest: {e}", agent.slug()))
                 .ok()?;
-            if agent == CLIAgent::Cursor {
-                let extension = compile(include_str!(
+            let extension_source = match agent {
+                CLIAgent::Cursor => Some(include_str!(
                     "../../assets/agent-detection/extensions/cursor.toml"
-                ))
-                .inspect_err(|e| log::warn!("cursor's local extension: {e}"))
-                .ok()?;
+                )),
+                CLIAgent::Codex => Some(include_str!(
+                    "../../assets/agent-detection/extensions/codex.toml"
+                )),
+                _ => None,
+            };
+            if let Some(source) = extension_source {
+                let extension = compile(source)
+                    .inspect_err(|e| log::warn!("{}'s local extension: {e}", agent.slug()))
+                    .ok()?;
                 manifest.rules.extend(extension.rules);
             }
             Some(manifest)
@@ -740,6 +755,7 @@ mod tests {
             &Input {
                 screen: text,
                 osc_title: "",
+                osc_progress: "",
             },
         )
         .expect("the agent has a manifest")
@@ -805,6 +821,7 @@ mod tests {
             &Input {
                 screen: draft,
                 osc_title: "OpenAI Codex (v0.162.1)",
+                osc_progress: "",
             },
         )
         .expect("the agent has a manifest");
@@ -821,6 +838,7 @@ mod tests {
                 &Input {
                     screen: "• Working (2s • esc to interrupt)\n› \n",
                     osc_title: title,
+                    osc_progress: "",
                 },
             )
             .unwrap()
@@ -833,6 +851,7 @@ mod tests {
                 &Input {
                     screen: "›\nallow command?\n",
                     osc_title: title,
+                    osc_progress: "",
                 },
             )
             .unwrap()
@@ -881,6 +900,107 @@ mod tests {
         let idle = screen(CLIAgent::Antigravity, "> \n  ? for shortcuts\n");
         assert_eq!(idle.state, ScreenState::Idle);
         assert!(!idle.matched, "an idle agy is the fallback, not a rule");
+    }
+
+    #[test]
+    fn antigravity_freeform_live_spinner_is_working() {
+        let active = "○ Thought for 1m 50s\n● Explored 1 file\n● Killed 1 task\n⠿ The structure of the `view-grouped-container` section is being mapped out.\n└ Tip: Use /settings to configure your environment.\n> add emoji\n> \nPress up to edit queued messages\nGemini 3.8 Flash · high\n";
+        let reading = screen(CLIAgent::Antigravity, active);
+        assert_eq!(reading.state, ScreenState::Working);
+        assert!(reading.matched);
+
+        let mut tracker = Tracker::default();
+        for seq in 1..=4 {
+            tracker.observe(Some(CLIAgent::Antigravity), seq, "agy", "", || {
+                active.into()
+            });
+            assert_eq!(tracker.status().unwrap().status, Some(AgentStatus::Working));
+        }
+
+        let finished = "○ Thought for 1m 50s\n● Explored 1 file\n● Killed 1 task\nThe structure of the `view-grouped-container` section has been mapped out.\n> \nGemini 3.8 Flash · high\n";
+        for _ in 0..=IDLE_CONFIRMATIONS {
+            tracker.observe(Some(CLIAgent::Antigravity), 5, "agy", "", || {
+                finished.into()
+            });
+        }
+        assert_eq!(tracker.status().unwrap().status, Some(AgentStatus::Done));
+        assert_eq!(
+            screen(CLIAgent::Antigravity, finished).state,
+            ScreenState::Idle
+        );
+    }
+
+    #[test]
+    fn upstream_rules_handle_current_prompts_and_background_work() {
+        for (agent, text, expected) in [
+            (CLIAgent::Pi, "⠋ Working\n", ScreenState::Working),
+            (
+                CLIAgent::Grok,
+                "○ 2 commands still running\n> \n",
+                ScreenState::Idle,
+            ),
+            (
+                CLIAgent::Codex,
+                "Update available · 0.159\nenter continue · esc skip\n",
+                ScreenState::Blocked,
+            ),
+            (
+                CLIAgent::Antigravity,
+                "↑/↓ Navigate · tab Amend · f full diff\nesc to cancel\n",
+                ScreenState::Blocked,
+            ),
+            (
+                CLIAgent::Antigravity,
+                "↑/↓ Navigate · enter Select · esc Skip\nesc to cancel\n",
+                ScreenState::Blocked,
+            ),
+            (
+                CLIAgent::Antigravity,
+                "> \n? for shortcuts · 2 tasks\n",
+                ScreenState::Idle,
+            ),
+        ] {
+            assert_eq!(screen(agent, text).state, expected, "{agent:?}: {text}");
+        }
+    }
+
+    #[test]
+    fn manifests_requiring_a_newer_engine_are_rejected() {
+        let future = "min_engine_version = 4\n[[rules]]\nstate = 'working'\ncontains = ['x']\n";
+        assert!(
+            compile(future).is_err(),
+            "a future rule cannot silently use old semantics"
+        );
+    }
+
+    #[test]
+    fn progress_changes_are_observed_without_a_screen_or_title_change() {
+        let mut tracker = Tracker::default();
+        tracker.observe(Some(CLIAgent::Grok), 1, "", "4;1;-1", String::new);
+        assert_eq!(tracker.status().unwrap().status, Some(AgentStatus::Working));
+        tracker.observe(Some(CLIAgent::Grok), 1, "", "4;0;0", String::new);
+        assert_eq!(tracker.status().unwrap().status, Some(AgentStatus::Done));
+    }
+
+    #[test]
+    fn osc_progress_rules_receive_their_dedicated_input() {
+        for (agent, progress, expected) in [
+            (CLIAgent::Grok, "4;1;-1", ScreenState::Working),
+            (CLIAgent::Qwen, "4;3;0", ScreenState::Working),
+            (CLIAgent::Claude, "4;0;0", ScreenState::Idle),
+        ] {
+            let reading = read(
+                agent,
+                &Input {
+                    screen: "",
+                    osc_title: "",
+                    osc_progress: progress,
+                },
+            )
+            .unwrap();
+            assert!(reading.matched, "{agent:?} must match its OSC rule");
+            assert_eq!(reading.state, expected);
+        }
     }
 
     #[test]
@@ -985,6 +1105,7 @@ mod tests {
             &Input {
                 screen: "",
                 osc_title: "⠂ Fixing the build",
+                osc_progress: "",
             },
         )
         .unwrap();
@@ -994,6 +1115,7 @@ mod tests {
             &Input {
                 screen: "",
                 osc_title: "✳ Fixing the build",
+                osc_progress: "",
             },
         )
         .unwrap();
@@ -1005,7 +1127,7 @@ mod tests {
     fn agents_herdr_has_no_manifest_for_read_nothing() {
         assert!(manifest_source(CLIAgent::Aider).is_none());
         let mut tracker = Tracker::default();
-        tracker.observe(Some(CLIAgent::Aider), 1, "", || {
+        tracker.observe(Some(CLIAgent::Aider), 1, "", "", || {
             panic!("no manifest, so nothing to render the screen for")
         });
         assert_eq!(tracker.status(), None);
@@ -1089,10 +1211,10 @@ mod tests {
             reads.set(reads.get() + 1);
             "> \n".to_string()
         };
-        t.observe(Some(CLIAgent::Antigravity), 7, "agy", screen);
-        t.observe(Some(CLIAgent::Antigravity), 7, "agy", screen);
+        t.observe(Some(CLIAgent::Antigravity), 7, "agy", "", screen);
+        t.observe(Some(CLIAgent::Antigravity), 7, "agy", "", screen);
         assert_eq!(reads.get(), 1);
-        t.observe(Some(CLIAgent::Antigravity), 8, "agy", screen);
+        t.observe(Some(CLIAgent::Antigravity), 8, "agy", "", screen);
         assert_eq!(reads.get(), 2);
     }
 

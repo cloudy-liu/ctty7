@@ -1,20 +1,46 @@
 # Agent screen-detection manifests
 
 These TOML files come from [herdr](https://github.com/herdrdev/herdr)
-(`src/detect/manifests/`, commit `2563803dca97c040beaf3dc3acdcb5a3221b4238`,
-version `2026.10.01.1`), licensed under the Apache License 2.0. `codex.toml`
-adds tty7's `ready_prompt` rule for the visible
-input prompt and shortcuts footer; preserve this extension when updating
-the upstream rules. The other upstream manifests are copied unchanged.
+(`src/detect/manifests/`, commit `241b99cd397bb642eaabcfee1647bcecffb26be1`),
+licensed under the Apache License 2.0. All 14 upstream files are copied
+byte-for-byte. `upstream.json` records each source path, version and SHA-256.
+Versions belong to individual manifests, not to the entire directory.
 `copilot.toml` is herdr's `github-copilot.toml`, renamed after
 tty7's slug.
 
+`extensions/codex.toml` holds tty7's `ready_prompt` rule for the visible
+input prompt and shortcuts footer. The engine appends it after upstream
+Codex rules; working and approval rules retain their higher priority.
+Keep local extensions separate when updating the upstream files.
+
 `extensions/cursor.toml` adds rules for a running spinner or an approval
 prompt after Herdr's `│` pane divider. The engine appends them to Cursor's
-upstream rules with the same priorities and detection regions. Keep this
-local extension separate when updating the upstream files.
+upstream rules with the same priorities and detection regions.
+
+Check the complete set offline with Python 3.11 or newer:
+
+```sh
+python scripts/sync-agent-detection.py --check
+```
+
+Sync every supported agent at one full upstream commit SHA:
+
+```sh
+python scripts/sync-agent-detection.py --update <40-character-commit-sha>
+```
+
+The updater fetches and validates the entire set before writing any file.
+CI checks coverage and content hashes, and tests that partial updates and
+engine incompatibilities fail. Additions must also be registered in
+`manifest_source` in `src/terminal/screen_status.rs`.
 
 Each file lists rules that classify a coding agent's pane as `working`,
 `blocked` or `idle`, based on what the agent's TUI is showing at the bottom of
 the screen. `src/terminal/screen_status.rs` evaluates them the way herdr's
 `src/detect/manifest.rs` does.
+
+The engine supports manifest version 3 semantics. Screen text, the current
+OSC title, and OSC 9;4 progress reports are separate detection inputs. A rule
+requiring a newer engine is rejected. tty7 keeps its hook/session ownership
+and completion debounce behavior; this sync does not add new agent types or
+remote rule downloads at runtime.

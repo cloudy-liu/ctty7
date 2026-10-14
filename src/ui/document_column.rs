@@ -692,6 +692,217 @@ mod gpui_tests {
     }
 
     #[gpui::test]
+    fn diff_character_selection_works_in_the_docked_and_full_window(cx: &mut TestAppContext) {
+        use crate::core::config::DiffViewMode;
+        use crate::terminal::git_diff::{self, DiffSnapshot, DiffSource};
+        use crate::ui::diff_overlay::{DiffLoad, DiffOverlayState};
+        use crate::ui::host_ops::HostId;
+        use gpui::{Modifiers, MouseButton, ScrollHandle, point};
+        use std::{collections::HashMap, path::PathBuf, sync::Arc};
+
+        let (app, mut vcx) = window(cx, 1600.);
+        let source = DiffSource::commit("selection-fixture");
+        let snapshot = Arc::new(DiffSnapshot {
+            source: source.clone(),
+            files: vec![git_diff::synthesize_added(
+                "a.txt",
+                b"before selected after\nsecond line\n",
+                &git_diff::DiffBudget::SINGLE_FILE,
+            )],
+            ..Default::default()
+        });
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            for layout in [DocumentLayout::Dock, DocumentLayout::Fill] {
+                app.update_in(&mut vcx, |app, window, cx| {
+                    cx.global_mut::<Config>().diff_view = mode;
+                    app.set_document_layout(layout, cx);
+                    let focus_handle = cx.focus_handle();
+                    window.focus(&focus_handle, cx);
+                    let active = app.active;
+                    app.tabs[active].overlay_top = OverlayTop::Diff;
+                    app.tabs[active].diff_overlay = Some(DiffOverlayState {
+                        host_id: HostId::LOCAL,
+                        cwd: PathBuf::from("/no/such/repo"),
+                        source: source.clone(),
+                        focus_handle,
+                        load: DiffLoad::Ready(snapshot.clone()),
+                        loading: false,
+                        expanded: HashMap::new(),
+                        focus: Some("a.txt".into()),
+                        preview: None,
+                        preview_loading: None,
+                        scroll: ScrollHandle::new(),
+                        epoch: None,
+                    });
+                    cx.notify();
+                });
+                vcx.run_until_parked();
+                let column = usize::from(mode == DiffViewMode::Split);
+                let bounds = vcx
+                    .debug_bounds(if column == 0 {
+                        "diff-selection-text-0-0"
+                    } else {
+                        "diff-selection-text-1-0"
+                    })
+                    .unwrap();
+                let prefix = if mode == DiffViewMode::Split {
+                    "+ "
+                } else {
+                    ""
+                };
+                let (start_x, end_x) = vcx.update(|window, cx| {
+                    let font = gpui::Font {
+                        family: app.read(cx).font_family.clone().into(),
+                        ..Default::default()
+                    };
+                    let size = window.rem_size().as_f32() * 0.75;
+                    let width = |text: &str| {
+                        crate::ui::tab_strip::measure_text(window.text_system(), &font, size, text)
+                    };
+                    (
+                        width(&format!("{prefix}before ")),
+                        width(&format!("{prefix}before selected")),
+                    )
+                });
+                let start = point(bounds.left() + px(start_x), bounds.center().y);
+                let end = point(bounds.left() + px(end_x), bounds.center().y);
+                vcx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+                vcx.simulate_mouse_move(end, MouseButton::Left, Modifiers::none());
+                vcx.simulate_mouse_up(end, MouseButton::Left, Modifiers::none());
+                vcx.run_until_parked();
+                vcx.simulate_keystrokes("secondary-c");
+                assert_eq!(
+                    vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap()),
+                    "selected"
+                );
+
+                let word = point((start.x + end.x) / 2., start.y);
+                for (count, expected) in [(2, "selected"), (3, "before selected after")] {
+                    vcx.simulate_event(gpui::MouseDownEvent {
+                        button: MouseButton::Left,
+                        position: word,
+                        click_count: count,
+                        ..Default::default()
+                    });
+                    vcx.run_until_parked();
+                    vcx.simulate_mouse_up(word, MouseButton::Left, Modifiers::none());
+                    vcx.simulate_keystrokes("secondary-c");
+                    assert_eq!(
+                        vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap()),
+                        expected
+                    );
+                }
+                vcx.simulate_click(start, Modifiers::none());
+                vcx.simulate_click(
+                    end,
+                    Modifiers {
+                        shift: true,
+                        ..Modifiers::none()
+                    },
+                );
+                vcx.simulate_keystrokes("secondary-c");
+                assert_eq!(
+                    vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap()),
+                    "selected"
+                );
+
+                vcx.update(|_, cx| {
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string("UNCHANGED".into()))
+                });
+                vcx.simulate_mouse_down(start, MouseButton::Right, Modifiers::none());
+                vcx.simulate_mouse_up(start, MouseButton::Right, Modifiers::none());
+                vcx.run_until_parked();
+                vcx.simulate_keystrokes("down enter");
+                vcx.run_until_parked();
+                assert_eq!(
+                    vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap()),
+                    "selected",
+                    "context menu in {layout:?} {mode:?}"
+                );
+
+                vcx.simulate_keystrokes("secondary-a secondary-c");
+                assert_eq!(
+                    vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap()),
+                    "before selected after\nsecond line"
+                );
+                vcx.update(|_, cx| {
+                    cx.global_mut::<Config>().diff_view = if mode == DiffViewMode::Split {
+                        DiffViewMode::Unified
+                    } else {
+                        DiffViewMode::Split
+                    };
+                    cx.write_to_clipboard(gpui::ClipboardItem::new_string("UNCHANGED".into()));
+                });
+                app.update_in(&mut vcx, |_, _, cx| cx.notify());
+                vcx.run_until_parked();
+                vcx.simulate_keystrokes("secondary-c");
+                assert_eq!(
+                    vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap()),
+                    "UNCHANGED",
+                    "mode change must discard stale ranges"
+                );
+
+                let content = format!("before selected after\n{}", "more code\n".repeat(120));
+                app.update_in(&mut vcx, |app, _, cx| {
+                    cx.global_mut::<Config>().diff_view = mode;
+                    let active = app.active;
+                    app.tabs[active].diff_overlay.as_mut().unwrap().load =
+                        DiffLoad::Ready(Arc::new(DiffSnapshot {
+                            source: source.clone(),
+                            files: vec![git_diff::synthesize_added(
+                                "a.txt",
+                                content.as_bytes(),
+                                &git_diff::DiffBudget::SINGLE_FILE,
+                            )],
+                            ..Default::default()
+                        }));
+                    cx.notify();
+                });
+                vcx.run_until_parked();
+                let viewport = vcx.debug_bounds("diff-scroll").unwrap();
+                let outside = point(start.x, viewport.bottom() + px(30.));
+                vcx.simulate_mouse_down(start, MouseButton::Left, Modifiers::none());
+                vcx.simulate_mouse_move(outside, MouseButton::Left, Modifiers::none());
+                vcx.run_until_parked();
+                vcx.executor()
+                    .advance_clock(std::time::Duration::from_millis(32));
+                vcx.run_until_parked();
+                let offset = app.read_with(&vcx, |app, _| {
+                    app.tabs[app.active]
+                        .diff_overlay
+                        .as_ref()
+                        .unwrap()
+                        .scroll
+                        .offset()
+                });
+                assert!(
+                    offset.y < px(0.),
+                    "selection must scroll below the viewport"
+                );
+                vcx.simulate_mouse_up(outside, MouseButton::Left, Modifiers::none());
+                vcx.executor()
+                    .advance_clock(std::time::Duration::from_millis(64));
+                vcx.run_until_parked();
+                assert_eq!(
+                    app.read_with(&vcx, |app, _| app.tabs[app.active]
+                        .diff_overlay
+                        .as_ref()
+                        .unwrap()
+                        .scroll
+                        .offset()),
+                    offset,
+                    "release outside the code must stop scrolling"
+                );
+                vcx.simulate_keystrokes("secondary-c");
+                assert!(
+                    vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap())
+                        .contains("selected after\nmore code")
+                );
+            }
+        }
+    }
+
+    #[gpui::test]
     fn github_diff_mode_switch_keeps_the_open_patch_and_reading_position(cx: &mut TestAppContext) {
         use crate::core::config::DiffViewMode;
         use crate::terminal::git_diff::{self, DiffSnapshot, DiffSource};

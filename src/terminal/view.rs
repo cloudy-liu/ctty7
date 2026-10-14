@@ -3621,10 +3621,13 @@ impl TerminalView {
         // title is exactly what settling holds back.
         let title = self.pending_title.as_deref().unwrap_or(&self.title);
         let term = &self.terminal.term;
-        self.screen_status
-            .observe(agent, self.output_seq, title, || {
-                crate::terminal::screen_status::detection_text(&term.lock())
-            });
+        self.screen_status.observe(
+            agent,
+            self.output_seq,
+            title,
+            &self.terminal.osc_progress(),
+            || crate::terminal::screen_status::detection_text(&term.lock()),
+        );
 
         let session = self.terminal.agent_session();
         if agent != self.last_notification_agent {
