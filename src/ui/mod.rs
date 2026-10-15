@@ -1,6 +1,7 @@
 pub mod app;
 pub mod assets;
 pub mod code_editor;
+mod diff_context;
 pub mod diff_overlay;
 pub mod diff_rows;
 pub mod diff_selection;

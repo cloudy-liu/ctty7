@@ -1,5 +1,8 @@
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::ops::Range;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 use std::sync::Arc;
 
 #[cfg(feature = "markdown-visual-tests")]
@@ -10,10 +13,12 @@ use gpui::{
     AnyElement, Background, FocusHandle, FontWeight, Hsla, KeyDownEvent, Pixels, SharedString,
     Window, div, prelude::*, px,
 };
-use gpui_component::button::Button;
+use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::menu::ContextMenuExt as _;
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
-use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
+use gpui_component::{
+    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, h_flex, v_flex,
+};
 
 use crate::core::config::{Config, DiffViewMode};
 use crate::core::git::status::DecoStatus;
@@ -130,6 +135,69 @@ pub(crate) struct DiffOverlayState {
     /// `None` until the first snapshot arrives: the epoch is keyed by the
     /// repository root, and only a snapshot knows where that is.
     pub(crate) epoch: Option<u64>,
+    file_view: Option<DiffFileView>,
+    geometry: Rc<RefCell<HashMap<String, DiffGeometry>>>,
+    anchor: Rc<RefCell<Option<DiffAnchor>>>,
+}
+
+struct DiffFileView {
+    path: String,
+    whole: bool,
+    revealed: Vec<Range<u32>>,
+    full: Option<Arc<FileDiff>>,
+    shown: Option<Arc<FileDiff>>,
+    loading: bool,
+    failed: bool,
+    token: Rc<()>,
+}
+
+type DiffLineKey = (Option<u32>, Option<u32>);
+struct DiffGeometry {
+    top: f32,
+    rows: Arc<Vec<(DiffLineKey, f32, bool)>>,
+}
+struct DiffAnchor {
+    path: String,
+    line: DiffLineKey,
+    screen_y: f32,
+}
+
+fn anchor_row(
+    rows: &[(DiffLineKey, f32, bool)],
+    line: DiffLineKey,
+) -> Option<&(DiffLineKey, f32, bool)> {
+    rows.iter()
+        .find(|(key, _, _)| *key == line)
+        .or_else(|| {
+            rows.iter().find(|(key, _, _)| {
+                (line.1.is_some() && key.1 == line.1) || (line.0.is_some() && key.0 == line.0)
+            })
+        })
+        .or_else(|| {
+            rows.iter().min_by_key(|(key, _, _)| {
+                key.1
+                    .or(key.0)
+                    .unwrap_or(0)
+                    .abs_diff(line.1.or(line.0).unwrap_or(0))
+            })
+        })
+}
+
+impl DiffOverlayState {
+    fn remember_diff_position(&self, path: &str) {
+        let geometry = self.geometry.borrow();
+        let Some(g) = geometry.get(path) else {
+            return;
+        };
+        let top = self.scroll.bounds().top().as_f32();
+        if let Some((line, y, _)) = g.rows.iter().find(|(_, y, _)| g.top + y >= top) {
+            *self.anchor.borrow_mut() = Some(DiffAnchor {
+                path: path.to_string(),
+                line: *line,
+                screen_y: g.top + y,
+            });
+        }
+    }
 }
 
 /// One hunk, already turned into whichever kind of row the current view draws.
@@ -224,6 +292,240 @@ fn diff_palette(cx: &gpui::App) -> DiffPalette {
 }
 
 impl Tty7App {
+    fn change_diff_context(
+        &mut self,
+        path: String,
+        reveal: Option<Range<u32>>,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(o) = self
+            .tabs
+            .get_mut(self.active)
+            .and_then(|t| t.diff_overlay.as_mut())
+        else {
+            return;
+        };
+        let DiffLoad::Ready(snap) = &o.load else {
+            return;
+        };
+        let Some(file) = snap.files.iter().find(|f| f.path == path && !f.binary) else {
+            return;
+        };
+        o.remember_diff_position(&path);
+        if !o.file_view.as_ref().is_some_and(|v| v.path == path) {
+            o.file_view = Some(DiffFileView {
+                path: path.clone(),
+                whole: false,
+                revealed: Vec::new(),
+                full: None,
+                shown: None,
+                loading: false,
+                failed: false,
+                token: Rc::new(()),
+            });
+        }
+        let view = o.file_view.as_mut().unwrap();
+        if view.loading {
+            return;
+        }
+        if let Some(range) = reveal {
+            view.whole = false;
+            view.revealed.push(range);
+        } else {
+            view.whole = !view.whole || view.failed;
+            view.revealed.clear();
+        }
+        o.focus = Some(path.clone());
+        o.expanded.insert(path.clone(), true);
+        if let Some(full) = &view.full {
+            view.shown = Some(if view.whole {
+                full.clone()
+            } else {
+                Arc::new(crate::ui::diff_context::with_context(full, &view.revealed))
+            });
+            cx.notify();
+            return;
+        }
+        let Some(host) = crate::ui::host_registry::HostRegistry::lookup(cx, o.host_id) else {
+            return;
+        };
+        let root = snap.root.clone();
+        let source = o.source.clone();
+        let file = file.clone();
+        let token = view.token.clone();
+        view.loading = true;
+        view.failed = false;
+        crate::ui::host_ops::HostOps::run(
+            host,
+            cx,
+            move |h| git_diff::probe_full_file(h, &root, source, &file).map(Arc::new),
+            move |app, full, cx| {
+                for tab in &mut app.tabs {
+                    let Some(o) = tab.diff_overlay.as_mut() else {
+                        continue;
+                    };
+                    if !o
+                        .file_view
+                        .as_ref()
+                        .is_some_and(|v| Rc::ptr_eq(&v.token, &token))
+                    {
+                        continue;
+                    }
+                    if o.focus.as_deref() == Some(path.as_str()) {
+                        o.remember_diff_position(&path);
+                    }
+                    let view = o.file_view.as_mut().unwrap();
+                    view.loading = false;
+                    view.failed = full.is_none();
+                    view.full = full.clone();
+                    view.shown = full.as_ref().map(|f| {
+                        if view.whole {
+                            f.clone()
+                        } else {
+                            Arc::new(crate::ui::diff_context::with_context(f, &view.revealed))
+                        }
+                    });
+                }
+                cx.notify();
+            },
+        );
+        cx.notify();
+    }
+
+    fn navigate_diff_change(&mut self, forward: bool, cx: &mut Context<Self>) {
+        let Some(o) = self
+            .tabs
+            .get(self.active)
+            .and_then(|t| t.diff_overlay.as_ref())
+        else {
+            return;
+        };
+        let Some(path) = o.focus.as_ref() else {
+            return;
+        };
+        let geometry = o.geometry.borrow();
+        let Some(g) = geometry.get(path) else {
+            return;
+        };
+        let top = o.scroll.bounds().top().as_f32() + 1.;
+        let mut previous_changed = false;
+        let starts: Vec<_> = g
+            .rows
+            .iter()
+            .filter_map(|(_, y, changed)| {
+                let start = *changed && !previous_changed;
+                previous_changed = *changed;
+                start.then_some(g.top + y)
+            })
+            .collect();
+        let target = if forward {
+            starts
+                .iter()
+                .find(|y| **y > top + DIFF_ROW_HEIGHT)
+                .or(starts.first())
+        } else {
+            starts
+                .iter()
+                .rev()
+                .find(|y| **y < top - DIFF_ROW_HEIGHT)
+                .or(starts.last())
+        };
+        if let Some(y) = target {
+            let mut offset = o.scroll.offset();
+            offset.y += px(top - y);
+            o.scroll.set_offset(offset);
+            cx.notify();
+        }
+    }
+
+    fn diff_context_button(&self, path: &str, cx: &mut Context<Self>) -> AnyElement {
+        let view = self
+            .tabs
+            .get(self.active)
+            .and_then(|t| t.diff_overlay.as_ref())
+            .and_then(|o| o.file_view.as_ref())
+            .filter(|v| v.path == path);
+        let whole = view.is_some_and(|v| v.whole && !v.failed);
+        let loading = view.is_some_and(|v| v.loading);
+        let path = path.to_string();
+        Button::new(SharedString::from(format!("diff-context:{path}")))
+            .small()
+            .ghost()
+            .disabled(loading)
+            .child(
+                gpui::svg()
+                    .path(if whole {
+                        "icons/diff-fold.svg"
+                    } else {
+                        "icons/diff-unfold.svg"
+                    })
+                    .size(px(14.)),
+            )
+            .tooltip(t(if whole {
+                L10nKey::DiffCollapseContext
+            } else {
+                L10nKey::DiffExpandFile
+            }))
+            .on_click(cx.listener(move |this, _, _, cx| {
+                cx.stop_propagation();
+                this.change_diff_context(path.clone(), None, cx);
+            }))
+            .into_any_element()
+    }
+
+    fn diff_change_button(&self, forward: bool, cx: &mut Context<Self>) -> AnyElement {
+        Button::new(if forward {
+            "diff-next-change"
+        } else {
+            "diff-previous-change"
+        })
+        .small()
+        .ghost()
+        .icon(if forward {
+            IconName::ArrowDown
+        } else {
+            IconName::ArrowUp
+        })
+        .tooltip(t(if forward {
+            L10nKey::DiffNextChange
+        } else {
+            L10nKey::DiffPreviousChange
+        }))
+        .on_click(cx.listener(move |this, _, _, cx| this.navigate_diff_change(forward, cx)))
+        .into_any_element()
+    }
+
+    fn diff_more_button(
+        &self,
+        path: &str,
+        range: Range<u32>,
+        above: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let path = path.to_string();
+        Button::new(SharedString::from(format!(
+            "diff-more:{path}:{}:{}",
+            range.start, range.end
+        )))
+        .small()
+        .ghost()
+        .icon(if above {
+            IconName::ArrowUp
+        } else {
+            IconName::ArrowDown
+        })
+        .tooltip(t(if above {
+            L10nKey::DiffMoreAbove
+        } else {
+            L10nKey::DiffMoreBelow
+        }))
+        .on_click(cx.listener(move |this, _, _, cx| {
+            cx.stop_propagation();
+            this.change_diff_context(path.clone(), Some(range.clone()), cx);
+        }))
+        .into_any_element()
+    }
+
     pub(crate) fn toggle_diff_overlay(
         &mut self,
         host: crate::ui::host_ops::HostId,
@@ -278,6 +580,7 @@ impl Tty7App {
             }
             Some(o) => {
                 o.focus = focus;
+                *o.anchor.borrow_mut() = None;
                 let handle = o.focus_handle.clone();
                 window.focus(&handle, cx);
                 cx.notify();
@@ -306,6 +609,9 @@ impl Tty7App {
             preview_loading: None,
             scroll: gpui::ScrollHandle::new(),
             epoch: None,
+            file_view: None,
+            geometry: Rc::default(),
+            anchor: Rc::default(),
         });
         window.focus(&focus_handle, cx);
         self.spawn_diff_probe(cx);
@@ -459,6 +765,8 @@ impl Tty7App {
             // A new snapshot restarts any untracked preview: the file may
             // have changed with the tree, and the re-read costs one file.
             overlay.preview = None;
+            overlay.file_view = None;
+            *overlay.anchor.borrow_mut() = None;
             landed = true;
         }
         if landed {
@@ -761,6 +1069,7 @@ impl Tty7App {
                                             .and_then(|t| t.diff_overlay.as_mut())
                                         {
                                             overlay.focus = None;
+                                            *overlay.anchor.borrow_mut() = None;
                                             cx.notify();
                                         }
                                     }))
@@ -834,6 +1143,12 @@ impl Tty7App {
                     }),
             )
             .child(self.diff_view_button(cx))
+            .when_some(focused_name(overlay).filter(|path| {
+                matches!(&overlay.load, DiffLoad::Ready(s) if s.files.iter().any(|f| f.path == *path && !f.binary))
+            }), |bar, path| bar
+                .child(self.diff_context_button(&path, cx))
+                .child(self.diff_change_button(false, cx))
+                .child(self.diff_change_button(true, cx)))
             .child(self.document_fill_button(cx))
             .child(
                 div().occlude().flex_shrink_0().child(
@@ -997,12 +1312,29 @@ impl Tty7App {
             if focused.is_none() && idx >= shown {
                 break;
             }
+            let file = self
+                .tabs
+                .get(self.active)
+                .and_then(|t| t.diff_overlay.as_ref())
+                .and_then(|o| o.file_view.as_ref())
+                .filter(|v| v.path == file.path && focused == Some(idx))
+                .and_then(|v| v.shown.as_deref())
+                .unwrap_or(file);
             let is_expanded = if focused == Some(idx) {
                 expanded.get(&file.path).copied().unwrap_or(true)
             } else {
                 file_expanded(file, expanded, oversized)
             };
             list = list.child(self.diff_file_card(idx, file, is_expanded, mode, window, cx));
+        }
+        if self
+            .tabs
+            .get(self.active)
+            .and_then(|t| t.diff_overlay.as_ref())
+            .and_then(|o| o.file_view.as_ref())
+            .is_some_and(|v| v.failed)
+        {
+            list = list.child(self.diff_message(t(L10nKey::DiffReadFailed), cx));
         }
         if focused.is_none() && snap.files.len() > shown {
             let rest = snap.files.len() - shown;
@@ -1173,6 +1505,9 @@ impl Tty7App {
                     .child(format!("−{}", file.removed)),
             );
         }
+        if !file.binary && idx != usize::MAX {
+            header = header.child(self.diff_context_button(&file.path, cx));
+        }
 
         let mut card = v_flex()
             .debug_selector(|| {
@@ -1261,6 +1596,76 @@ impl Tty7App {
                         * DIFF_ROW_HEIGHT,
                 )
                 + px(12.);
+            let mut positions = Vec::new();
+            let mut y = 0.;
+            for (_, rows) in &hunks {
+                y += hunk_height.as_f32();
+                match rows.as_ref() {
+                    HunkRows::Split(rows) => {
+                        for row in rows {
+                            positions.push((
+                                (
+                                    row.left.as_ref().and_then(|c| c.no),
+                                    row.right.as_ref().and_then(|c| c.no),
+                                ),
+                                y,
+                                row.left.as_ref().is_some_and(|c| c.changed)
+                                    || row.right.as_ref().is_some_and(|c| c.changed),
+                            ));
+                            y += DIFF_ROW_HEIGHT;
+                        }
+                    }
+                    HunkRows::Unified(rows) => {
+                        for row in rows {
+                            positions.push(((row.old, row.new), y, row.kind != LineKind::Context));
+                            y += DIFF_ROW_HEIGHT;
+                        }
+                    }
+                }
+            }
+            let positions = Arc::new(positions);
+            let view = self
+                .tabs
+                .get(self.active)
+                .and_then(|t| t.diff_overlay.as_ref())
+                .and_then(|o| o.file_view.as_ref())
+                .filter(|v| v.path == file.path);
+            let whole = view.is_some_and(|v| v.whole && v.shown.is_some());
+            let last_line = view.and_then(|v| v.full.as_ref()).and_then(|f| {
+                f.hunks
+                    .iter()
+                    .flat_map(|h| &h.lines)
+                    .filter_map(|l| l.new_no)
+                    .last()
+            });
+            let mut previous_end = 0;
+            let gaps: Vec<_> = file
+                .hunks
+                .iter()
+                .map(|h| {
+                    let first = h.lines.iter().find_map(|l| l.new_no).unwrap_or(0);
+                    let gap = (!whole && first > previous_end + 1).then(|| {
+                        (
+                            first.saturating_sub(20).max(previous_end + 1)..first,
+                            previous_end + 1..(previous_end + 21).min(first),
+                        )
+                    });
+                    previous_end = h
+                        .lines
+                        .iter()
+                        .filter_map(|l| l.new_no)
+                        .last()
+                        .unwrap_or(previous_end);
+                    gap
+                })
+                .collect();
+            let context_path = file.path.clone();
+            let geometry = self
+                .tabs
+                .get(self.active)
+                .and_then(|t| t.diff_overlay.as_ref())
+                .map(|o| (o.geometry.clone(), o.anchor.clone(), o.scroll.clone()));
+            let geometry_path = file.path.clone();
             // Keep each horizontal offset even while its file is offscreen.
             let horizontal: Vec<_> = sides
                 .iter()
@@ -1280,6 +1685,28 @@ impl Tty7App {
             let owner = cx.entity();
             let columns = gpui::canvas(
                 move |bounds, window, cx| {
+                    if let Some((geometry, anchor, scroll)) = &geometry {
+                        geometry.borrow_mut().insert(
+                            geometry_path.clone(),
+                            DiffGeometry {
+                                top: bounds.top().as_f32(),
+                                rows: positions.clone(),
+                            },
+                        );
+                        let mut pending = anchor.borrow_mut();
+                        if let Some(a) = pending.as_ref().filter(|a| a.path == geometry_path) {
+                            if let Some((_, y, _)) = anchor_row(&positions, a.line) {
+                                let delta = a.screen_y - bounds.top().as_f32() - y;
+                                if delta.abs() > 0.5 {
+                                    let mut offset = scroll.offset();
+                                    offset.y += px(delta);
+                                    scroll.set_offset(offset);
+                                    window.refresh();
+                                }
+                            }
+                            *pending = None;
+                        }
+                    }
                     let visible = bounds.intersect(&window.content_mask().bounds);
                     if visible.size.width <= px(0.) || visible.size.height <= px(0.) {
                         selection.update(cx, |state, _| state.cancel_drag());
@@ -1330,20 +1757,35 @@ impl Tty7App {
                                 }
                             }
                             for (h, (header, rows)) in hunks.iter().enumerate() {
-                                body = body.child(
-                                    div()
-                                        .w_full()
-                                        .h(hunk_height)
-                                        .flex_shrink_0()
-                                        .px_2()
-                                        .py_0p5()
-                                        .bg(palette.header)
-                                        .text_xs()
-                                        .font_family(app.font_family.clone())
-                                        .text_color(palette.hunk)
-                                        .whitespace_nowrap()
-                                        .child(header.clone()),
-                                );
+                                body =
+                                    body.child(
+                                        h_flex()
+                                            .w_full()
+                                            .h(hunk_height)
+                                            .flex_shrink_0()
+                                            .px_2()
+                                            .py_0p5()
+                                            .bg(palette.header)
+                                            .text_xs()
+                                            .font_family(app.font_family.clone())
+                                            .text_color(palette.hunk)
+                                            .whitespace_nowrap()
+                                            .child(div().flex_1().child(header.clone()))
+                                            .when_some(gaps[h].clone(), |bar, (above, below)| {
+                                                bar.child(app.diff_more_button(
+                                                    &context_path,
+                                                    above,
+                                                    true,
+                                                    cx,
+                                                ))
+                                                .child(app.diff_more_button(
+                                                    &context_path,
+                                                    below,
+                                                    false,
+                                                    cx,
+                                                ))
+                                            }),
+                                    );
                                 let row_offset = row_index;
                                 match rows.as_ref() {
                                     HunkRows::Split(rows) => {
@@ -1521,11 +1963,32 @@ impl Tty7App {
             .h(body_height)
             .flex_shrink_0();
             card = card.child(columns);
+            if !whole
+                && !matches!(file.status, FileStatus::Added | FileStatus::Deleted)
+                && last_line.is_none_or(|last| last > previous_end)
+            {
+                card = card.child(h_flex().justify_center().bg(palette.header).child(
+                    self.diff_more_button(
+                        &file.path,
+                        previous_end + 1..previous_end.saturating_add(21),
+                        false,
+                        cx,
+                    ),
+                ));
+            }
             if let Some(reason) = file.truncated {
                 let note = match reason {
                     Truncation::PerFile => t_fmt(
                         L10nKey::DiffTruncatedPerFile,
-                        &[("limit", &git_diff::MAX_LINES_PER_FILE.to_string())],
+                        &[(
+                            "limit",
+                            &if view.is_some_and(|v| v.shown.is_some()) {
+                                git_diff::DiffBudget::SINGLE_FILE.max_lines_per_file
+                            } else {
+                                git_diff::MAX_LINES_PER_FILE
+                            }
+                            .to_string(),
+                        )],
                     ),
                     Truncation::Budget => t(L10nKey::DiffTruncatedBudget).to_string(),
                 };
@@ -1579,7 +2042,18 @@ impl Tty7App {
                 } else {
                     L10nKey::DiffViewSplitTooltip
                 }))
-                .on_click(cx.listener(|this, _, _, cx| this.toggle_diff_view_mode(cx))),
+                .on_click(cx.listener(|this, _, _, cx| {
+                    if let Some(o) = this
+                        .tabs
+                        .get(this.active)
+                        .and_then(|t| t.diff_overlay.as_ref())
+                    {
+                        if let Some(path) = &o.focus {
+                            o.remember_diff_position(path);
+                        }
+                    }
+                    this.toggle_diff_view_mode(cx)
+                })),
             )
             .into_any_element()
     }
@@ -3113,6 +3587,126 @@ mod github_theme_gpui_tests {
     use crate::ui::app::test_window;
     use gpui::{TestAppContext, point, size};
     use gpui_component::{Theme, ThemeMode};
+
+    struct ContextDiff(gpui::Entity<Tty7App>);
+
+    impl gpui::Render for ContextDiff {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            self.0.update(cx, |app, cx| {
+                app.render_diff_overlay(DocumentChrome::Fill, window, cx)
+                    .unwrap_or_else(|| div().into_any_element())
+            })
+        }
+    }
+
+    #[gpui::test]
+    fn full_file_controls_preserve_change_position_and_layout(cx: &mut TestAppContext) {
+        let (app, _) = test_window::harness(cx);
+        let mut full = git_diff::synthesize_added(
+            "context.rs",
+            (1..=100)
+                .map(|n| format!("line {n}\n"))
+                .collect::<String>()
+                .as_bytes(),
+            &git_diff::DiffBudget::SINGLE_FILE,
+        );
+        full.status = FileStatus::Modified;
+        for line in &mut full.hunks[0].lines {
+            line.kind = LineKind::Context;
+            line.old_no = line.new_no;
+        }
+        for n in [25, 65].into_iter().rev() {
+            let mut removed = full.hunks[0].lines[n - 1].clone();
+            removed.kind = LineKind::Removed;
+            removed.new_no = None;
+            full.hunks[0].lines[n - 1].kind = LineKind::Added;
+            full.hunks[0].lines[n - 1].old_no = None;
+            full.hunks[0].lines.insert(n - 1, removed);
+        }
+        let full = Arc::new(full);
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            let (_, mut vcx) = cx.add_window_view(|_, _| ContextDiff(app.clone()));
+            vcx.simulate_resize(size(px(1000.), px(600.)));
+            app.update_in(&mut vcx, |app, window, cx| {
+                cx.global_mut::<Config>().diff_view = mode;
+                app.tabs = vec![crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty)];
+                app.active = 0;
+                app.open_diff_overlay(
+                    crate::ui::host_ops::HostId::LOCAL,
+                    PathBuf::from("/fixture"),
+                    DiffSource::Staged,
+                    Some("context.rs".into()),
+                    window,
+                    cx,
+                );
+                let o = app.tabs[0].diff_overlay.as_mut().unwrap();
+                o.loading = false;
+                o.load = DiffLoad::Ready(Arc::new(DiffSnapshot {
+                    files: vec![crate::ui::diff_context::with_context(&full, &[])],
+                    source: DiffSource::Staged,
+                    ..Default::default()
+                }));
+                o.file_view = Some(DiffFileView {
+                    path: "context.rs".into(),
+                    whole: false,
+                    revealed: vec![],
+                    full: Some(full.clone()),
+                    shown: None,
+                    loading: false,
+                    failed: false,
+                    token: Rc::new(()),
+                });
+                cx.notify();
+            });
+            vcx.run_until_parked();
+            let position = |vcx: &mut gpui::VisualTestContext| {
+                app.update(vcx, |app, _| {
+                    let o = app.tabs[0].diff_overlay.as_ref().unwrap();
+                    let g = o.geometry.borrow();
+                    let g = g.get("context.rs").unwrap();
+                    g.top + anchor_row(&g.rows, (None, Some(25))).unwrap().1
+                })
+            };
+            let before = position(&mut vcx);
+            app.update(&mut vcx, |app, cx| {
+                app.change_diff_context("context.rs".into(), None, cx)
+            });
+            vcx.run_until_parked();
+            assert!(
+                (position(&mut vcx) - before).abs() < 1.,
+                "expand moved the change in {mode:?}"
+            );
+            app.update(&mut vcx, |app, cx| {
+                assert_eq!(cx.global::<Config>().diff_view, mode);
+                assert!(
+                    app.tabs[0]
+                        .diff_overlay
+                        .as_ref()
+                        .unwrap()
+                        .file_view
+                        .as_ref()
+                        .unwrap()
+                        .whole
+                );
+                app.change_diff_context("context.rs".into(), None, cx);
+            });
+            vcx.run_until_parked();
+            assert!(
+                (position(&mut vcx) - before).abs() < 1.,
+                "collapse moved the change in {mode:?}"
+            );
+            app.update(&mut vcx, |app, cx| {
+                app.change_diff_context("context.rs".into(), Some(2..22), cx)
+            });
+            vcx.run_until_parked();
+            app.update(&mut vcx, |app, _| {
+                let o = app.tabs[0].diff_overlay.as_ref().unwrap();
+                let f = o.file_view.as_ref().unwrap().shown.as_ref().unwrap();
+                assert_eq!(f.hunks[0].lines[0].new_no, Some(2));
+                assert_eq!(o.source, DiffSource::Staged);
+            });
+        }
+    }
 
     #[gpui::test]
     fn diff_character_selection_copies_partial_lines_in_both_views(cx: &mut TestAppContext) {

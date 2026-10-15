@@ -22,6 +22,10 @@ pub const MAX_UNTRACKED: usize = 500;
 /// `-U<n>`. Git's own default, spelled out because the request carries it.
 pub const DEFAULT_CONTEXT: u32 = 3;
 
+/// Git accepts a signed integer for `-U`; this includes every line while the
+/// parser still bounds retained text. Only use with a single-file pathspec.
+pub const FULL_FILE_CONTEXT: u32 = i32::MAX as u32;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Truncation {
     PerFile,
@@ -259,6 +263,38 @@ impl DiffRequest<'_> {
         }
         argv
     }
+}
+
+/// Read the same comparison as the overview, including both rename paths.
+/// Never substitute worktree bytes for an index or historical version.
+pub fn probe_full_file(
+    host: &dyn Host,
+    root: &Path,
+    source: DiffSource,
+    file: &FileDiff,
+) -> Option<FileDiff> {
+    let mut paths = vec![format!(":(literal){}", file.path)];
+    if let Some(old) = &file.old_path {
+        paths.push(format!(":(literal){old}"));
+    }
+    let snapshot = probe_diff(
+        host,
+        root,
+        &DiffRequest {
+            source,
+            paths: &paths,
+            context: FULL_FILE_CONTEXT,
+            budget: DiffBudget {
+                max_total_lines: DiffBudget::SINGLE_FILE.max_lines_per_file,
+                ..DiffBudget::SINGLE_FILE
+            },
+            ..Default::default()
+        },
+    )?;
+    if snapshot.read_failed {
+        return None;
+    }
+    snapshot.files.into_iter().find(|f| f.path == file.path)
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -1762,6 +1798,75 @@ index 1..2 100644
         assert_eq!(probe(&*host, &dir).unwrap().untracked, ["fresh.txt"]);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn full_file_preserves_index_worktree_and_historical_versions() {
+        let dir = merge_repo("full-file").expect("git fixture");
+        let host = crate::host::local::LocalHost::new();
+        let path = "literal[1].txt";
+        let original: String = (1..=80).map(|n| format!("line {n}\n")).collect();
+        std::fs::write(dir.join(path), &original).unwrap();
+        git::git_output(&dir, &["add", "--", path]).unwrap();
+        git::git_output(&dir, &["commit", "-qm", "full baseline"]).unwrap();
+        let baseline = rev(&dir, "HEAD");
+        let staged = original.replace("line 25\n", "staged version\n");
+        std::fs::write(dir.join(path), &staged).unwrap();
+        git::git_output(&dir, &["add", "--", path]).unwrap();
+        let working = staged.replace("line 65\n", "worktree version\n");
+        std::fs::write(dir.join(path), &working).unwrap();
+        let read = |source: DiffSource| {
+            let snap = probe_diff(
+                &*host,
+                &dir,
+                &DiffRequest {
+                    source: source.clone(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let file = snap.files.iter().find(|f| f.path == path).unwrap();
+            assert!(file.hunks.iter().map(|h| h.lines.len()).sum::<usize>() < 80);
+            probe_full_file(&*host, &dir, source, file).unwrap()
+        };
+        let added = |file: &FileDiff| {
+            file.hunks
+                .iter()
+                .flat_map(|h| &h.lines)
+                .filter(|l| l.kind == LineKind::Added)
+                .map(|l| l.text.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(added(&read(DiffSource::Staged)), ["staged version"]);
+        assert_eq!(added(&read(DiffSource::Worktree)), ["worktree version"]);
+        let head = read(DiffSource::Head);
+        assert_eq!(added(&head), ["staged version", "worktree version"]);
+        assert_eq!(head.hunks[0].lines.first().unwrap().new_no, Some(1));
+        assert_eq!(head.hunks[0].lines.last().unwrap().new_no, Some(80));
+        git::git_output(&dir, &["commit", "-qm", "staged change"]).unwrap();
+        assert_eq!(added(&read(DiffSource::commit("HEAD"))), ["staged version"]);
+        assert_eq!(
+            added(&read(DiffSource::Range {
+                base: baseline,
+                head: "HEAD".into()
+            })),
+            ["staged version"]
+        );
+        git::git_output(&dir, &["mv", "--", path, "renamed[2].txt"]).unwrap();
+        let renamed = probe_diff(
+            &*host,
+            &dir,
+            &DiffRequest {
+                source: DiffSource::Staged,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let renamed = probe_full_file(&*host, &dir, DiffSource::Staged, &renamed.files[0]).unwrap();
+        assert_eq!(renamed.path, "renamed[2].txt");
+        assert_eq!(renamed.old_path.as_deref(), Some(path));
+        assert_eq!(renamed.hunks[0].lines.last().unwrap().new_no, Some(80));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

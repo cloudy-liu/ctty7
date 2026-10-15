@@ -49,6 +49,8 @@ fn agent_icon(path: &str) -> Option<&'static [u8]> {
         // apart reads as a bug.
         "icons/git-sync.svg" => include_bytes!("../../assets/icons/git-sync.svg"),
         "icons/git-commit.svg" => include_bytes!("../../assets/icons/git-commit.svg"),
+        "icons/diff-unfold.svg" => include_bytes!("../../assets/icons/diff-unfold.svg"),
+        "icons/diff-fold.svg" => include_bytes!("../../assets/icons/diff-fold.svg"),
         "icons/panel-left.svg" => include_bytes!("../../assets/icons/panel-left.svg"),
         "icons/panel-right.svg" => include_bytes!("../../assets/icons/panel-right.svg"),
         "icons/plus.svg" => include_bytes!("../../assets/icons/plus.svg"),
