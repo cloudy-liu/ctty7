@@ -135,12 +135,12 @@ pub(crate) struct DiffOverlayState {
     /// `None` until the first snapshot arrives: the epoch is keyed by the
     /// repository root, and only a snapshot knows where that is.
     pub(crate) epoch: Option<u64>,
-    file_view: Option<DiffFileView>,
-    geometry: Rc<RefCell<HashMap<String, DiffGeometry>>>,
-    anchor: Rc<RefCell<Option<DiffAnchor>>>,
+    pub(crate) file_view: Option<DiffFileView>,
+    pub(crate) geometry: Rc<RefCell<HashMap<String, DiffGeometry>>>,
+    pub(crate) anchor: Rc<RefCell<Option<DiffAnchor>>>,
 }
 
-struct DiffFileView {
+pub(crate) struct DiffFileView {
     path: String,
     whole: bool,
     revealed: Vec<Range<u32>>,
@@ -151,12 +151,24 @@ struct DiffFileView {
     token: Rc<()>,
 }
 
+impl DiffFileView {
+    fn update_shown(&mut self) {
+        self.shown = self.full.as_ref().map(|full| {
+            if self.whole {
+                full.clone()
+            } else {
+                Arc::new(crate::ui::diff_context::with_context(full, &self.revealed))
+            }
+        });
+    }
+}
+
 type DiffLineKey = (Option<u32>, Option<u32>);
-struct DiffGeometry {
+pub(crate) struct DiffGeometry {
     top: f32,
     rows: Arc<Vec<(DiffLineKey, f32, bool)>>,
 }
-struct DiffAnchor {
+pub(crate) struct DiffAnchor {
     path: String,
     line: DiffLineKey,
     screen_y: f32,
@@ -337,12 +349,8 @@ impl Tty7App {
         }
         o.focus = Some(path.clone());
         o.expanded.insert(path.clone(), true);
-        if let Some(full) = &view.full {
-            view.shown = Some(if view.whole {
-                full.clone()
-            } else {
-                Arc::new(crate::ui::diff_context::with_context(full, &view.revealed))
-            });
+        if view.full.is_some() {
+            view.update_shown();
             cx.notify();
             return;
         }
@@ -378,13 +386,7 @@ impl Tty7App {
                     view.loading = false;
                     view.failed = full.is_none();
                     view.full = full.clone();
-                    view.shown = full.as_ref().map(|f| {
-                        if view.whole {
-                            f.clone()
-                        } else {
-                            Arc::new(crate::ui::diff_context::with_context(f, &view.revealed))
-                        }
-                    });
+                    view.update_shown();
                 }
                 cx.notify();
             },
@@ -448,51 +450,73 @@ impl Tty7App {
         let whole = view.is_some_and(|v| v.whole && !v.failed);
         let loading = view.is_some_and(|v| v.loading);
         let path = path.to_string();
-        Button::new(SharedString::from(format!("diff-context:{path}")))
-            .small()
-            .ghost()
-            .disabled(loading)
+        div()
+            .occlude()
+            .flex_shrink_0()
             .child(
-                gpui::svg()
-                    .path(if whole {
-                        "icons/diff-fold.svg"
+                Button::new(SharedString::from(format!("diff-context:{path}")))
+                    .small()
+                    .ghost()
+                    .disabled(loading)
+                    .child(
+                        gpui::svg()
+                            .path(if whole {
+                                "icons/diff-fold.svg"
+                            } else {
+                                "icons/diff-unfold.svg"
+                            })
+                            .size(px(14.))
+                            .text_color(cx.theme().foreground),
+                    )
+                    .tooltip(t(if whole {
+                        L10nKey::DiffCollapseContext
                     } else {
-                        "icons/diff-unfold.svg"
-                    })
-                    .size(px(14.)),
+                        L10nKey::DiffExpandFile
+                    }))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.change_diff_context(path.clone(), None, cx);
+                    })),
             )
-            .tooltip(t(if whole {
-                L10nKey::DiffCollapseContext
-            } else {
-                L10nKey::DiffExpandFile
-            }))
-            .on_click(cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                this.change_diff_context(path.clone(), None, cx);
-            }))
             .into_any_element()
     }
 
     fn diff_change_button(&self, forward: bool, cx: &mut Context<Self>) -> AnyElement {
-        Button::new(if forward {
-            "diff-next-change"
-        } else {
-            "diff-previous-change"
-        })
-        .small()
-        .ghost()
-        .icon(if forward {
-            IconName::ArrowDown
-        } else {
-            IconName::ArrowUp
-        })
-        .tooltip(t(if forward {
-            L10nKey::DiffNextChange
-        } else {
-            L10nKey::DiffPreviousChange
-        }))
-        .on_click(cx.listener(move |this, _, _, cx| this.navigate_diff_change(forward, cx)))
-        .into_any_element()
+        let has_changes = self
+            .tabs
+            .get(self.active)
+            .and_then(|t| t.diff_overlay.as_ref())
+            .is_some_and(|o| {
+                matches!(&o.load, DiffLoad::Ready(s) if s.files.iter().any(|f|
+                o.focus.as_deref() == Some(f.path.as_str()) && (f.added > 0 || f.removed > 0)))
+            });
+        div()
+            .occlude()
+            .flex_shrink_0()
+            .child(
+                Button::new(if forward {
+                    "diff-next-change"
+                } else {
+                    "diff-previous-change"
+                })
+                .small()
+                .ghost()
+                .disabled(!has_changes)
+                .icon(if forward {
+                    IconName::ArrowDown
+                } else {
+                    IconName::ArrowUp
+                })
+                .tooltip(t(if forward {
+                    L10nKey::DiffNextChange
+                } else {
+                    L10nKey::DiffPreviousChange
+                }))
+                .on_click(
+                    cx.listener(move |this, _, _, cx| this.navigate_diff_change(forward, cx)),
+                ),
+            )
+            .into_any_element()
     }
 
     fn diff_more_button(
@@ -579,6 +603,7 @@ impl Tty7App {
                 return;
             }
             Some(o) => {
+                o.file_view = None;
                 o.focus = focus;
                 *o.anchor.borrow_mut() = None;
                 let handle = o.focus_handle.clone();
@@ -673,6 +698,8 @@ impl Tty7App {
             return;
         };
         overlay.loading = true;
+        overlay.file_view = None;
+        *overlay.anchor.borrow_mut() = None;
         overlay.epoch = epoch;
         self.spawn_diff_probe_for(host, cwd, source, cx);
     }
@@ -1051,9 +1078,10 @@ impl Tty7App {
                     })
                     .when_some(focused_name(overlay), |bar, name| {
                         bar.child(
-                            div().occlude().flex_shrink_0().child(
+                            div().occlude().flex_1().min_w_0().child(
                                 h_flex()
                                     .id("diff-overlay-unfocus")
+                                    .w_full().min_w_0()
                                     .items_center()
                                     .gap_1()
                                     .px_1p5()
@@ -1069,6 +1097,7 @@ impl Tty7App {
                                             .and_then(|t| t.diff_overlay.as_mut())
                                         {
                                             overlay.focus = None;
+                                            overlay.file_view = None;
                                             *overlay.anchor.borrow_mut() = None;
                                             cx.notify();
                                         }
@@ -1080,6 +1109,7 @@ impl Tty7App {
                                     )
                                     .child(
                                         div()
+                                            .min_w_0().truncate()
                                             .text_xs()
                                             .font_family(self.font_family.clone())
                                             .child(name),
@@ -1145,6 +1175,8 @@ impl Tty7App {
             .child(self.diff_view_button(cx))
             .when_some(focused_name(overlay).filter(|path| {
                 matches!(&overlay.load, DiffLoad::Ready(s) if s.files.iter().any(|f| f.path == *path && !f.binary))
+                    && !overlay.file_view.as_ref().filter(|v| v.path == *path)
+                        .and_then(|v| v.full.as_ref()).is_some_and(|f| f.binary)
             }), |bar, path| bar
                 .child(self.diff_context_button(&path, cx))
                 .child(self.diff_change_button(false, cx))
@@ -1331,8 +1363,11 @@ impl Tty7App {
             .tabs
             .get(self.active)
             .and_then(|t| t.diff_overlay.as_ref())
-            .and_then(|o| o.file_view.as_ref())
-            .is_some_and(|v| v.failed)
+            .is_some_and(|o| {
+                o.file_view
+                    .as_ref()
+                    .is_some_and(|v| v.failed && o.focus.as_deref() == Some(v.path.as_str()))
+            })
         {
             list = list.child(self.diff_message(t(L10nKey::DiffReadFailed), cx));
         }
@@ -1698,9 +1733,16 @@ impl Tty7App {
                             if let Some((_, y, _)) = anchor_row(&positions, a.line) {
                                 let delta = a.screen_y - bounds.top().as_f32() - y;
                                 if delta.abs() > 0.5 {
-                                    let mut offset = scroll.offset();
-                                    offset.y += px(delta);
-                                    scroll.set_offset(offset);
+                                    let scroll = scroll.clone();
+                                    // Prepaint has already read this frame's offset.
+                                    // Apply the correction after layout has installed
+                                    // the expanded scroll range, then request a frame.
+                                    window.on_next_frame(move |window, _| {
+                                        let mut offset = scroll.offset();
+                                        offset.y += px(delta);
+                                        scroll.set_offset(offset);
+                                        window.refresh();
+                                    });
                                     window.refresh();
                                 }
                             }
@@ -3625,20 +3667,29 @@ mod github_theme_gpui_tests {
         }
         let full = Arc::new(full);
         for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
-            let (_, mut vcx) = cx.add_window_view(|_, _| ContextDiff(app.clone()));
+            let (_, vcx) = cx.add_window_view(|_, _| ContextDiff(app.clone()));
             vcx.simulate_resize(size(px(1000.), px(600.)));
-            app.update_in(&mut vcx, |app, window, cx| {
+            app.update_in(vcx, |app, _window, cx| {
                 cx.global_mut::<Config>().diff_view = mode;
                 app.tabs = vec![crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty)];
                 app.active = 0;
-                app.open_diff_overlay(
-                    crate::ui::host_ops::HostId::LOCAL,
-                    PathBuf::from("/fixture"),
-                    DiffSource::Staged,
-                    Some("context.rs".into()),
-                    window,
-                    cx,
-                );
+                app.tabs[0].diff_overlay = Some(DiffOverlayState {
+                    host_id: crate::ui::host_ops::HostId::LOCAL,
+                    cwd: PathBuf::from("/fixture"),
+                    source: DiffSource::Staged,
+                    focus: Some("context.rs".into()),
+                    focus_handle: cx.focus_handle(),
+                    load: DiffLoad::Loading,
+                    loading: false,
+                    expanded: HashMap::new(),
+                    preview: None,
+                    preview_loading: None,
+                    scroll: gpui::ScrollHandle::new(),
+                    epoch: None,
+                    file_view: None,
+                    geometry: Rc::default(),
+                    anchor: Rc::default(),
+                });
                 let o = app.tabs[0].diff_overlay.as_mut().unwrap();
                 o.loading = false;
                 o.load = DiffLoad::Ready(Arc::new(DiffSnapshot {
@@ -3667,16 +3718,17 @@ mod github_theme_gpui_tests {
                     g.top + anchor_row(&g.rows, (None, Some(25))).unwrap().1
                 })
             };
-            let before = position(&mut vcx);
-            app.update(&mut vcx, |app, cx| {
+            let before = position(vcx);
+            app.update(vcx, |app, cx| {
                 app.change_diff_context("context.rs".into(), None, cx)
             });
             vcx.run_until_parked();
             assert!(
-                (position(&mut vcx) - before).abs() < 1.,
-                "expand moved the change in {mode:?}"
+                (position(vcx) - before).abs() < 1.,
+                "expand moved the change in {mode:?}: {before} -> {}",
+                position(vcx)
             );
-            app.update(&mut vcx, |app, cx| {
+            app.update(vcx, |app, cx| {
                 assert_eq!(cx.global::<Config>().diff_view, mode);
                 assert!(
                     app.tabs[0]
@@ -3692,18 +3744,37 @@ mod github_theme_gpui_tests {
             });
             vcx.run_until_parked();
             assert!(
-                (position(&mut vcx) - before).abs() < 1.,
+                (position(vcx) - before).abs() < 1.,
                 "collapse moved the change in {mode:?}"
             );
-            app.update(&mut vcx, |app, cx| {
+            app.update(vcx, |app, cx| {
                 app.change_diff_context("context.rs".into(), Some(2..22), cx)
             });
             vcx.run_until_parked();
-            app.update(&mut vcx, |app, _| {
+            app.update(vcx, |app, _| {
                 let o = app.tabs[0].diff_overlay.as_ref().unwrap();
                 let f = o.file_view.as_ref().unwrap().shown.as_ref().unwrap();
                 assert_eq!(f.hunks[0].lines[0].new_no, Some(2));
                 assert_eq!(o.source, DiffSource::Staged);
+            });
+            app.update_in(vcx, |app, window, cx| {
+                app.open_diff_overlay(
+                    crate::ui::host_ops::HostId::LOCAL,
+                    PathBuf::from("/fixture"),
+                    DiffSource::Staged,
+                    Some("other.rs".into()),
+                    window,
+                    cx,
+                );
+                assert!(
+                    app.tabs[0]
+                        .diff_overlay
+                        .as_ref()
+                        .unwrap()
+                        .file_view
+                        .is_none(),
+                    "switching files must invalidate a pending context reply"
+                );
             });
         }
     }

@@ -281,7 +281,7 @@ pub fn probe_full_file(
         host,
         root,
         &DiffRequest {
-            source,
+            source: source.clone(),
             paths: &paths,
             context: FULL_FILE_CONTEXT,
             budget: DiffBudget {
@@ -294,7 +294,54 @@ pub fn probe_full_file(
     if snapshot.read_failed {
         return None;
     }
-    snapshot.files.into_iter().find(|f| f.path == file.path)
+    let mut full = snapshot.files.into_iter().find(|f| f.path == file.path)?;
+    if full.hunks.is_empty()
+        && !full.binary
+        && !matches!(full.status, FileStatus::Added | FileStatus::Deleted)
+    {
+        // A pure rename or mode change has identical blob text but Git emits
+        // no hunk, regardless of -U. The unchanged left blob also supplies the
+        // right text for working comparisons, including symlinks and filters.
+        let old = file.old_path.as_deref().unwrap_or(&file.path);
+        let object = match source {
+            DiffSource::Worktree => format!(":{old}"),
+            DiffSource::Head => format!("HEAD:{old}"),
+            DiffSource::Staged => format!(":{}", file.path),
+            DiffSource::Commit { rev, .. } => format!("{rev}:{}", file.path),
+            DiffSource::Range { head, .. } => format!("{head}:{}", file.path),
+        };
+        let mut lines = Vec::new();
+        let mut count = 0u32;
+        let mut scanned = 0;
+        let result = host.git_lines(root, &["show", "--no-textconv", &object], &mut |text| {
+            if scanned < 8000 {
+                let sample = text.len().min(8000 - scanned);
+                full.binary |= text.as_bytes()[..sample].contains(&0);
+                scanned += sample;
+            }
+            count = count.saturating_add(1);
+            if lines.len() < DiffBudget::SINGLE_FILE.max_lines_per_file {
+                lines.push(DiffLine {
+                    kind: LineKind::Context,
+                    old_no: Some(count),
+                    new_no: Some(count),
+                    text: text.to_string(),
+                });
+            } else {
+                full.truncated = Some(Truncation::PerFile);
+            }
+        });
+        if !matches!(result, Ok(Some(0))) {
+            return None;
+        }
+        if !full.binary && !lines.is_empty() {
+            full.hunks.push(Hunk {
+                header: format!("@@ -1,{count} +1,{count} @@"),
+                lines,
+            });
+        }
+    }
+    Some(full)
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -1866,6 +1913,62 @@ index 1..2 100644
         assert_eq!(renamed.path, "renamed[2].txt");
         assert_eq!(renamed.old_path.as_deref(), Some(path));
         assert_eq!(renamed.hunks[0].lines.last().unwrap().new_no, Some(80));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn full_file_reads_pure_rename_and_mode_changes_from_the_compared_blob() {
+        let dir = merge_repo("metadata-context").expect("git fixture");
+        let host = crate::host::local::LocalHost::new();
+        let original = "unchanged blob\nsecond line\n";
+        std::fs::write(dir.join("old.txt"), original).unwrap();
+        git::git_output(&dir, &["add", "old.txt"]).unwrap();
+        git::git_output(&dir, &["commit", "-qm", "before rename"]).unwrap();
+        let base = rev(&dir, "HEAD");
+        git::git_output(&dir, &["mv", "old.txt", "new.txt"]).unwrap();
+        std::fs::write(dir.join("new.txt"), "unrelated worktree bytes\n").unwrap();
+        let read = |source: DiffSource| {
+            let snap = probe_diff(
+                &*host,
+                &dir,
+                &DiffRequest {
+                    source: source.clone(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let file = &snap.files[0];
+            assert!(
+                file.hunks.is_empty(),
+                "metadata-only fixture must have no patch body"
+            );
+            let full = probe_full_file(&*host, &dir, source, file).unwrap();
+            assert_eq!(
+                full.hunks[0]
+                    .lines
+                    .iter()
+                    .map(|l| l.text.as_str())
+                    .collect::<Vec<_>>(),
+                ["unchanged blob", "second line"]
+            );
+            assert!(
+                full.hunks[0]
+                    .lines
+                    .iter()
+                    .all(|l| l.kind == LineKind::Context)
+            );
+        };
+        read(DiffSource::Staged);
+        git::git_output(&dir, &["commit", "-qm", "pure rename"]).unwrap();
+        read(DiffSource::commit("HEAD"));
+        read(DiffSource::Range {
+            base,
+            head: "HEAD".into(),
+        });
+        std::fs::write(dir.join("new.txt"), original).unwrap();
+        git::git_output(&dir, &["update-index", "--chmod=+x", "new.txt"]).unwrap();
+        std::fs::write(dir.join("new.txt"), "unrelated worktree bytes\n").unwrap();
+        read(DiffSource::Staged);
         let _ = std::fs::remove_dir_all(dir);
     }
 
