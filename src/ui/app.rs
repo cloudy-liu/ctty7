@@ -503,21 +503,10 @@ fn badge_for_focused_pane(
         .unwrap_or_default()
 }
 
-pub(crate) fn title_or_ssh_target<'a>(
-    title: &'a str,
-    remote: Option<&'a RemoteContext>,
-) -> &'a str {
-    if title.trim().is_empty()
-        && let Some(remote) = remote
-        && matches!(
-            remote.kind,
-            crate::daemon::protocol::RemoteKind::Ssh
-                | crate::daemon::protocol::RemoteKind::NativeSsh
-        )
-    {
-        return &remote.target;
-    }
-    title
+pub(crate) struct TabTitle {
+    pub(crate) label: String,
+    pub(crate) context: Option<String>,
+    pub(crate) ssh_target: Option<String>,
 }
 
 impl Tab {
@@ -637,6 +626,85 @@ impl Tab {
         };
         let leaf = leaf.read(cx);
         (leaf.title.clone(), leaf.display_home(cx))
+    }
+
+    /// Full display text shared by the sidebar, strip, and local switcher.
+    /// Only remote-reported paths may name an SSH tab; the local ssh process's
+    /// cwd belongs to a different machine.
+    pub(crate) fn title_details(&self, window: Option<&Window>, cx: &App) -> TabTitle {
+        use crate::ui::tab_strip::{abbreviate_home, strip_host_prefix};
+        use tty7_core::core::tab_view::{shell_title_path, ssh_tab_title};
+
+        let name = self
+            .name
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty());
+        let Some(leaf) = self.title_leaf(window, cx) else {
+            return TabTitle {
+                label: name.unwrap_or_default().into(),
+                context: None,
+                ssh_target: None,
+            };
+        };
+        let leaf = leaf.read(cx);
+        let raw = leaf.title.trim();
+        let home = leaf.display_home(cx);
+        let remote = leaf.remote_context();
+        let target = match remote.as_ref() {
+            Some(remote) => crate::ui::tab_strip::has_ssh_badge(Some(remote.kind))
+                .then(|| remote.display_target()),
+            None => leaf.workspace().filter(|ws| ws.target.is_ssh()).map(|ws| {
+                ws.spec
+                    .as_ref()
+                    .and_then(|spec| spec.display_name.clone())
+                    .unwrap_or_else(|| {
+                        crate::ui::remote_connect::route_label(
+                            cx,
+                            &crate::core::session::RemoteRef::new(ws.target.clone(), ws.workspace),
+                        )
+                    })
+            }),
+        };
+        let Some(target) = target else {
+            return TabTitle {
+                label: name.map(str::to_owned).unwrap_or_else(|| {
+                    abbreviate_home(strip_host_prefix(raw), home.as_deref()).into_owned()
+                }),
+                context: None,
+                ssh_target: None,
+            };
+        };
+        let path = shell_title_path(raw)
+            .map(|p| abbreviate_home(p, home.as_deref()).into_owned())
+            .or_else(|| {
+                remote
+                    .is_none()
+                    .then(|| leaf.effective_cwd())
+                    .flatten()
+                    .map(|p| abbreviate_home(&p.to_string_lossy(), home.as_deref()).into_owned())
+            });
+        let automatic = ssh_tab_title(raw, &target);
+        let shell_path = shell_title_path(raw).is_some() || automatic == target;
+        let automatic = if shell_path {
+            ssh_tab_title(path.as_deref().unwrap_or(raw), &target)
+        } else {
+            automatic
+        };
+        let label = name.map(str::to_owned).unwrap_or(automatic);
+        let context = if name.is_none() && shell_path {
+            path
+        } else {
+            Some(match path {
+                Some(path) => format!("{target} · {path}"),
+                None => target.clone(),
+            })
+        };
+        TabTitle {
+            label,
+            context,
+            ssh_target: Some(target),
+        }
     }
 
     pub(crate) fn git_status(
@@ -8633,7 +8701,7 @@ pub(crate) fn parse_ssh_connect_input(input: &str) -> Result<ParsedSshConnect, S
     let qc = parse_quick_connect(&target)
         .ok_or_else(|| t_fmt(L10nKey::AppSshParseBadHost, &[("host", &target)]))?;
 
-    let mut profile = SshProfile::new(qc.host.clone());
+    let mut profile = SshProfile::new("");
     profile.host = qc.host;
     profile.port = port.or(qc.port).unwrap_or(22);
     if let Some(user) = user.or(qc.user) {
@@ -8909,42 +8977,9 @@ mod tests {
         TabAgentSession, badge_for_focused_pane, clear_window_override_values, close_prompt,
         document_column_px, join_shell_args, leaf_shares_the_window_daemon, most_urgent_agent_row,
         mru_order, pane_free_for, parse_ssh_connect_input, parse_ssh_option_words, side_panel_max,
-        split_shell_args, strip_band, title_or_ssh_target, wd_path_saveable,
+        split_shell_args, strip_band, wd_path_saveable,
     };
     use gpui::{Edges, point, px, size};
-
-    #[test]
-    fn ssh_connection_names_only_fill_an_empty_title() {
-        use crate::daemon::protocol::{RemoteContext, RemoteKind};
-
-        for kind in [RemoteKind::Ssh, RemoteKind::NativeSsh] {
-            let remote = RemoteContext {
-                kind,
-                argv: vec!["ssh".into(), "prod-web".into()],
-                target: "prod-web".into(),
-            };
-            assert_eq!(title_or_ssh_target("", Some(&remote)), "prod-web");
-            assert_eq!(title_or_ssh_target("  ", Some(&remote)), "prod-web");
-            assert_eq!(
-                title_or_ssh_target("Fix login", Some(&remote)),
-                "Fix login",
-                "a terminal title keeps the original title slot"
-            );
-        }
-        let wsl = RemoteContext {
-            kind: RemoteKind::Wsl,
-            argv: vec!["wsl".into()],
-            target: "Ubuntu".into(),
-        };
-        assert_eq!(title_or_ssh_target("", Some(&wsl)), "");
-        assert_eq!(title_or_ssh_target("", None), "");
-        let ipv6 = RemoteContext {
-            kind: RemoteKind::Ssh,
-            argv: vec!["ssh".into(), "deploy@2001:db8::1".into()],
-            target: "deploy@2001:db8::1".into(),
-        };
-        assert_eq!(title_or_ssh_target("", Some(&ipv6)), "deploy@2001:db8::1");
-    }
 
     #[test]
     fn the_agent_icon_and_status_come_from_the_same_most_urgent_pane() {
@@ -9933,6 +9968,28 @@ mod ssh_tab_gpui_tests {
                 TabAvatar::Agent(CLIAgent::Codex),
                 "the SSH corner badge must keep the detected Agent as the main icon"
             );
+            remote.update(cx, |view, _| view.title = "deploy@server:~".into());
+            assert_eq!(
+                app.tabs[0].title_details(None, cx).context.as_deref(),
+                Some("~")
+            );
+            assert_eq!(
+                app.tab_label(&app.tabs[0], 0, None, cx),
+                "deploy@2001:db8::1"
+            );
+            remote.update(cx, |view, _| {
+                view.title = "deploy@server:~/projects/api".into()
+            });
+            assert_eq!(
+                app.tab_label(&app.tabs[0], 0, None, cx),
+                "deploy@2001:db8::1 · api"
+            );
+            remote.update(cx, |view, _| view.title = "Fix login".into());
+            assert_eq!(app.tab_label(&app.tabs[0], 0, None, cx), "Fix login");
+            assert_eq!(
+                app.tabs[0].title_details(None, cx).context.as_deref(),
+                Some("deploy@2001:db8::1")
+            );
             remote.update(cx, |view, _| view.title.clear());
             assert_eq!(
                 app.tab_label(&app.tabs[0], 0, None, cx),
@@ -9944,7 +10001,18 @@ mod ssh_tab_gpui_tests {
             );
             app.tabs[0].name = Some("My deployment".into());
             assert_eq!(app.tab_label(&app.tabs[0], 0, None, cx), "My deployment");
-            assert!(app.tab_title_tooltip(&app.tabs[0], 0, None, cx).is_none());
+            app.tabs[0].name = None;
+            remote.update(cx, |view, _| view.title = "~/projects/api".into());
+            assert_eq!(
+                app.tab_label(&app.tabs[0], 0, None, cx),
+                "deploy@2001:db8::1 · api"
+            );
+            app.tabs[0].name = Some("My deployment".into());
+            assert!(
+                app.tab_title_tooltip(&app.tabs[0], 0, None, cx)
+                    .unwrap()
+                    .contains("deploy@2001:db8::1")
+            );
             // An inactive split must use its remembered leaf, rather than
             // borrowing the first pane's connection or agent.
             app.tabs[0].last_focused = Some(local.entity_id());
@@ -9977,6 +10045,91 @@ mod ssh_tab_gpui_tests {
             assert!(!crate::ui::tab_strip::has_ssh_badge(kind));
             assert_eq!(TabAvatar::choose(agent, None), TabAvatar::Terminal);
             assert_eq!(app.tab_label(tab, 0, Some(window), cx), "My deployment");
+            app.tabs[0].name = None;
+            remote.update(cx, |view, _| {
+                view.title = "dev@local:~/local-project".into()
+            });
+            assert_eq!(
+                app.tab_label(&app.tabs[0], 0, Some(window), cx),
+                "~/local-project"
+            );
+            assert!(
+                app.tabs[0]
+                    .title_details(Some(window), cx)
+                    .context
+                    .is_none()
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn remote_workspace_titles_keep_the_machine_and_wsl_keeps_local_naming(
+        cx: &mut TestAppContext,
+    ) {
+        use crate::core::session::RemoteTarget;
+        use crate::terminal::PaneWorkspace;
+
+        let (app, mut vcx) = test_window::harness(cx);
+        let (view, mut stream) = app.update_in(&mut vcx, |app, window, cx| {
+            let (view, stream) = crate::terminal::view::quiet_test_pane(1, window, cx);
+            view.update(cx, |view, _| {
+                view.set_workspace(Some(PaneWorkspace {
+                    workspace: WorkspaceId::new(),
+                    target: RemoteTarget::Alias {
+                        alias: "prod-web".into(),
+                    },
+                    spec: None,
+                    label: None,
+                    resize_echo: false,
+                }));
+                view.title = "dev@server:~/projects/api".into();
+            });
+            app.tabs
+                .push(Tab::new(Pane::leaf(PaneSlot::Ready(view.clone()))));
+            let details = app.tabs[0].title_details(None, cx);
+            assert_eq!(details.label, "prod-web · api");
+            assert_eq!(details.context.as_deref(), Some("~/projects/api"));
+            app.tabs[0].name = Some("Production logs".into());
+            let details = app.tabs[0].title_details(None, cx);
+            assert_eq!(details.label, "Production logs");
+            assert_eq!(
+                details.context.as_deref(),
+                Some("prod-web · ~/projects/api")
+            );
+            app.tabs[0].name = None;
+            view.update(cx, |view, _| {
+                let mut workspace = view.workspace().unwrap().clone();
+                workspace.target = RemoteTarget::Wsl {
+                    distro: "Ubuntu".into(),
+                };
+                view.set_workspace(Some(workspace));
+            });
+            let details = app.tabs[0].title_details(None, cx);
+            assert_eq!(details.label, "~/projects/api");
+            assert!(details.ssh_target.is_none());
+            (view, stream)
+        });
+        view.update(&mut vcx, |view, _| {
+            let mut workspace = view.workspace().unwrap().clone();
+            workspace.target = RemoteTarget::Alias {
+                alias: "prod-web".into(),
+            };
+            view.set_workspace(Some(workspace));
+            view.title = "bash".into();
+        });
+        DaemonMsg::Cwd(std::path::PathBuf::from("/srv/api"))
+            .encode(&mut stream)
+            .unwrap();
+        for _ in 0..200 {
+            if view.read_with(&vcx, |view, _| view.cwd().is_some()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        app.update(&mut vcx, |app, cx| {
+            let title = app.tabs[0].title_details(None, cx);
+            assert_eq!(title.label, "prod-web · api");
+            assert_eq!(title.context.as_deref(), Some("/srv/api"));
         });
     }
 }

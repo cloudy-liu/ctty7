@@ -18,9 +18,7 @@ use crate::core::actions::{
 use crate::core::config::RightPanelTab;
 use crate::core::shells::DetectedShell;
 use crate::daemon::protocol::{RemoteKind, ShellSpec};
-use crate::ui::app::{
-    SpawnWhere, TILE_GLYPH, TILE_SIZE, Tab, Tty7App, tile_trailing_inset, title_or_ssh_target,
-};
+use crate::ui::app::{SpawnWhere, TILE_GLYPH, TILE_SIZE, Tab, Tty7App, tile_trailing_inset};
 use crate::ui::hints::tab_badge_label;
 use crate::ui::i18n::{L10nKey, t, t_fmt};
 use crate::ui::reorder::{self, Reorder, Surface};
@@ -1349,15 +1347,28 @@ impl Tty7App {
         window: Option<&Window>,
         cx: &App,
     ) -> Option<SharedString> {
+        let details = tab.title_details(window, cx);
+        if let Some(target) = details.ssh_target {
+            let raw = tab.leaf_title(window, cx);
+            let full = match details.context {
+                Some(context) if context != target => format!("{target}\n{context}"),
+                _ => target,
+            };
+            return Some(SharedString::from(
+                if raw.trim().is_empty() || full.contains(raw.trim()) {
+                    full
+                } else {
+                    format!("{full}\n{}", raw.trim())
+                },
+            ));
+        }
         if tab.name.as_ref().is_some_and(|n| !n.trim().is_empty()) {
             return None;
         }
         let (raw, home) = tab.leaf_title_and_home(window, cx);
         let raw = raw.trim();
         if raw.is_empty() {
-            let remote = tab.remote_context(window, cx);
-            let target = title_or_ssh_target(raw, remote.as_ref()).trim();
-            return (!target.is_empty()).then(|| SharedString::from(target.to_owned()));
+            return None;
         }
         if raw == self.tab_label(tab, index, window, cx) {
             return None;
@@ -1380,14 +1391,11 @@ impl Tty7App {
                 return trimmed.to_string();
             }
         }
-        let (raw, home) = tab.leaf_title_and_home(window, cx);
-        let label = if raw.trim().is_empty() {
-            // A connection target is a literal name. It may contain IPv6
-            // colons, which are not a shell title's user@host:path prefix.
-            title_or_ssh_target(&raw, tab.remote_context(window, cx).as_ref())
-                .trim()
-                .to_owned()
+        let details = tab.title_details(window, cx);
+        let label = if details.ssh_target.is_some() {
+            details.label
         } else {
+            let (raw, home) = tab.leaf_title_and_home(window, cx);
             short_title(&raw, home.as_deref())
         };
         if label.trim().is_empty() {
@@ -1738,7 +1746,7 @@ impl Tty7App {
             let agent_badge = tab.focused_agent_badge(Some(window), cx);
             let agent = agent_badge.agent;
             let avatar = TabAvatar::choose(agent, tab.foreground_app(Some(window), cx));
-            let ssh = has_ssh_badge(tab.remote_context(Some(window), cx).map(|r| r.kind));
+            let ssh = tab.title_details(Some(window), cx).ssh_target.is_some();
             let agent_indicator = agent_badge.indicator();
 
             let rename_input = self

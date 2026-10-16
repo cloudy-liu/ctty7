@@ -75,6 +75,15 @@ Almost no tab has a name of its own, so the sidebar falls back:
 2. the title the shell is reporting — the running command, usually
 3. **Shell 3**, numbered by position, when there is no title at all
 
+SSH shell tabs show the connection name at home, such as **prod-web**, and add
+the directory elsewhere, such as **prod-web · api**. The full path appears on
+the second line. Task titles and manual names keep their wording, with the
+connection shown below them. Clearing a manual name restores automatic naming.
+Saved profile names and SSH aliases take priority over addresses. Ad-hoc
+addresses retain the user and any non-default port. Unknown remote paths show
+the connection name; a local SSH client's directory is never used as the
+remote location.
+
 `tty7 tab ls` answers the same question with more evidence, because a script has
 no screen to look at. Its `label` falls back through the name, then the coding
 agent running in the tab ("Claude Code"), then the last segment of the working

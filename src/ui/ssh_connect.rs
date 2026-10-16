@@ -91,7 +91,7 @@ impl Tty7App {
             return;
         }
         let port = qc.port_or_default();
-        let mut profile = SshProfile::new(qc.host.clone());
+        let mut profile = SshProfile::new("");
         profile.host = qc.host;
         profile.port = port;
         if let Some(user) = qc.user {
@@ -561,7 +561,11 @@ pub(crate) fn native_spec_from_transient_profile(
     let mut spec = build_native_ssh_spec(profile, &[], store, global_verify_host_keys);
     if let Some(raw) = proxy_jump {
         let mut visited = HashSet::new();
-        visited.insert(profile.name.clone());
+        visited.insert(if profile.name.is_empty() {
+            profile.host.clone()
+        } else {
+            profile.name.clone()
+        });
         spec.jump = resolve_jump_chain(
             &raw,
             store,
@@ -904,6 +908,19 @@ mod tests {
         let jump = spec.jump.expect("first hop resolves");
         assert_eq!(jump.host, "bastion.example.com");
         assert!(jump.jump.is_none(), "cycle back to prod is cut");
+        let nameless = profile("", "prod", "deploy");
+        assert!(
+            native_spec_from_transient_profile(
+                &nameless,
+                Some("prod".into()),
+                &store,
+                true,
+                &|_| None,
+            )
+            .jump
+            .is_none(),
+            "an automatic address label must retain the original cycle guard"
+        );
     }
 
     #[test]

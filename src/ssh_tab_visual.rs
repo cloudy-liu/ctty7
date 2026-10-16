@@ -29,6 +29,8 @@ struct Options {
     hold_seconds: Option<u64>,
     #[serde(default)]
     agent_replay: bool,
+    #[serde(default)]
+    auto_names: bool,
 }
 
 struct Fixture {
@@ -85,6 +87,15 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             let mut replay_stream = None;
             let cases = if options.agent_replay {
                 vec![("AGY screen replay", Some(CLIAgent::Antigravity), None)]
+            } else if options.auto_names {
+                vec![
+                    ("Local terminal", None, None),
+                    ("deploy@prod-web:~", None, Some(RemoteKind::NativeSsh)),
+                    ("deploy@prod-web:~/projects/api", None, Some(RemoteKind::NativeSsh)),
+                    ("dev@dev-box:~/projects/api", None, Some(RemoteKind::Ssh)),
+                    ("Fix login", Some(CLIAgent::Codex), Some(RemoteKind::Ssh)),
+                    ("deploy@prod-web:/var/log/nginx", None, Some(RemoteKind::NativeSsh)),
+                ]
             } else {
                 CASES.to_vec()
             };
@@ -123,7 +134,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                                     DaemonMsg::RemoteContext(Some(RemoteContext {
                                         kind: *kind,
                                         argv: vec!["ssh".into(), "dev-box".into()],
-                                        target: if index == 3 { "prod-web" } else { "dev-box" }
+                                        target: if (options.auto_names && matches!(index, 1 | 2 | 5)) || (!options.auto_names && index == 3) { "prod-web" } else { "dev-box" }
                                             .into(),
                                     }))
                                     .encode(&mut stream)
@@ -151,7 +162,11 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                                      \x1b[36mdev@dev-box\x1b[0m:/srv/api $ codex\r\n"
                                 ) };
                                 DaemonMsg::Output(output.into_bytes()).encode(&mut stream).unwrap();
-                                app.tabs.push(Tab::new(Pane::leaf(PaneSlot::Ready(view.clone()))));
+                                let mut tab = Tab::new(Pane::leaf(PaneSlot::Ready(view.clone())));
+                                if options.auto_names && index == 5 {
+                                    tab.name = Some("Production logs".into());
+                                }
+                                app.tabs.push(tab);
                                 views.push(view);
                                 streams.push(stream);
                             }

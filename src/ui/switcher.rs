@@ -916,21 +916,27 @@ impl Tty7App {
                     let tab = &self.tabs[i];
                     let agent_row = tab.agent_row(cx);
                     let focused = tab.focused_agent_badge(None, cx);
+                    let title = tab.title_details(None, cx);
                     TabRow {
                         id: tab.tree_id.get(),
                         index: i,
                         label: self.tab_label(tab, i, None, cx),
                         named: tab.name.as_deref().is_some_and(|n| !n.trim().is_empty())
                             || agent_row.is_some(),
-                        path: tab
-                            .pane
-                            .terminals()
-                            .first()
-                            .and_then(|leaf| {
-                                let leaf = leaf.read(cx);
-                                Some((leaf.cwd()?, leaf.display_home(cx)))
+                        path: title
+                            .context
+                            .or_else(|| {
+                                tab.pane
+                                    .terminals()
+                                    .first()
+                                    .and_then(|leaf| {
+                                        let leaf = leaf.read(cx);
+                                        Some((leaf.cwd()?, leaf.display_home(cx)))
+                                    })
+                                    .map(|(p, home)| {
+                                        crate::ui::home::display_path(&p, home.as_deref())
+                                    })
                             })
-                            .map(|(p, home)| crate::ui::home::display_path(&p, home.as_deref()))
                             .unwrap_or_default(),
                         avatar: TabAvatar::choose(focused.agent, tab.foreground_app(None, cx)),
                         indicator: focused.indicator(),
@@ -959,11 +965,16 @@ impl Tty7App {
         // These rows describe a workspace on `host`, and the cwds they carry
         // are that machine's. Only its home may shorten them (#580).
         let home = host.and_then(|host| crate::ui::path_display::home_for_host(cx, host));
+        let workspace_target = WorkspaceStore::all(cx)
+            .get(id)
+            .and_then(|w| w.host.as_ref())
+            .filter(|r| r.target.is_ssh())
+            .map(|r| remote_connect::route_label(cx, r));
         views
             .into_iter()
             .enumerate()
             .map(|(i, v)| TabRow {
-                label: tab_view_label(&v, i, home.as_deref()),
+                label: tab_view_label(&v, i, home.as_deref(), workspace_target.as_deref()),
                 // The label only stands in for the path when it came *from* the
                 // path; a name or an agent leaves the location still worth
                 // printing.
@@ -2969,6 +2980,7 @@ fn tab_view_label(
     view: &crate::ui::machine_mirror::TabView,
     index: usize,
     home: Option<&std::path::Path>,
+    workspace_target: Option<&str>,
 ) -> String {
     let unnamed = || {
         t_fmt(
@@ -2985,6 +2997,21 @@ fn tab_view_label(
             title => title.to_string(),
         },
     };
+    if !matches!(view.label(), crate::ui::machine_mirror::TabLabel::Named(_))
+        && let Some(target) = view.ssh_target.as_deref().or(workspace_target)
+    {
+        let raw = view
+            .osc_title
+            .as_deref()
+            .filter(|s| !s.trim().is_empty())
+            .or(view.cwd.as_deref())
+            .unwrap_or_default();
+        let path = tty7_core::core::tab_view::shell_title_path(raw);
+        let raw = path
+            .map(|p| crate::ui::tab_strip::abbreviate_home(p, home).into_owned())
+            .unwrap_or_else(|| raw.to_owned());
+        return tty7_core::core::tab_view::ssh_tab_title(&raw, target);
+    }
     match view.label() {
         crate::ui::machine_mirror::TabLabel::Named(name) => name.to_string(),
         // Through `short_title` because the local strip puts its own titles
@@ -3631,6 +3658,7 @@ mod tests {
             title: "zsh".to_string(),
             osc_title: Some("✳ 修复 workspace switcher".to_string()),
             cwd: Some("/Users/x/repo/tty7".to_string()),
+            ssh_target: None,
             agent: Some(crate::core::cli_agent::CLIAgent::Claude),
             status: None,
             focused_agent: None,
@@ -3639,52 +3667,72 @@ mod tests {
             live: true,
             panes: 1,
         };
-        assert_eq!(tab_view_label(&view, 0, None), "build", "a given name wins");
+        assert_eq!(
+            tab_view_label(&view, 0, None, None),
+            "build",
+            "a given name wins"
+        );
 
         view.name = None;
         assert_eq!(
-            tab_view_label(&view, 0, None),
+            tab_view_label(&view, 0, None, None),
             "✳ 修复 workspace switcher",
             "then the title the local strip would be showing, verbatim"
         );
 
         view.osc_title = Some("user@host:~/repo/025/tty7".to_string());
         assert_eq!(
-            tab_view_label(&view, 0, None),
+            tab_view_label(&view, 0, None, None),
             crate::ui::tab_strip::short_title("user@host:~/repo/025/tty7", None),
             "a shell's title goes through the shortener the strip uses"
         );
 
         view.osc_title = Some("user@host:".to_string());
         assert_eq!(
-            tab_view_label(&view, 0, None),
+            tab_view_label(&view, 0, None, None),
             "zsh",
             "a title that shortens away to nothing falls through"
         );
 
         view.osc_title = None;
         assert_eq!(
-            tab_view_label(&view, 0, None),
+            tab_view_label(&view, 0, None, None),
             "Claude Code",
             "an agent names a tab that has told us nothing else"
         );
 
         view.agent = None;
         assert_eq!(
-            tab_view_label(&view, 0, None),
+            tab_view_label(&view, 0, None, None),
             crate::ui::tab_strip::short_title("/Users/x/repo/tty7", None),
             "otherwise the directory, put through the same shortener as the strip"
         );
 
         view.cwd = None;
         assert_eq!(
-            tab_view_label(&view, 0, None),
+            tab_view_label(&view, 0, None, None),
             "zsh",
             "process name is last"
         );
 
         view.title = String::new();
-        assert!(tab_view_label(&view, 2, None).contains('3'));
+        assert!(tab_view_label(&view, 2, None, None).contains('3'));
+
+        view.osc_title = Some("dev@server:~".into());
+        view.ssh_target = Some("prod-web".into());
+        assert_eq!(tab_view_label(&view, 0, None, None), "prod-web");
+        view.osc_title = Some("dev@server:~/projects/api".into());
+        assert_eq!(tab_view_label(&view, 0, None, None), "prod-web · api");
+        view.ssh_target = None;
+        assert_eq!(
+            tab_view_label(&view, 0, None, Some("dev-box")),
+            "dev-box · api"
+        );
+        view.name = Some("Production logs".into());
+        assert_eq!(
+            tab_view_label(&view, 0, None, Some("dev-box")),
+            "Production logs"
+        );
     }
 }
 

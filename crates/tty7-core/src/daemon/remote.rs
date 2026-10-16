@@ -8,6 +8,78 @@ pub(crate) struct SshInvocation {
     pub forward_args: Vec<String>,
 }
 
+impl RemoteContext {
+    /// Display identity only. Keep the destination/argv unchanged for routing,
+    /// while retaining explicit login and port options in a tab's name.
+    pub fn display_target(&self) -> String {
+        if self.kind != RemoteKind::Ssh {
+            return self.target.clone();
+        }
+        let Some(invocation) = parse_ssh_invocation(&self.argv) else {
+            return self.target.clone();
+        };
+        let Some(mut address) = crate::core::ssh_profile::parse_quick_connect(&self.target) else {
+            return self.target.clone();
+        };
+        let mut explicit_user = None;
+        let mut explicit_port = None;
+        let mut args = invocation.forward_args.iter();
+        while let Some(arg) = args.next() {
+            let Some(flag) = arg.as_bytes().get(1).copied().map(char::from) else {
+                continue;
+            };
+            if !option_takes_value(flag) {
+                continue;
+            }
+            let value = arg
+                .get(2..)
+                .filter(|s| !s.is_empty())
+                .or_else(|| args.next().map(String::as_str))
+                .unwrap_or_default();
+            match flag {
+                'l' if explicit_user.is_none() => explicit_user = Some(value.to_owned()),
+                'p' if explicit_port.is_none() => {
+                    explicit_port = value.parse::<u16>().ok().filter(|p| *p != 0)
+                }
+                'o' => {
+                    if let Some((key, value)) = value
+                        .split_once('=')
+                        .or_else(|| value.split_once(char::is_whitespace))
+                    {
+                        match key.to_ascii_lowercase().as_str() {
+                            "user" if explicit_user.is_none() => {
+                                explicit_user = Some(value.trim().to_owned())
+                            }
+                            "port" if explicit_port.is_none() => {
+                                explicit_port = value.trim().parse::<u16>().ok().filter(|p| *p != 0)
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+        if explicit_user.is_none() && explicit_port.is_none() {
+            return self.target.clone();
+        }
+        address.user = explicit_user.or(address.user);
+        address.port = explicit_port.or(address.port);
+        let port = address.port_or_default();
+        let host = if address.host.contains(':') {
+            format!("[{}]", address.host)
+        } else {
+            address.host
+        };
+        crate::core::session::RemoteTarget::Direct {
+            user: address.user.unwrap_or_default(),
+            host,
+            port,
+        }
+        .to_string()
+    }
+}
+
 /// Whether `program` is the OpenSSH client — `ssh`, `ssh.exe`, or a path
 /// whose stem is `ssh`. `ssh-agent` / `sshd` / `scp` stay out.
 pub(crate) fn is_ssh_program(program: &str) -> bool {
@@ -236,6 +308,48 @@ mod tests {
         let inv = parse_ssh_invocation(&argv(&["ssh", "user@dev"])).unwrap();
         assert_eq!(inv.context.target, "user@dev");
         assert_eq!(inv.forward_args, Vec::<String>::new());
+    }
+
+    #[test]
+    fn display_identity_keeps_login_port_alias_and_ipv6_without_changing_routing() {
+        for (parts, expected) in [
+            (
+                vec!["ssh", "-p", "2222", "-l", "deploy", "10.0.0.5"],
+                "deploy@10.0.0.5:2222",
+            ),
+            (
+                vec!["ssh", "-p2222", "-ldeploy", "prod-web"],
+                "deploy@prod-web:2222",
+            ),
+            (
+                vec!["ssh", "-o", "Port=2222", "-oUser=deploy", "prod-web"],
+                "deploy@prod-web:2222",
+            ),
+            (vec!["ssh", "prod-web"], "prod-web"),
+            (vec!["ssh", "deploy@2001:db8::1"], "deploy@2001:db8::1"),
+            (vec!["ssh", "-p2222", "-p2200", "prod-web"], "prod-web:2222"),
+            (
+                vec!["ssh", "-oPort=2222", "-p2200", "prod-web"],
+                "prod-web:2222",
+            ),
+            (
+                vec!["ssh", "-oUser=deploy", "other@prod-web"],
+                "deploy@prod-web",
+            ),
+            (
+                vec!["ssh", "-p", "22", "deploy@prod-web"],
+                "deploy@prod-web",
+            ),
+            (
+                vec!["ssh", "-p", "2222", "deploy@[2001:db8::1]"],
+                "deploy@[2001:db8::1]:2222",
+            ),
+        ] {
+            let invocation = parse_ssh_invocation(&argv(&parts)).unwrap();
+            let original = invocation.context.target.clone();
+            assert_eq!(invocation.context.display_target(), expected);
+            assert_eq!(invocation.context.target, original);
+        }
     }
 
     #[test]

@@ -280,7 +280,7 @@ pub fn spec_for(target: &RemoteTarget, cx: &App) -> Result<NativeSshSpec, String
             ))
         }
         RemoteTarget::Direct { user, host, port } => {
-            let mut profile = crate::core::ssh_profile::SshProfile::new(host.clone());
+            let mut profile = crate::core::ssh_profile::SshProfile::new("");
             profile.host = host.clone();
             profile.user = user.clone();
             profile.port = *port;
