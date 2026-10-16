@@ -165,7 +165,7 @@ impl DiffFileView {
 
 type DiffLineKey = (Option<u32>, Option<u32>);
 pub(crate) struct DiffGeometry {
-    top: f32,
+    content_top: f32,
     rows: Arc<Vec<(DiffLineKey, f32, bool)>>,
 }
 pub(crate) struct DiffAnchor {
@@ -202,11 +202,12 @@ impl DiffOverlayState {
             return;
         };
         let top = self.scroll.bounds().top().as_f32();
-        if let Some((line, y, _)) = g.rows.iter().find(|(_, y, _)| g.top + y >= top) {
+        let screen_top = g.content_top + self.scroll.offset().y.as_f32();
+        if let Some((line, y, _)) = g.rows.iter().find(|(_, y, _)| screen_top + y >= top) {
             *self.anchor.borrow_mut() = Some(DiffAnchor {
                 path: path.to_string(),
                 line: *line,
-                screen_y: g.top + y,
+                screen_y: screen_top + y,
             });
         }
     }
@@ -417,7 +418,7 @@ impl Tty7App {
             .filter_map(|(_, y, changed)| {
                 let start = *changed && !previous_changed;
                 previous_changed = *changed;
-                start.then_some(g.top + y)
+                start.then_some(g.content_top + o.scroll.offset().y.as_f32() + y)
             })
             .collect();
         let target = if forward {
@@ -1724,7 +1725,7 @@ impl Tty7App {
                         geometry.borrow_mut().insert(
                             geometry_path.clone(),
                             DiffGeometry {
-                                top: bounds.top().as_f32(),
+                                content_top: bounds.top().as_f32() - scroll.offset().y.as_f32(),
                                 rows: positions.clone(),
                             },
                         );
@@ -1734,14 +1735,16 @@ impl Tty7App {
                                 let delta = a.screen_y - bounds.top().as_f32() - y;
                                 if delta.abs() > 0.5 {
                                     let scroll = scroll.clone();
-                                    // Prepaint has already read this frame's offset.
-                                    // Apply the correction after layout has installed
-                                    // the expanded scroll range, then request a frame.
-                                    window.on_next_frame(move |window, _| {
-                                        let mut offset = scroll.offset();
-                                        offset.y += px(delta);
-                                        scroll.set_offset(offset);
-                                        window.refresh();
+                                    let handle = window.window_handle();
+                                    // Defer until layout has installed the new scroll
+                                    // range. This also works without animation frames.
+                                    cx.defer(move |cx| {
+                                        let _ = handle.update(cx, |_, window, _| {
+                                            let mut offset = scroll.offset();
+                                            offset.y += px(delta);
+                                            scroll.set_offset(offset);
+                                            window.refresh();
+                                        });
                                     });
                                     window.refresh();
                                 }
@@ -3634,16 +3637,20 @@ mod github_theme_gpui_tests {
 
     impl gpui::Render for ContextDiff {
         fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-            self.0.update(cx, |app, cx| {
+            let overlay = self.0.update(cx, |app, cx| {
                 app.render_diff_overlay(DocumentChrome::Fill, window, cx)
                     .unwrap_or_else(|| div().into_any_element())
-            })
+            });
+            v_flex().size_full().child(overlay)
         }
     }
 
     #[gpui::test]
     fn full_file_controls_preserve_change_position_and_layout(cx: &mut TestAppContext) {
-        let (app, _) = test_window::harness(cx);
+        let (app, mut initial_window) = test_window::harness(cx);
+        // One overlay scroll handle belongs to one window. The generic harness
+        // window must not also lay out this fixture's shared application entity.
+        initial_window.update(|window, _| window.remove_window());
         let mut full = git_diff::synthesize_added(
             "context.rs",
             (1..=100)
@@ -3715,17 +3722,22 @@ mod github_theme_gpui_tests {
                     let o = app.tabs[0].diff_overlay.as_ref().unwrap();
                     let g = o.geometry.borrow();
                     let g = g.get("context.rs").unwrap();
-                    g.top + anchor_row(&g.rows, (None, Some(25))).unwrap().1
+                    g.content_top
+                        + o.scroll.offset().y.as_f32()
+                        + anchor_row(&g.rows, (None, Some(25))).unwrap().1
                 })
             };
             let before = position(vcx);
             app.update(vcx, |app, cx| {
-                app.change_diff_context("context.rs".into(), None, cx)
+                app.change_diff_context("context.rs".into(), None, cx);
             });
             vcx.run_until_parked();
-            vcx.executor()
-                .advance_clock(std::time::Duration::from_millis(32));
-            vcx.run_until_parked();
+            for _ in 0..2 {
+                vcx.update(|window, cx| {
+                    window.refresh();
+                    let _ = window.draw(cx);
+                });
+            }
             assert!(
                 (position(vcx) - before).abs() < 1.,
                 "expand moved the change in {mode:?}: {before} -> {}",
@@ -3746,9 +3758,12 @@ mod github_theme_gpui_tests {
                 app.change_diff_context("context.rs".into(), None, cx);
             });
             vcx.run_until_parked();
-            vcx.executor()
-                .advance_clock(std::time::Duration::from_millis(32));
-            vcx.run_until_parked();
+            for _ in 0..2 {
+                vcx.update(|window, cx| {
+                    window.refresh();
+                    let _ = window.draw(cx);
+                });
+            }
             assert!(
                 (position(vcx) - before).abs() < 1.,
                 "collapse moved the change in {mode:?}"
@@ -3782,6 +3797,7 @@ mod github_theme_gpui_tests {
                     "switching files must invalidate a pending context reply"
                 );
             });
+            vcx.update(|window, _| window.remove_window());
         }
     }
 
