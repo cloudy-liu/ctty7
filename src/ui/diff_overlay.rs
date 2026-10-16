@@ -3723,6 +3723,9 @@ mod github_theme_gpui_tests {
                 app.change_diff_context("context.rs".into(), None, cx)
             });
             vcx.run_until_parked();
+            vcx.executor()
+                .advance_clock(std::time::Duration::from_millis(32));
+            vcx.run_until_parked();
             assert!(
                 (position(vcx) - before).abs() < 1.,
                 "expand moved the change in {mode:?}: {before} -> {}",
@@ -3742,6 +3745,9 @@ mod github_theme_gpui_tests {
                 );
                 app.change_diff_context("context.rs".into(), None, cx);
             });
+            vcx.run_until_parked();
+            vcx.executor()
+                .advance_clock(std::time::Duration::from_millis(32));
             vcx.run_until_parked();
             assert!(
                 (position(vcx) - before).abs() < 1.,

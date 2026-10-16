@@ -304,9 +304,9 @@ pub fn probe_full_file(
         // right text for working comparisons, including symlinks and filters.
         let old = file.old_path.as_deref().unwrap_or(&file.path);
         let object = match source {
-            DiffSource::Worktree => format!(":{old}"),
+            DiffSource::Worktree => format!(":0:{old}"),
             DiffSource::Head => format!("HEAD:{old}"),
-            DiffSource::Staged => format!(":{}", file.path),
+            DiffSource::Staged => format!(":0:{}", file.path),
             DiffSource::Commit { rev, .. } => format!("{rev}:{}", file.path),
             DiffSource::Range { head, .. } => format!("{head}:{}", file.path),
         };
@@ -1921,12 +1921,14 @@ index 1..2 100644
         let dir = merge_repo("metadata-context").expect("git fixture");
         let host = crate::host::local::LocalHost::new();
         let original = "unchanged blob\nsecond line\n";
-        std::fs::write(dir.join("old.txt"), original).unwrap();
-        git::git_output(&dir, &["add", "old.txt"]).unwrap();
+        let old = if cfg!(unix) { "0:old.txt" } else { "old.txt" };
+        let new = if cfg!(unix) { "0:new.txt" } else { "new.txt" };
+        std::fs::write(dir.join(old), original).unwrap();
+        git::git_output(&dir, &["add", "--", old]).unwrap();
         git::git_output(&dir, &["commit", "-qm", "before rename"]).unwrap();
         let base = rev(&dir, "HEAD");
-        git::git_output(&dir, &["mv", "old.txt", "new.txt"]).unwrap();
-        std::fs::write(dir.join("new.txt"), "unrelated worktree bytes\n").unwrap();
+        git::git_output(&dir, &["mv", "--", old, new]).unwrap();
+        std::fs::write(dir.join(new), "unrelated worktree bytes\n").unwrap();
         let read = |source: DiffSource| {
             let snap = probe_diff(
                 &*host,
@@ -1965,9 +1967,9 @@ index 1..2 100644
             base,
             head: "HEAD".into(),
         });
-        std::fs::write(dir.join("new.txt"), original).unwrap();
-        git::git_output(&dir, &["update-index", "--chmod=+x", "new.txt"]).unwrap();
-        std::fs::write(dir.join("new.txt"), "unrelated worktree bytes\n").unwrap();
+        std::fs::write(dir.join(new), original).unwrap();
+        git::git_output(&dir, &["update-index", "--chmod=+x", "--", new]).unwrap();
+        std::fs::write(dir.join(new), "unrelated worktree bytes\n").unwrap();
         read(DiffSource::Staged);
         let _ = std::fs::remove_dir_all(dir);
     }
