@@ -1327,10 +1327,29 @@ impl Tty7App {
             .and_then(Path::parent)
             .filter(|parent| !parent.as_os_str().is_empty())
             .map(|parent| {
-                let directory = parent.display().to_string().replace('\\', "/");
-                format!("{} / ", directory.trim_end_matches('/'))
+                let directory = parent
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(" › ");
+                format!("{directory} › ")
             });
         let full_path = active.map(|f| SharedString::from(f.path.display().to_string()));
+        let path_label = gpui::StyledText::new(format!(
+            "{}{}",
+            directory.as_deref().unwrap_or_default(),
+            name.as_deref()
+                .unwrap_or_else(|| t(L10nKey::EditorNoFileOpen)),
+        ))
+        .with_highlights(directory.as_ref().map(|directory| {
+            (
+                0..directory.len(),
+                gpui::HighlightStyle {
+                    color: Some(cx.theme().muted_foreground),
+                    ..Default::default()
+                },
+            )
+        }));
         let dirty = active.is_some_and(|f| f.dirty);
         // `TITLE_BAR_LEAD` is the room macOS's traffic lights need. Only a
         // header that starts at the left edge of the window has them to clear,
@@ -1369,12 +1388,14 @@ impl Tty7App {
                     .render(px(crate::ui::file_icons::ROW_ICON), window)
             }))
             .child(
-                h_flex()
+                div()
                     .id("editor-document-path")
                     .debug_selector(|| "editor-document-path".into())
                     .flex_1()
                     .min_w_0()
                     .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis_start()
                     .text_sm()
                     .when_some(full_path, |this, path| {
                         this.tooltip(move |window, cx| {
@@ -1384,25 +1405,7 @@ impl Tty7App {
                     .when(name.is_none(), |d| {
                         d.text_color(cx.theme().muted_foreground)
                     })
-                    .when_some(directory, |this, directory| {
-                        this.child(
-                            div()
-                                .min_w_0()
-                                .truncate()
-                                .text_color(cx.theme().muted_foreground)
-                                .child(directory),
-                        )
-                    })
-                    .child(
-                        div()
-                            .debug_selector(|| "editor-document-name".into())
-                            .flex_shrink_0()
-                            .max_w_full()
-                            .truncate()
-                            .child(name.unwrap_or_else(|| {
-                                SharedString::from(t(L10nKey::EditorNoFileOpen))
-                            })),
-                    ),
+                    .child(path_label),
             )
             .when(dirty, |d| {
                 d.child(
@@ -1713,8 +1716,10 @@ mod tests {
                     let _ = window.draw(cx);
                 });
                 let path = vcx.debug_bounds("editor-document-path").unwrap();
-                let name = vcx.debug_bounds("editor-document-name").unwrap();
-                assert!(name.left() >= path.left() && name.right() <= path.right());
+                assert!(
+                    path.size.width > px(20.) && path.size.height > px(8.),
+                    "the document title must have visible space: {path:?}"
+                );
                 let footer = vcx.debug_bounds("editor-status-bar").unwrap();
                 let toggle = vcx.debug_bounds("status-md-preview").unwrap();
                 assert!(toggle.size.width >= px(24.) && toggle.size.height >= px(24.));
