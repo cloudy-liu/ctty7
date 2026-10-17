@@ -27,6 +27,27 @@ the two. The choice is global — one setting for every diff, the same call VS
 Code's `diffEditor.renderSideBySide` makes — and persists as `diff_view` in
 `config.json`.
 
+## Full-file context
+
+The unfold icon beside a file's counts opens that file with all unchanged
+lines included. Additions, deletions and both versions' line numbers remain
+visible. The fold icon returns to changed regions. Hover or keyboard focus
+shows each icon's action; the controls have no persistent text labels.
+
+The focused file's toolbar also offers previous/next change arrows. Layout
+and context are independent: the existing unified/side-by-side button keeps
+the chosen context. Expanding, collapsing and changing layout preserve the
+source line being read when it remains available; collapsed context returns
+to the nearest retained line.
+
+At a gap, the up/down arrows reveal up to 20 more unchanged lines on that
+edge. Full-file reads use the original worktree, index, commit or range
+comparison on the file's host. They do not read historical files from the
+current working tree. Only the selected file is fetched, with a 50,000-line
+retention limit and an explicit truncation notice. Binary files have no
+context toggle. A failed read keeps the compact diff available and shows an
+error.
+
 ## Selecting and copying code
 
 Code can be selected at any character boundary, including across lines, and

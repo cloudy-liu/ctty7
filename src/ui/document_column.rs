@@ -733,6 +733,9 @@ mod gpui_tests {
                         preview_loading: None,
                         scroll: ScrollHandle::new(),
                         epoch: None,
+                        file_view: None,
+                        geometry: Default::default(),
+                        anchor: Default::default(),
                     });
                     cx.notify();
                 });
@@ -955,6 +958,9 @@ mod gpui_tests {
                         preview_loading: None,
                         scroll: scroll.clone(),
                         epoch: None,
+                        file_view: None,
+                        geometry: Default::default(),
+                        anchor: Default::default(),
                     });
                     cx.notify();
                 });

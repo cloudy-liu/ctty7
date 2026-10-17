@@ -22,6 +22,10 @@ pub const MAX_UNTRACKED: usize = 500;
 /// `-U<n>`. Git's own default, spelled out because the request carries it.
 pub const DEFAULT_CONTEXT: u32 = 3;
 
+/// Git accepts a signed integer for `-U`; this includes every line while the
+/// parser still bounds retained text. Only use with a single-file pathspec.
+pub const FULL_FILE_CONTEXT: u32 = i32::MAX as u32;
+
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Truncation {
     PerFile,
@@ -259,6 +263,85 @@ impl DiffRequest<'_> {
         }
         argv
     }
+}
+
+/// Read the same comparison as the overview, including both rename paths.
+/// Never substitute worktree bytes for an index or historical version.
+pub fn probe_full_file(
+    host: &dyn Host,
+    root: &Path,
+    source: DiffSource,
+    file: &FileDiff,
+) -> Option<FileDiff> {
+    let mut paths = vec![format!(":(literal){}", file.path)];
+    if let Some(old) = &file.old_path {
+        paths.push(format!(":(literal){old}"));
+    }
+    let snapshot = probe_diff(
+        host,
+        root,
+        &DiffRequest {
+            source: source.clone(),
+            paths: &paths,
+            context: FULL_FILE_CONTEXT,
+            budget: DiffBudget {
+                max_total_lines: DiffBudget::SINGLE_FILE.max_lines_per_file,
+                ..DiffBudget::SINGLE_FILE
+            },
+            ..Default::default()
+        },
+    )?;
+    if snapshot.read_failed {
+        return None;
+    }
+    let mut full = snapshot.files.into_iter().find(|f| f.path == file.path)?;
+    if full.hunks.is_empty()
+        && !full.binary
+        && !matches!(full.status, FileStatus::Added | FileStatus::Deleted)
+    {
+        // A pure rename or mode change has identical blob text but Git emits
+        // no hunk, regardless of -U. The unchanged left blob also supplies the
+        // right text for working comparisons, including symlinks and filters.
+        let old = file.old_path.as_deref().unwrap_or(&file.path);
+        let object = match source {
+            DiffSource::Worktree => format!(":0:{old}"),
+            DiffSource::Head => format!("HEAD:{old}"),
+            DiffSource::Staged => format!(":0:{}", file.path),
+            DiffSource::Commit { rev, .. } => format!("{rev}:{}", file.path),
+            DiffSource::Range { head, .. } => format!("{head}:{}", file.path),
+        };
+        let mut lines = Vec::new();
+        let mut count = 0u32;
+        let mut scanned = 0;
+        let result = host.git_lines(root, &["show", "--no-textconv", &object], &mut |text| {
+            if scanned < 8000 {
+                let sample = text.len().min(8000 - scanned);
+                full.binary |= text.as_bytes()[..sample].contains(&0);
+                scanned += sample;
+            }
+            count = count.saturating_add(1);
+            if lines.len() < DiffBudget::SINGLE_FILE.max_lines_per_file {
+                lines.push(DiffLine {
+                    kind: LineKind::Context,
+                    old_no: Some(count),
+                    new_no: Some(count),
+                    text: text.to_string(),
+                });
+            } else {
+                full.truncated = Some(Truncation::PerFile);
+            }
+        });
+        if !matches!(result, Ok(Some(0))) {
+            return None;
+        }
+        if !full.binary && !lines.is_empty() {
+            full.hunks.push(Hunk {
+                header: format!("@@ -1,{count} +1,{count} @@"),
+                lines,
+            });
+        }
+    }
+    Some(full)
 }
 
 #[derive(Clone, PartialEq, Eq, Debug, Default)]
@@ -1762,6 +1845,133 @@ index 1..2 100644
         assert_eq!(probe(&*host, &dir).unwrap().untracked, ["fresh.txt"]);
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn full_file_preserves_index_worktree_and_historical_versions() {
+        let dir = merge_repo("full-file").expect("git fixture");
+        let host = crate::host::local::LocalHost::new();
+        let path = "literal[1].txt";
+        let original: String = (1..=80).map(|n| format!("line {n}\n")).collect();
+        std::fs::write(dir.join(path), &original).unwrap();
+        git::git_output(&dir, &["add", "--", path]).unwrap();
+        git::git_output(&dir, &["commit", "-qm", "full baseline"]).unwrap();
+        let baseline = rev(&dir, "HEAD");
+        let staged = original.replace("line 25\n", "staged version\n");
+        std::fs::write(dir.join(path), &staged).unwrap();
+        git::git_output(&dir, &["add", "--", path]).unwrap();
+        let working = staged.replace("line 65\n", "worktree version\n");
+        std::fs::write(dir.join(path), &working).unwrap();
+        let read = |source: DiffSource| {
+            let snap = probe_diff(
+                &*host,
+                &dir,
+                &DiffRequest {
+                    source: source.clone(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let file = snap.files.iter().find(|f| f.path == path).unwrap();
+            assert!(file.hunks.iter().map(|h| h.lines.len()).sum::<usize>() < 80);
+            probe_full_file(&*host, &dir, source, file).unwrap()
+        };
+        let added = |file: &FileDiff| {
+            file.hunks
+                .iter()
+                .flat_map(|h| &h.lines)
+                .filter(|l| l.kind == LineKind::Added)
+                .map(|l| l.text.clone())
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(added(&read(DiffSource::Staged)), ["staged version"]);
+        assert_eq!(added(&read(DiffSource::Worktree)), ["worktree version"]);
+        let head = read(DiffSource::Head);
+        assert_eq!(added(&head), ["staged version", "worktree version"]);
+        assert_eq!(head.hunks[0].lines.first().unwrap().new_no, Some(1));
+        assert_eq!(head.hunks[0].lines.last().unwrap().new_no, Some(80));
+        git::git_output(&dir, &["commit", "-qm", "staged change"]).unwrap();
+        assert_eq!(added(&read(DiffSource::commit("HEAD"))), ["staged version"]);
+        assert_eq!(
+            added(&read(DiffSource::Range {
+                base: baseline,
+                head: "HEAD".into()
+            })),
+            ["staged version"]
+        );
+        git::git_output(&dir, &["mv", "--", path, "renamed[2].txt"]).unwrap();
+        let renamed = probe_diff(
+            &*host,
+            &dir,
+            &DiffRequest {
+                source: DiffSource::Staged,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let renamed = probe_full_file(&*host, &dir, DiffSource::Staged, &renamed.files[0]).unwrap();
+        assert_eq!(renamed.path, "renamed[2].txt");
+        assert_eq!(renamed.old_path.as_deref(), Some(path));
+        assert_eq!(renamed.hunks[0].lines.last().unwrap().new_no, Some(80));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn full_file_reads_pure_rename_and_mode_changes_from_the_compared_blob() {
+        let dir = merge_repo("metadata-context").expect("git fixture");
+        let host = crate::host::local::LocalHost::new();
+        let original = "unchanged blob\nsecond line\n";
+        let old = if cfg!(unix) { "0:old.txt" } else { "old.txt" };
+        let new = if cfg!(unix) { "0:new.txt" } else { "new.txt" };
+        std::fs::write(dir.join(old), original).unwrap();
+        git::git_output(&dir, &["add", "--", old]).unwrap();
+        git::git_output(&dir, &["commit", "-qm", "before rename"]).unwrap();
+        let base = rev(&dir, "HEAD");
+        git::git_output(&dir, &["mv", "--", old, new]).unwrap();
+        std::fs::write(dir.join(new), "unrelated worktree bytes\n").unwrap();
+        let read = |source: DiffSource| {
+            let snap = probe_diff(
+                &*host,
+                &dir,
+                &DiffRequest {
+                    source: source.clone(),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+            let file = &snap.files[0];
+            assert!(
+                file.hunks.is_empty(),
+                "metadata-only fixture must have no patch body"
+            );
+            let full = probe_full_file(&*host, &dir, source, file).unwrap();
+            assert_eq!(
+                full.hunks[0]
+                    .lines
+                    .iter()
+                    .map(|l| l.text.as_str())
+                    .collect::<Vec<_>>(),
+                ["unchanged blob", "second line"]
+            );
+            assert!(
+                full.hunks[0]
+                    .lines
+                    .iter()
+                    .all(|l| l.kind == LineKind::Context)
+            );
+        };
+        read(DiffSource::Staged);
+        git::git_output(&dir, &["commit", "-qm", "pure rename"]).unwrap();
+        read(DiffSource::commit("HEAD"));
+        read(DiffSource::Range {
+            base,
+            head: "HEAD".into(),
+        });
+        std::fs::write(dir.join(new), original).unwrap();
+        git::git_output(&dir, &["update-index", "--chmod=+x", "--", new]).unwrap();
+        std::fs::write(dir.join(new), "unrelated worktree bytes\n").unwrap();
+        read(DiffSource::Staged);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
