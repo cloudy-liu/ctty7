@@ -529,6 +529,12 @@ fn main() {
     apply_config_dir_arg(&args);
 
     #[cfg(feature = "markdown-visual-tests")]
+    if let Some(index) = args.iter().position(|arg| arg == "--diff-profile") {
+        ui::diff_overlay::profile::run(args.get(index + 1).expect("diff profile options path"));
+        return;
+    }
+
+    #[cfg(feature = "markdown-visual-tests")]
     if let Some(index) = args.iter().position(|arg| arg == "--ssh-tab-visual") {
         ssh_tab_visual::run(args.get(index + 1).expect("SSH tab fixture options path"));
         return;
