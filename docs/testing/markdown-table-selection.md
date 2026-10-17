@@ -30,3 +30,10 @@ uses the committed Git dependency, without local path patches. Native desktop
 mouse interaction was not manually repeated; pointer events and the copy
 shortcut run through the GPUI application harness. Cross-platform results are
 reported separately by CI.
+
+The parallel settings suite also exercises the notification persistence test in
+its own test process. Its real GPUI setters and disk reload assertions are
+unchanged; the per-process scratch directory prevents unrelated settings tests
+from overwriting the same config file. This fixes the shared-config failure
+observed in the Linux integration run without skipping tests or retrying failed
+assertions. The eight settings tests pass with 16 test threads.
