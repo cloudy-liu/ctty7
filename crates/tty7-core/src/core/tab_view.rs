@@ -24,6 +24,8 @@ pub struct TabView {
     /// [`PaneRecord::osc_title`](crate::core::machine::PaneRecord::osc_title).
     pub osc_title: Option<String>,
     pub cwd: Option<String>,
+    /// Native SSH connection identity, when this tab's title comes from one.
+    pub ssh_target: Option<String>,
     pub agent: Option<CLIAgent>,
     pub status: Option<AgentStatus>,
     /// Identity and status of the last focused pane, used for navigation.
@@ -98,6 +100,61 @@ pub fn strip_host_prefix(raw: &str) -> &str {
     }
 }
 
+/// A directory explicitly reported in a shell title. Do not interpret prose,
+/// commands, or a connection address as a path, even when they contain `/`.
+pub fn shell_title_path(raw: &str) -> Option<&str> {
+    let raw = raw.trim();
+    let path = if let Some((head, tail)) = raw.split_once("]:")
+        && head.contains("@[")
+    {
+        tail.trim()
+    } else {
+        strip_host_prefix(raw).trim()
+    };
+    let drive_path = path.as_bytes().get(1) == Some(&b':')
+        && path
+            .as_bytes()
+            .get(2)
+            .is_some_and(|c| matches!(c, b'/' | b'\\'));
+    (path == "~"
+        || path.starts_with("~/")
+        || path.starts_with("~\\")
+        || path.starts_with('/')
+        || path.starts_with('\\')
+        || drive_path)
+        .then_some(path)
+}
+
+/// SSH shells keep their connection name at home and add the current directory
+/// elsewhere. Application/task titles retain their wording.
+pub fn ssh_tab_title(raw: &str, target: &str) -> String {
+    let raw = raw.trim();
+    let target = target.trim();
+    if raw.is_empty()
+        || raw == target
+        || matches!(
+            raw,
+            "sh" | "bash" | "zsh" | "fish" | "pwsh" | "powershell" | "cmd" | "tty7" | "ssh"
+        )
+    {
+        return target.to_owned();
+    }
+    if let Some(path) = shell_title_path(raw) {
+        let tail = path.trim_end_matches(['/', '\\']);
+        if tail == "~" {
+            return target.to_owned();
+        }
+        let directory = tail
+            .rsplit(['/', '\\'])
+            .next()
+            .filter(|s| !s.is_empty())
+            .unwrap_or(path);
+        return format!("{target} · {directory}");
+    }
+    let title = strip_host_prefix(raw).trim();
+    if title.is_empty() { target } else { title }.to_owned()
+}
+
 impl TabView {
     pub fn label(&self) -> TabLabel<'_> {
         if let Some(name) = self
@@ -138,26 +195,45 @@ pub fn tab_views_of(ws: &Workspace, panes: &[PaneRecord]) -> Vec<TabView> {
                 .iter()
                 .filter_map(|id| panes.iter().find(|p| p.id == *id))
                 .collect();
-            // Labels keep their existing first-pane and any-agent rules. The
-            // avatar follows the saved focus, falling back to the first pane.
-            let head = records.first();
+            let head = records.first().copied();
             let focused = tab
                 .focused_pane
                 .and_then(|id| records.iter().copied().find(|p| p.id == id))
-                .or(head.copied());
+                .or(head);
             let facts = records.iter().find_map(|p| p.agent.as_ref());
             // The title follows the agent for the same reason the facts do: an
             // agent's pane titles itself with what it is working on, while a
             // plain shell's says where it is — which `cwd` carries anyway. A
             // split with a shell in front would otherwise name the tab after a
             // directory and bury the agent.
-            let titled = records.iter().find(|p| p.agent.is_some()).or(head);
+            // SSH identity and location follow the remembered pane, including
+            // when that pane is local. Keep the existing local-only agent policy.
+            let has_ssh = records.iter().any(|p| p.ssh_spec.is_some());
+            let titled = if has_ssh {
+                focused
+            } else {
+                records.iter().copied().find(|p| p.agent.is_some()).or(head)
+            };
+            let location = if has_ssh { titled } else { head };
             TabView {
                 id: tab.id,
                 name: tab.name.clone(),
-                title: head.map(|p| p.title.clone()).unwrap_or_default(),
+                title: location.map(|p| p.title.clone()).unwrap_or_default(),
                 osc_title: titled.and_then(|p| p.osc_title.clone()),
-                cwd: head.and_then(|p| p.cwd.clone()),
+                cwd: location.and_then(|p| p.cwd.clone()),
+                ssh_target: titled.and_then(|p| p.ssh_spec.as_ref()).map(|spec| {
+                    spec.display_name
+                        .as_deref()
+                        .map(str::trim)
+                        .filter(|s| !s.is_empty())
+                        .map(str::to_owned)
+                        .unwrap_or_else(|| {
+                            crate::core::session::RemoteTarget::direct(
+                                &spec.user, &spec.host, spec.port,
+                            )
+                            .to_string()
+                        })
+                }),
                 agent: facts.map(|f| f.agent),
                 status: facts.and_then(|f| f.status),
                 focused_agent: focused.and_then(|p| p.agent.as_ref().map(|a| a.agent)),
@@ -175,6 +251,38 @@ mod tests {
     use super::*;
     use crate::core::machine::{AgentFacts, Tab};
 
+    #[test]
+    fn ssh_tabs_keep_the_connection_at_home_and_the_directory_elsewhere() {
+        for (raw, expected) in [
+            ("", "prod-web"),
+            ("prod-web", "prod-web"),
+            ("bash", "prod-web"),
+            ("deploy@server:~", "prod-web"),
+            ("deploy@server:", "prod-web"),
+            ("deploy@server: ~/", "prod-web"),
+            ("deploy@server:~/projects/api", "prod-web · api"),
+            ("/var/log/nginx/", "prod-web · nginx"),
+            ("/", "prod-web · /"),
+            (r"ann@BOX:C:\src\api", "prod-web · api"),
+            ("deploy@[2001:db8::1]:~/api", "prod-web · api"),
+            ("Fix login", "Fix login"),
+            ("npm run dev", "npm run dev"),
+        ] {
+            assert_eq!(ssh_tab_title(raw, "prod-web"), expected, "{raw}");
+        }
+        assert_eq!(
+            ssh_tab_title("~", "deploy@[2001:db8::1]:2222"),
+            "deploy@[2001:db8::1]:2222"
+        );
+        assert_eq!(
+            ssh_tab_title("deploy@[2001:db8::1]:2222", "deploy@[2001:db8::1]:2222"),
+            "deploy@[2001:db8::1]:2222"
+        );
+        assert_eq!(shell_title_path("vim src/main.rs"), None);
+        assert_eq!(shell_title_path("deploy@10.0.0.5:2222"), None);
+        assert_eq!(shell_title_path("deploy@[2001:db8::1]:2222"), None);
+    }
+
     fn view() -> TabView {
         TabView {
             id: TabId::new(),
@@ -182,6 +290,7 @@ mod tests {
             title: String::new(),
             osc_title: None,
             cwd: None,
+            ssh_target: None,
             agent: None,
             status: None,
             focused_agent: None,
@@ -293,6 +402,70 @@ mod tests {
             Some("✳ fixing the switcher"),
             "the agent's pane names the tab, not the shell in front of it"
         );
+
+        let mut ssh_panes = panes;
+        let mut spec = crate::daemon::ssh::test_support::base_spec();
+        spec.display_name = Some("prod-web".into());
+        ssh_panes[1].ssh_spec = Some(Box::new(spec));
+        ssh_panes[1].osc_title = None;
+        ws.tabs[0].focused_pane = Some(2);
+        let views = tab_views_of(&ws, &ssh_panes);
+        assert_eq!(views[0].ssh_target.as_deref(), Some("prod-web"));
+        assert_eq!(
+            views[0].cwd, None,
+            "a remote agent must not borrow a local split's cwd"
+        );
+    }
+
+    #[test]
+    fn ssh_tab_views_keep_the_remembered_panes_identity_and_location_together() {
+        use crate::core::machine::{Axis, PaneNode};
+
+        let spec = |name: &str| {
+            let mut spec = crate::daemon::ssh::test_support::base_spec();
+            spec.display_name = Some(name.into());
+            Some(Box::new(spec))
+        };
+        let mut tab = Tab::leaf(1);
+        tab.root = PaneNode::Split {
+            axis: Axis::Horizontal,
+            ratio: 0.5,
+            a: Box::new(PaneNode::Leaf { pane: 1 }),
+            b: Box::new(PaneNode::Leaf { pane: 2 }),
+        };
+        tab.focused_pane = Some(2);
+        let mut ws = Workspace::default();
+        ws.tabs.push(tab);
+        let mut panes = vec![
+            PaneRecord {
+                cwd: Some("/srv/prod".into()),
+                osc_title: Some("~/prod".into()),
+                ssh_spec: spec("prod-web"),
+                ..PaneRecord::new(1)
+            },
+            PaneRecord {
+                cwd: Some("/srv/staging".into()),
+                osc_title: Some("~/staging".into()),
+                ssh_spec: spec("staging"),
+                ..PaneRecord::new(2)
+            },
+        ];
+        let selected = tab_views_of(&ws, &panes).remove(0);
+        assert_eq!(selected.ssh_target.as_deref(), Some("staging"));
+        assert_eq!(selected.osc_title.as_deref(), Some("~/staging"));
+        assert_eq!(selected.cwd.as_deref(), Some("/srv/staging"));
+
+        panes[0].ssh_spec = None;
+        let selected = tab_views_of(&ws, &panes).remove(0);
+        assert_eq!(selected.ssh_target.as_deref(), Some("staging"));
+        assert_eq!(selected.cwd.as_deref(), Some("/srv/staging"));
+
+        panes[0].ssh_spec = spec("prod-web");
+        panes[1].ssh_spec = None;
+        let selected = tab_views_of(&ws, &panes).remove(0);
+        assert!(selected.ssh_target.is_none());
+        assert_eq!(selected.osc_title.as_deref(), Some("~/staging"));
+        assert_eq!(selected.cwd.as_deref(), Some("/srv/staging"));
     }
 
     #[test]

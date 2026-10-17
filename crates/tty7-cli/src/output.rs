@@ -476,6 +476,7 @@ mod tests {
                 title: String::new(),
                 osc_title: None,
                 cwd: None,
+                ssh_target: None,
                 agent: None,
                 status: None,
                 focused_agent: None,

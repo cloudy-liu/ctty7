@@ -22,7 +22,7 @@ use crate::ui::reorder::{self, Reorder, Surface};
 use crate::ui::right_panel::RESIZE_HANDLE_WIDTH;
 use crate::ui::tab_strip::{
     DragTab, REORDER_SLIDE_MS, TabAvatar, abbreviate_home, elide_keep_edges, elide_label,
-    elide_path_keep_tail, has_ssh_badge, measure_text, strip_host_prefix,
+    elide_path_keep_tail, measure_text,
 };
 
 pub(crate) const MIN_SIDEBAR_WIDTH: f32 = 180.;
@@ -203,6 +203,10 @@ impl Tty7App {
                                 .to_lowercase()
                                 .contains(&query)
                             || self.tabs[i]
+                                .title_details(Some(window), cx)
+                                .context
+                                .is_some_and(|context| context.to_lowercase().contains(&query))
+                            || self.tabs[i]
                                 .git_status(Some(window), cx)
                                 .is_some_and(|g| g.branch.to_lowercase().contains(&query))
                     })
@@ -292,7 +296,8 @@ impl Tty7App {
                 let agent_badge = tab.focused_agent_badge(Some(window), cx);
                 let agent = agent_badge.agent;
                 let avatar = TabAvatar::choose(agent, tab.foreground_app(Some(window), cx));
-                let ssh = has_ssh_badge(tab.remote_context(Some(window), cx).map(|r| r.kind));
+                let title = tab.title_details(Some(window), cx);
+                let ssh = title.ssh_target.is_some();
                 let agent_indicator = agent_badge.indicator();
                 let git_cwd = diff_click_cwd(
                     cx.global::<Config>(),
@@ -362,54 +367,51 @@ impl Tty7App {
                 // `full_title` is the unelided string the card can expand
                 // back to; `None` means the row is showing a placeholder that
                 // no card can improve on.
-                let (shown_title, full_title) =
-                    if let Some(name) = tab.name.as_ref().filter(|n| !n.trim().is_empty()) {
-                        // A renamed tab is elided like anything else — and so
-                        // the card has to be able to spell the name back out.
-                        let full = SharedString::from(name.trim().to_string());
-                        let shown = elide_label(
+                let (shown_title, full_title) = if title.label.trim().is_empty() {
+                    (
+                        SharedString::from(t_fmt(
+                            L10nKey::TabUnnamedShell,
+                            &[("n", &((i + 1).to_string()))],
+                        )),
+                        None,
+                    )
+                } else {
+                    let full = SharedString::from(title.label.clone());
+                    let shown = if ssh {
+                        elide_keep_edges(
                             &window.text_system(),
                             title_font,
                             title_size,
                             &full,
                             label_avail,
-                        );
-                        (shown, Some(full))
+                        )
                     } else {
-                        let (raw_title, home) = tab.leaf_title_and_home(Some(window), cx);
-                        let remote = raw_title
-                            .trim()
-                            .is_empty()
-                            .then(|| tab.remote_context(Some(window), cx))
-                            .flatten();
-                        let title = if raw_title.trim().is_empty() {
-                            crate::ui::app::title_or_ssh_target(&raw_title, remote.as_ref())
-                        } else {
-                            strip_host_prefix(raw_title.trim())
-                        };
-                        let raw = abbreviate_home(title, home.as_deref());
-                        if raw.trim().is_empty() {
-                            // Nothing to expand: the row is naming an unnamed
-                            // shell, not hiding a title behind an ellipsis.
-                            let placeholder = SharedString::from(t_fmt(
-                                L10nKey::TabUnnamedShell,
-                                &[("n", &((i + 1).to_string()))],
-                            ));
-                            (placeholder, None)
-                        } else {
-                            let full = SharedString::from(raw.as_ref());
-                            let shown = elide_label(
-                                &window.text_system(),
-                                title_font,
-                                title_size,
-                                &full,
-                                label_avail,
-                            );
-                            (shown, Some(full))
-                        }
+                        elide_label(
+                            &window.text_system(),
+                            title_font,
+                            title_size,
+                            &full,
+                            label_avail,
+                        )
                     };
+                    (shown, Some(full))
+                };
+                let git_context = title.context.as_ref().map(|context| {
+                    let shown = elide_keep_edges(
+                        &window.text_system(),
+                        &font,
+                        meta_size,
+                        context,
+                        (label_avail - status_w).max(0.) * 0.6,
+                    );
+                    (shown, SharedString::from(context.clone()))
+                });
+                let git_context_w = git_context.as_ref().map_or(0., |(context, _)| {
+                    measure_text(&window.text_system(), &font, meta_size, context)
+                        + row_metrics::META_GAP
+                });
                 let mut branch_shown: Option<(SharedString, SharedString, u32, u32)> = None;
-                let mut cwd_shown: Option<(SharedString, SharedString)> = None;
+                let mut cwd_shown = git_context.clone();
                 let git_line = tab.git_status(Some(window), cx).map(|g| {
                     let mut line = h_flex()
                         .id(("sidebar-git", i))
@@ -419,6 +421,11 @@ impl Tty7App {
                         .text_xs()
                         .text_color(cx.theme().muted_foreground)
                         .children(status_lead())
+                        .children(
+                            git_context
+                                .as_ref()
+                                .map(|(context, _)| div().flex_shrink_0().child(context.clone())),
+                        )
                         .child(
                             gpui::svg()
                                 .path("icons/git-branch.svg")
@@ -460,6 +467,7 @@ impl Tty7App {
                     // identifying tail survives a narrow sidebar.
                     let branch_avail = (label_avail
                         - status_w
+                        - git_context_w
                         - row_metrics::BRANCH_ICON
                         - row_metrics::META_GAP
                         - counts_w)
@@ -530,19 +538,10 @@ impl Tty7App {
                 // carries the compressed cwd with its root marker, so a tab
                 // whose title is just a shell name still says where it lives.
                 if git_line.is_none() {
-                    cwd_shown = tab
-                        .pane
-                        .focused_or_first(window, cx)
-                        .and_then(|leaf| {
-                            let leaf = leaf.read(cx);
-                            Some((leaf.effective_cwd()?, leaf.display_home(cx)))
-                        })
-                        .map(|(cwd, home)| {
-                            let text = cwd.display().to_string();
-                            let full = SharedString::from(
-                                abbreviate_home(&text, home.as_deref()).into_owned(),
-                            );
-                            let shown = elide_path_keep_tail(
+                    cwd_shown = if ssh {
+                        title.context.as_ref().map(|context| {
+                            let full = SharedString::from(context.clone());
+                            let shown = elide_keep_edges(
                                 &window.text_system(),
                                 &font,
                                 meta_size,
@@ -551,14 +550,36 @@ impl Tty7App {
                             );
                             (shown, full)
                         })
-                        // The title already carries the whole path; a second
-                        // copy adds noise, not information.
-                        .filter(|(_, full)| {
-                            full_title
-                                .as_ref()
-                                .map_or(shown_title.as_ref(), |t| t.as_ref())
-                                != full.as_ref()
-                        });
+                    } else {
+                        tab.pane
+                            .focused_or_first(window, cx)
+                            .and_then(|leaf| {
+                                let leaf = leaf.read(cx);
+                                Some((leaf.effective_cwd()?, leaf.display_home(cx)))
+                            })
+                            .map(|(cwd, home)| {
+                                let text = cwd.display().to_string();
+                                let full = SharedString::from(
+                                    abbreviate_home(&text, home.as_deref()).into_owned(),
+                                );
+                                let shown = elide_path_keep_tail(
+                                    &window.text_system(),
+                                    &font,
+                                    meta_size,
+                                    &full,
+                                    (label_avail - status_w).max(0.),
+                                );
+                                (shown, full)
+                            })
+                            // The title already carries the whole path; a second
+                            // copy adds noise, not information.
+                            .filter(|(_, full)| {
+                                full_title
+                                    .as_ref()
+                                    .map_or(shown_title.as_ref(), |t| t.as_ref())
+                                    != full.as_ref()
+                            })
+                    };
                 }
                 // Outside a repo a known status still gets a line, even when
                 // the cwd was dropped as a copy of the title.
@@ -1340,8 +1361,10 @@ impl Tty7App {
         // split tab whose panes sit on different machines would otherwise
         // name whichever one happens to be first.
         if let Some(target) = tab
-            .remote_context(Some(window), cx)
-            .map(|r| SharedString::from(r.target))
+            .title_details(Some(window), cx)
+            .ssh_target
+            .or_else(|| tab.remote_context(Some(window), cx).map(|r| r.target))
+            .map(SharedString::from)
         {
             info.host = Some(target);
         }
