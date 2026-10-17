@@ -93,6 +93,21 @@ impl TabCode {
     pub(crate) fn active_file(&self) -> Option<&OpenFile> {
         self.files.get(self.active)
     }
+
+    fn active_display_path(&self, tree_host: HostId) -> Option<PathBuf> {
+        let file = self.active_file()?;
+        // Tree roots belong to the workspace host, while SFTP buffers can
+        // belong to another machine. Unrelated files keep their full path.
+        if file.host.id() == tree_host
+            && let Some(root) = crate::ui::file_tree::containing_root(&self.roots, &file.path)
+        {
+            // The root is the boundary, not a breadcrumb. Cursor's document
+            // title starts with the path inside the project; a file directly
+            // under the root is therefore just its filename.
+            return Some(file.path.strip_prefix(root).unwrap().to_path_buf());
+        }
+        Some(file.path.clone())
+    }
 }
 
 enum EditorNavigation {
@@ -1305,8 +1320,23 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        let active = self.tab_code().and_then(|c| c.active_file());
+        let code = self.tab_code();
+        let active = code.and_then(|c| c.active_file());
         let name = active.map(|f| f.label());
+        let path = code.and_then(|c| c.active_display_path(self.spawn_host(cx)));
+        let directory = path
+            .as_deref()
+            .and_then(Path::parent)
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(|parent| {
+                let directory = parent
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(" › ");
+                format!("{directory} › ")
+            });
+        let full_path = active.map(|f| SharedString::from(f.path.display().to_string()));
         let dirty = active.is_some_and(|f| f.dirty);
         // `TITLE_BAR_LEAD` is the room macOS's traffic lights need. Only a
         // header that starts at the left edge of the window has them to clear,
@@ -1325,6 +1355,7 @@ impl Tty7App {
         };
         let menu_app = cx.entity().downgrade();
         row.flex_none()
+            .min_w_0()
             .h(px(crate::ui::app::TITLE_BAR_HEIGHT))
             .items_center()
             .gap_1p5()
@@ -1339,21 +1370,68 @@ impl Tty7App {
             )
             .border_b_1()
             .border_color(cx.theme().border)
-            .children(name.as_ref().map(|name| {
-                crate::ui::file_icons::FileIcon::for_file(name)
-                    .render(px(crate::ui::file_icons::ROW_ICON), window)
-            }))
             .child(
                 div()
+                    .id("editor-document-path")
+                    .debug_selector(|| "editor-document-path".into())
                     .flex_1()
                     .min_w_0()
-                    .text_ellipsis()
+                    .overflow_hidden()
+                    .whitespace_nowrap()
                     .text_sm()
-                    .when(name.is_none(), |d| {
-                        d.text_color(cx.theme().muted_foreground)
+                    .when_some(full_path, |this, path| {
+                        this.tooltip(move |window, cx| {
+                            gpui_component::tooltip::Tooltip::new(path.clone()).build(window, cx)
+                        })
                     })
                     .child(
-                        name.unwrap_or_else(|| SharedString::from(t(L10nKey::EditorNoFileOpen))),
+                        h_flex()
+                            .min_w_0()
+                            .items_center()
+                            .when_some(directory, |row, directory| {
+                                row.child(
+                                    div()
+                                        .id("editor-document-directories")
+                                        .debug_selector(|| "editor-document-directories".into())
+                                        .flex_1()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis_start()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(directory),
+                                )
+                            })
+                            .when_some(name.as_ref(), |row, name| {
+                                row.child(
+                                    div()
+                                        .id("editor-document-icon")
+                                        .debug_selector(|| "editor-document-icon".into())
+                                        .flex_none()
+                                        .child(
+                                            crate::ui::file_icons::FileIcon::for_file(name).render(
+                                                px(crate::ui::file_icons::ROW_ICON),
+                                                window,
+                                            ),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .id("editor-document-name")
+                                        .debug_selector(|| "editor-document-name".into())
+                                        .flex_none()
+                                        .child(name.clone()),
+                                )
+                            })
+                            .when(name.is_none(), |row| {
+                                row.child(
+                                    div()
+                                        .id("editor-document-name")
+                                        .debug_selector(|| "editor-document-name".into())
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(t(L10nKey::EditorNoFileOpen)),
+                                )
+                            }),
                     ),
             )
             .when(dirty, |d| {
@@ -1388,34 +1466,10 @@ impl Tty7App {
     }
 
     fn render_code_status_bar(&self, _window: &Window, cx: &mut Context<Self>) -> gpui::Div {
-        // The roots below belong to this window's own machine. A file read
-        // over SFTP is on another one, where they mean nothing, so it shows
-        // its own full path rather than borrowing the local repo's name.
-        let tree_host = self.spawn_host(cx);
         let code = self.tab_code();
         let muted = cx.theme().muted_foreground;
-        let path_text: Option<SharedString> = code.map(|c| {
-            let repo = c
-                .roots
-                .first()
-                .and_then(|r| r.file_name())
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
-            match c.active_file() {
-                Some(f) if f.host.id() != tree_host => f.path.display().to_string().into(),
-                Some(f) => {
-                    let rel = c
-                        .roots
-                        .iter()
-                        .find_map(|r| f.path.strip_prefix(r).ok())
-                        .map(|p| p.display().to_string())
-                        .unwrap_or_else(|| f.label().to_string());
-                    format!("{repo} › {rel}").into()
-                }
-                None => repo.into(),
-            }
-        });
         let active = code.and_then(|c| c.active_file());
+        let language = active.map(|f| language_for_path(&f.path));
         let cursor: Option<SharedString> = active.filter(|f| !f.preview).map(|f| {
             let pos = f.input.read(cx).cursor_position();
             t_fmt(
@@ -1432,56 +1486,74 @@ impl Tty7App {
         let preview = active.is_some_and(|f| f.preview);
 
         h_flex()
+            .debug_selector(|| "editor-status-bar".into())
             .flex_none()
             .w_full()
             .h(px(26.))
             .bg(cx.theme().background)
             .items_center()
-            .gap_3()
+            .gap_1()
             .px_3()
             .border_t_1()
             .border_color(cx.theme().border)
             .text_xs()
             .text_color(muted)
-            .child(div().flex_1().min_w_0().truncate().children(path_text))
+            .child(div().flex_1().min_w_0().truncate().children(language))
             .when(is_markdown, |this| {
                 this.child(
-                    Button::new("status-md-preview")
-                        .label(if preview {
-                            t(L10nKey::EditorEdit)
-                        } else {
-                            t(L10nKey::EditorPreview)
-                        })
-                        .custom(crate::ui::tab_strip::chrome_tile_variant(cx))
-                        .xsmall()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.editor_toggle_preview(window, cx)
-                        })),
+                    crate::ui::tab_strip::chrome_tile_sized(
+                        Button::new("status-md-preview")
+                            .debug_selector(|| "status-md-preview".into())
+                            .icon(if preview {
+                                Icon::default().path("icons/pencil.svg")
+                            } else {
+                                Icon::new(IconName::Eye)
+                            }),
+                        crate::ui::tab_strip::MIN_TARGET,
+                        14.,
+                        false,
+                        cx,
+                    )
+                    .tooltip(if preview {
+                        t(L10nKey::EditorEdit)
+                    } else {
+                        t(L10nKey::EditorPreview)
+                    })
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.editor_toggle_preview(window, cx)),
+                    ),
                 )
             })
             .when_some(wrap, |this, wrap| {
                 this.child(
-                    Button::new("status-wrap")
-                        .label(if wrap {
-                            t(L10nKey::EditorWrapOn)
-                        } else {
-                            t(L10nKey::EditorWrapOff)
-                        })
-                        .custom(crate::ui::tab_strip::chrome_tile_variant(cx))
-                        .xsmall()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            let Some(code) = this.tab_code_mut() else {
-                                return;
-                            };
-                            let ix = code.active;
-                            if let Some(f) = code.files.get_mut(ix) {
-                                f.wrap = !f.wrap;
-                                let wrap = f.wrap;
-                                f.input.clone().update(cx, |st, cx| {
-                                    st.set_soft_wrap(wrap, window, cx);
-                                });
-                            }
-                        })),
+                    crate::ui::tab_strip::chrome_tile_sized(
+                        Button::new("status-wrap")
+                            .debug_selector(|| "status-wrap".into())
+                            .icon(Icon::default().path("icons/wrap-text.svg")),
+                        crate::ui::tab_strip::MIN_TARGET,
+                        14.,
+                        wrap,
+                        cx,
+                    )
+                    .tooltip(if wrap {
+                        t(L10nKey::EditorWrapOn)
+                    } else {
+                        t(L10nKey::EditorWrapOff)
+                    })
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        let Some(code) = this.tab_code_mut() else {
+                            return;
+                        };
+                        let ix = code.active;
+                        if let Some(f) = code.files.get_mut(ix) {
+                            f.wrap = !f.wrap;
+                            let wrap = f.wrap;
+                            f.input.clone().update(cx, |st, cx| {
+                                st.set_soft_wrap(wrap, window, cx);
+                            });
+                            cx.notify();
+                        }
+                    })),
                 )
             })
             .when_some(cursor, |this, t| {
@@ -1607,6 +1679,161 @@ mod tests {
             cx.notify();
         });
         (app, vcx)
+    }
+
+    #[gpui::test]
+    fn document_paths_use_the_matching_project_and_keep_unrelated_paths(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/work/second/docs/guide.md".into(),
+                "# Guide\n".into(),
+                None,
+                window,
+                cx,
+            );
+            let code = app.tab_code_mut().unwrap();
+            code.roots = vec!["/work/first".into(), "/work/second".into()];
+            assert_eq!(
+                code.active_display_path(HostId::LOCAL),
+                Some(PathBuf::from("docs/guide.md"))
+            );
+            code.roots.push("/work/second/docs".into());
+            assert_eq!(
+                code.active_display_path(HostId::LOCAL),
+                Some(PathBuf::from("guide.md")),
+                "the path starts at the deepest matching project root"
+            );
+            let active = code.active;
+            code.files[active].path = "/work/second/CONTEXT.md".into();
+            assert_eq!(
+                code.active_display_path(HostId::LOCAL),
+                Some(PathBuf::from("CONTEXT.md")),
+                "a file at the project root shows its filename without a root breadcrumb"
+            );
+            code.files[active].path = "/work/second/docs/guide.md".into();
+            assert_eq!(
+                code.active_display_path(HostId(99)),
+                Some(PathBuf::from("/work/second/docs/guide.md")),
+                "roots on another host must not shorten this buffer's path"
+            );
+            code.roots = vec!["/work/elsewhere".into()];
+            assert_eq!(
+                code.active_display_path(HostId::LOCAL),
+                Some(PathBuf::from("/work/second/docs/guide.md"))
+            );
+            code.roots.clear();
+            assert_eq!(
+                code.active_display_path(HostId::LOCAL),
+                Some(PathBuf::from("/work/second/docs/guide.md"))
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn document_header_places_the_file_icon_before_its_name(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/work/project/docs/guide.md".into(),
+                "# Guide\n".into(),
+                None,
+                window,
+                cx,
+            );
+            app.tab_code_mut().unwrap().roots = vec!["/work/project".into()];
+        });
+
+        for (path, has_directories) in [
+            ("/work/project/docs/guide.md", true),
+            ("/work/project/CONTEXT.md", false),
+        ] {
+            app.update_in(&mut vcx, |app, _, cx| {
+                let code = app.tab_code_mut().unwrap();
+                let active = code.active;
+                code.files[active].path = path.into();
+                cx.notify();
+            });
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+
+            let path = vcx.debug_bounds("editor-document-path").unwrap();
+            let icon = vcx.debug_bounds("editor-document-icon").unwrap();
+            let name = vcx.debug_bounds("editor-document-name").unwrap();
+            assert!(icon.left() < name.left(), "icon must precede filename");
+            assert!(icon.left() >= path.left() && icon.right() <= path.right());
+            assert!(name.left() < path.right(), "filename must remain visible");
+
+            let directories = vcx.debug_bounds("editor-document-directories");
+            assert_eq!(directories.is_some(), has_directories);
+            if let Some(directories) = directories {
+                assert!(directories.left() < icon.left());
+                assert!(directories.right() <= icon.left());
+            }
+        }
+    }
+
+    #[gpui::test]
+    fn document_icon_controls_fit_and_work_with_long_paths(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/work/project/a-very-long-directory/another-long-directory/reading-guide-with-a-very-long-name-阅读说明.md".into(),
+                "# Guide\n\nRead and edit.\n".into(),
+                None,
+                window,
+                cx,
+            );
+        });
+        for width in [1600., 560., 360.] {
+            vcx.simulate_resize(gpui::size(px(width), px(900.)));
+            vcx.run_until_parked();
+            for expected_preview in [false, true] {
+                vcx.update(|window, cx| {
+                    let _ = window.draw(cx);
+                });
+                let path = vcx.debug_bounds("editor-document-path").unwrap();
+                assert!(
+                    path.size.width > px(20.) && path.size.height > px(8.),
+                    "the document title must have visible space: {path:?}"
+                );
+                let footer = vcx.debug_bounds("editor-status-bar").unwrap();
+                let toggle = vcx.debug_bounds("status-md-preview").unwrap();
+                assert!(toggle.size.width >= px(24.) && toggle.size.height >= px(24.));
+                assert!(toggle.left() >= footer.left() && toggle.right() <= footer.right());
+                vcx.simulate_click(toggle.center(), gpui::Modifiers::none());
+                vcx.run_until_parked();
+                let preview = app.read_with(&vcx, |app, _| {
+                    app.tab_code().unwrap().active_file().unwrap().preview
+                });
+                assert_eq!(preview, expected_preview);
+                if preview {
+                    assert!(vcx.debug_bounds("status-wrap").is_none());
+                } else {
+                    let wrap = vcx.debug_bounds("status-wrap").unwrap();
+                    assert!(wrap.size.width >= px(24.) && wrap.size.height >= px(24.));
+                    assert!(wrap.left() >= footer.left() && wrap.right() <= footer.right());
+                    for expected in [true, false] {
+                        vcx.simulate_click(wrap.center(), gpui::Modifiers::none());
+                        vcx.run_until_parked();
+                        app.read_with(&vcx, |app, _| {
+                            assert_eq!(
+                                app.tab_code().unwrap().active_file().unwrap().wrap,
+                                expected
+                            );
+                        });
+                    }
+                }
+            }
+            assert!(app.read_with(&vcx, |app, _| {
+                app.tab_code().unwrap().active_file().unwrap().preview
+            }));
+        }
     }
 
     #[gpui::test]

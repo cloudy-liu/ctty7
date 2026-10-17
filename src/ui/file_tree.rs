@@ -103,7 +103,7 @@ impl TreeRow {
     }
 }
 
-fn containing_root<'a>(roots: &'a [PathBuf], path: &Path) -> Option<&'a PathBuf> {
+pub(super) fn containing_root<'a>(roots: &'a [PathBuf], path: &Path) -> Option<&'a PathBuf> {
     roots
         .iter()
         .filter(|root| path.starts_with(root))

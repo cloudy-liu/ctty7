@@ -11,12 +11,13 @@ use gpui::{
     relative, rems,
 };
 use gpui_component::{
-    ActiveTheme as _, IconName, Sizable as _, ThemeMode,
+    ActiveTheme as _, IconName, ThemeMode,
     button::{Button, ButtonVariants as _},
     highlighter::{
         FontWeightContent, HighlightTheme, HighlightThemeStyle, SyntaxColors, ThemeStyle,
     },
     input::InputState,
+    scroll::{Scrollbar, ScrollbarHandle},
     text::{
         AlertStyle, InlineCodeStyle, KeyboardStyle, LinkUnderline, MarkdownExtensions,
         MarkdownNode, TaskCheckboxStyle, TextView, TextViewState, TextViewStyle,
@@ -434,6 +435,7 @@ pub(crate) fn reading_style(
         style.code_block.text.line_height = Some(relative(line_height));
     }
     style.table.overflow.x = Some(gpui::Overflow::Scroll);
+    style.table.text.white_space = Some(gpui::WhiteSpace::Normal);
     style.code_block.overflow.x = Some(gpui::Overflow::Scroll);
     style.code_block.text.font_fallbacks =
         Some(gpui::FontFallbacks::from_fonts(t.code_fonts.clone()));
@@ -508,6 +510,31 @@ fn align_dark_github_foreground(
         .syntax
         .captures
         .insert("github.rust.type".into(), neutral);
+}
+
+#[derive(Clone)]
+struct ReadingScrollHandle {
+    list: gpui::ListState,
+    viewport: ScrollHandle,
+}
+
+impl ScrollbarHandle for ReadingScrollHandle {
+    fn offset(&self) -> gpui::Point<Pixels> {
+        self.list.scroll_px_offset_for_scrollbar()
+    }
+    fn set_offset(&self, offset: gpui::Point<Pixels>) {
+        self.list.set_offset_from_scrollbar(offset);
+    }
+    fn content_size(&self) -> gpui::Size<Pixels> {
+        // The track spans the panel, while the list viewport excludes paper padding.
+        self.viewport.bounds().size + self.list.max_offset_for_scrollbar().into()
+    }
+    fn start_drag(&self) {
+        self.list.scrollbar_drag_started();
+    }
+    fn end_drag(&self) {
+        self.list.scrollbar_drag_ended();
+    }
 }
 
 /// The source buffer owns all editable state. This entity retains only the
@@ -1231,6 +1258,17 @@ impl Render for MarkdownPreview {
         } else {
             layout.padding
         } * scale;
+        let horizontal_padding = if entry.theme.id == markdown_theme::DEFAULT_ID {
+            padding.min(if self.width < px(600. * scale) {
+                16. * scale
+            } else if self.width <= px(900. * scale) {
+                24. * scale
+            } else {
+                32. * scale
+            })
+        } else {
+            padding
+        };
         let outer = if compact {
             0.
         } else {
@@ -1241,6 +1279,7 @@ impl Render for MarkdownPreview {
         let image_owner = cx.weak_entity();
         let text = TextView::new(&self.text)
             .scrollable(self.virtualized)
+            .scrollbar_visible(false)
             .markdown_extensions(self.reading_extensions.clone())
             .selectable(true)
             .style(self.style.clone())
@@ -1268,6 +1307,7 @@ impl Render for MarkdownPreview {
             .max_w(px(layout.max_width * scale))
             .mx_auto()
             .p(px(padding))
+            .px(px(horizontal_padding))
             .text_size(px(typography.font_size * scale))
             .line_height(relative(typography.line_height))
             .font_family(body_font)
@@ -1439,19 +1479,32 @@ impl Render for MarkdownPreview {
                 .left_0()
                 .size(px(0.)),
             );
-        let scroll_area = if self.virtualized {
-            scroll_area.into_any_element()
+        let scrollbar = if self.virtualized {
+            Scrollbar::vertical(&ReadingScrollHandle {
+                list: self.text.read(cx).list_state(),
+                viewport: scroll.clone(),
+            })
         } else {
-            crate::ui::scrollbar::with_vertical_scrollbar(
-                "markdown-reading-scrollbar",
-                scroll_area,
-                &scroll,
-            )
-            .into_any_element()
+            Scrollbar::vertical(&scroll)
         };
-        // Cached views lay out their contents as a root; provide the definite
-        // flex-column height required by the shared scrollbar wrapper.
-        div().flex().flex_col().size_full().child(scroll_area)
+        // Keep the bar at the panel edge, outside the centered reading card.
+        // Its own 4px thumb inset plus 2px here clears the divider's 4px hit area.
+        div()
+            .flex()
+            .flex_col()
+            .relative()
+            .size_full()
+            .child(scroll_area)
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left_0()
+                    .right(px(2.))
+                    .debug_selector(|| "markdown-reading-scrollbar".into())
+                    .child(scrollbar.id("markdown-reading-scrollbar")),
+            )
     }
 }
 
@@ -2115,6 +2168,183 @@ mod tests {
                     "{preset}"
                 );
             });
+        }
+    }
+
+    #[gpui::test]
+    fn markdown_scrollbar_drags_at_the_panel_edge_for_small_and_large_documents(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
+        vcx.simulate_resize(gpui::size(px(1600.), px(900.)));
+        let mut host = DocumentsHost::new(9907, "Reader layout", None);
+        let short = format!(
+            "# Reading\n\n{}",
+            "Paragraph of reading text.\n\n".repeat(80)
+        );
+        let long = format!(
+            "# Reading\n\n{}",
+            "Paragraph of reading text.\n\n".repeat(1400)
+        );
+        Arc::get_mut(&mut host)
+            .unwrap()
+            .files
+            .insert("/repo/short.md".into(), short.clone().into_bytes());
+        Arc::get_mut(&mut host)
+            .unwrap()
+            .files
+            .insert("/repo/long.md".into(), long.clone().into_bytes());
+        app.update_in(&mut vcx, |app, _, cx| {
+            init(Default::default(), cx);
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = app.tabs.len() - 1;
+            app.sidebar_collapsed = true;
+            app.right_panel_visible = true;
+            app.right_panel_width.set(240.);
+            app.right_panel_tab = crate::core::config::RightPanelTab::Files;
+            app.set_document_ratio(0.5, cx);
+        });
+        for (name, bytes) in [("short", short.len()), ("long", long.len())] {
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.editor_open_on_host(
+                    host.clone(),
+                    Path::new(&format!("/repo/{name}.md")),
+                    window,
+                    cx,
+                );
+            });
+            settle(&mut vcx, |cx| {
+                app.read_with(cx, |app, cx| {
+                    app.tab_code()
+                        .and_then(|code| code.active_file())
+                        .and_then(|file| file.reading.as_ref())
+                        .is_some_and(|reading| {
+                            let view = reading.read(cx);
+                            view.source.read(cx).text().len() == bytes
+                                && view.text.read(cx).anchor_bounds("reading").is_some()
+                        })
+                })
+            });
+            let reading = app.read_with(&vcx, |app, _| {
+                app.tab_code()
+                    .unwrap()
+                    .active_file()
+                    .unwrap()
+                    .reading
+                    .clone()
+                    .unwrap()
+            });
+            for (width, layout, inset) in [
+                (1600., crate::core::config::DocumentLayout::Dock, 24.),
+                (1600., crate::core::config::DocumentLayout::Fill, 164.),
+                (1100., crate::core::config::DocumentLayout::Dock, 16.),
+                (1100., crate::core::config::DocumentLayout::Fill, 24.),
+            ] {
+                vcx.simulate_resize(gpui::size(px(width), px(900.)));
+                app.update_in(&mut vcx, |app, _, cx| app.set_document_layout(layout, cx));
+                for _ in 0..3 {
+                    vcx.run_until_parked();
+                    vcx.update(|window, cx| {
+                        let _ = window.draw(cx);
+                    });
+                }
+                reading.update(&mut vcx, |reading, cx| {
+                    reading.scroll.set_offset(Default::default());
+                    reading
+                        .text
+                        .read(cx)
+                        .list_state()
+                        .scroll_to(Default::default());
+                    cx.notify();
+                });
+                vcx.update(|window, cx| {
+                    window.refresh();
+                    let _ = window.draw(cx);
+                });
+                let panel = vcx.debug_bounds("code-panel").unwrap();
+                let files = vcx.debug_bounds("right-panel").unwrap();
+                let bar = vcx.debug_bounds("markdown-reading-scrollbar").unwrap();
+                assert!(
+                    (files.left() - bar.right() - px(2.)).abs() < px(1.),
+                    "scrollbar must clear the divider hit area"
+                );
+                let heading = reading.read_with(&vcx, |reading, cx| {
+                    reading.text.read(cx).anchor_bounds("reading").unwrap()
+                });
+                assert!(
+                    (heading.left() - panel.left() - px(inset)).abs() < px(1.),
+                    "{name} {layout:?} at {width}: responsive reading inset, got {heading:?}, {panel:?}"
+                );
+                let top = reading.read_with(&vcx, |reading, _| reading.scroll.bounds().top());
+                vcx.simulate_event(gpui::ScrollWheelEvent {
+                    position: point(panel.center().x, top + px(100.)),
+                    delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-8.))),
+                    modifiers: gpui::Modifiers::none(),
+                    touch_phase: gpui::TouchPhase::Moved,
+                });
+                for _ in 0..2 {
+                    vcx.update(|window, cx| {
+                        let _ = window.draw(cx);
+                    });
+                }
+                let before =
+                    reading.read_with(&vcx, |reading, cx| reading.profile_scroll_offset(cx));
+                let start = point(panel.right() - px(9.), top + px(16.));
+                let end = start + point(px(0.), px(130.));
+                vcx.simulate_mouse_move(start, None, gpui::Modifiers::none());
+                vcx.update(|window, cx| {
+                    let _ = window.draw(cx);
+                });
+                vcx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::none());
+                vcx.update(|window, cx| {
+                    let _ = window.draw(cx);
+                });
+                std::thread::sleep(Duration::from_millis(30));
+                vcx.simulate_mouse_move(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+                vcx.update(|window, cx| {
+                    let _ = window.draw(cx);
+                });
+                vcx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+                vcx.run_until_parked();
+                vcx.update(|window, cx| {
+                    let _ = window.draw(cx);
+                });
+                let offset =
+                    reading.read_with(&vcx, |reading, cx| reading.profile_scroll_offset(cx));
+                assert!(
+                    offset.y < before.y - px(30.),
+                    "{name} {layout:?}: dragging the document edge must scroll, got {before:?} -> {offset:?}"
+                );
+                assert_eq!(
+                    vcx.debug_bounds("right-panel"),
+                    Some(files),
+                    "scrolling must not resize Files"
+                );
+                vcx.simulate_click(
+                    point(panel.right() - px(9.), bar.bottom() - px(2.)),
+                    gpui::Modifiers::none(),
+                );
+                vcx.update(|window, cx| {
+                    let _ = window.draw(cx);
+                });
+                reading.read_with(&vcx, |reading, cx| {
+                    let max = if reading.virtualized {
+                        reading
+                            .text
+                            .read(cx)
+                            .list_state()
+                            .max_offset_for_scrollbar()
+                            .y
+                    } else {
+                        reading.scroll.max_offset().y
+                    };
+                    assert!(
+                        (reading.profile_scroll_offset(cx).y + max).abs() < px(1.),
+                        "the outer scrollbar must reach the document end"
+                    );
+                });
+            }
         }
     }
 
