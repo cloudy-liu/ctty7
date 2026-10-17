@@ -2554,6 +2554,99 @@ mod tests {
     }
 
     #[gpui::test]
+    fn markdown_table_text_can_be_selected_with_the_mouse(cx: &mut TestAppContext) {
+        for (alignment, start_ratio) in [("---:", 0.7), (":---:", 0.35)] {
+            let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
+            vcx.simulate_resize(gpui::size(px(1600.), px(900.)));
+            let mut host = DocumentsHost::new(908, "Table selection", None);
+            let content = format!(
+                "# Native CPU measurements\n\n| Measurement |\n| {alignment} |\n| 118.3344 |\n"
+            );
+            Arc::get_mut(&mut host)
+                .unwrap()
+                .files
+                .insert("/repo/docs/table.md".into(), content.as_bytes().to_vec());
+            app.update_in(&mut vcx, |app, window, cx| {
+                init(Default::default(), cx);
+                app.tabs
+                    .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+                app.active = app.tabs.len() - 1;
+                app.editor_open_on_host(host, Path::new("/repo/docs/table.md"), window, cx);
+            });
+            settle(&mut vcx, |cx| {
+                app.read_with(cx, |app, cx| {
+                    app.tab_code()
+                        .and_then(|code| code.active_file())
+                        .and_then(|file| file.reading.as_ref())
+                        .is_some_and(|reading| {
+                            reading
+                                .read(cx)
+                                .text
+                                .read(cx)
+                                .anchor_bounds("native-cpu-measurements")
+                                .is_some()
+                        })
+                })
+            });
+            let reading = app.read_with(&vcx, |app, _| {
+                app.tab_code()
+                    .unwrap()
+                    .active_file()
+                    .unwrap()
+                    .reading
+                    .clone()
+                    .unwrap()
+            });
+            let text = reading.read_with(&vcx, |reading, _| reading.text.clone());
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            let table_bounds = text.read_with(&vcx, |text, _| text.block_bounds(1).unwrap());
+            // Drag across the visible number, rather than across multiple rows.
+            // A multiline selection also crosses the stale left-aligned hit area.
+            let gap = reading.read_with(&vcx, |reading, _| {
+                reading
+                    .style
+                    .table_gap
+                    .expect("GitHub theme declares its table gap")
+            });
+            let row_y = (table_bounds.size.height - gap) * 0.75;
+            let start = table_bounds.origin + point(table_bounds.size.width * start_ratio, row_y);
+            let end = table_bounds.origin + point(table_bounds.size.width * 0.98, row_y);
+            for (start, end) in [(start, end), (end, start)] {
+                vcx.simulate_mouse_move(start, None, gpui::Modifiers::none());
+                vcx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::none());
+                for step in 1..=10 {
+                    let position =
+                        point(start.x + (end.x - start.x) * (step as f32 / 10.), start.y);
+                    vcx.simulate_mouse_move(
+                        position,
+                        gpui::MouseButton::Left,
+                        gpui::Modifiers::none(),
+                    );
+                }
+                vcx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+                vcx.run_until_parked();
+
+                let selected = text.read_with(&vcx, |text, _| text.selected_text());
+                assert_eq!(
+                    selected.trim(),
+                    "118.3344",
+                    "dragging the visible {alignment} cell should select its number; bounds={table_bounds:?}, selected={selected:?}"
+                );
+                vcx.simulate_keystrokes("secondary-c");
+                let copied = vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap());
+                assert_eq!(
+                    copied.trim(),
+                    "118.3344",
+                    "copy should contain the selected table cells: {copied:?}"
+                );
+            }
+        }
+    }
+
+    #[gpui::test]
     fn markdown_mermaid_theme_switch_replaces_svg_without_reparsing_or_losing_selection(
         cx: &mut TestAppContext,
     ) {

@@ -8588,6 +8588,28 @@ mod gpui_tests {
     #[gpui::test]
     fn agent_sound_settings_persist_without_changing_desktop_policy(cx: &mut TestAppContext) {
         use crate::core::config::NotifyMode;
+        // Config's directory override is process-wide. Other GPUI tests save
+        // defaults concurrently, so run the real persistence check on its own.
+        const CHILD: &str = "TTY7_TEST_AGENT_SOUND_CONFIG_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let name = concat!(
+                module_path!(),
+                "::agent_sound_settings_persist_without_changing_desktop_policy"
+            );
+            let name = name.split_once("::").unwrap().1;
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", name, "--nocapture"])
+                .env(CHILD, "1")
+                .output()
+                .expect("run the isolated persistence test");
+            assert!(
+                output.status.success(),
+                "isolated persistence check failed:\n{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+            return;
+        }
         crate::core::config::pin_test_config_dir();
         let (app, mut vcx) = harness(cx);
         app.update_in(&mut vcx, |app, _, cx| {
