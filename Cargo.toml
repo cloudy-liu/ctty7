@@ -300,7 +300,7 @@ version = "0.5.0"
 [workspace.dependencies]
 # The maintenance fork retains tty7's existing menu, button and input changes
 # and adds instance-scoped Markdown and source editor styles, highlighting,
-# document resources and selection snapshots for toolbar layout changes.
+# document resources, selection snapshots, adaptive tables and aligned hit testing.
 # Both packages use the same commit, also recorded in Cargo.lock.
 # For co-developing the UI crate, point these back at a sibling
 # checkout: `path = "../gpui-component/crates/{ui,assets}"` — but never commit
