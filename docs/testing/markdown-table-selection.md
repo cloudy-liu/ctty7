@@ -3,9 +3,10 @@
 The reader layout and aligned selection changes originally pinned sibling
 component commits. Selecting either pin would omit the other change.
 
-The application now pins `cloudy-liu/gpui-component` commit
-`e7711b27a74afaca714b3e52652e9c386195b6c8`, directly based on the reader layout
-commit `a9f601a1a632c753ae279a9c25f629d59908d87c`. It includes adaptive table
+The aligned selection implementation was introduced by component commit
+`e7711b27a74afaca714b3e52652e9c386195b6c8` and has since been merged into the
+fork's `ctty7` integration branch. The application now pins
+`9572b7fab9c0fcf73e34c6118f8a9f10f083f928`, which includes adaptive table
 wrapping, external scrollbar ownership and aligned selection geometry. The
 manifest and all three component lockfile sources use the same Git revision.
 

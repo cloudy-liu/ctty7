@@ -298,7 +298,7 @@ edition = "2024"
 version = "0.5.0"
 
 [workspace.dependencies]
-# The maintenance fork retains tty7's existing menu, button and input changes
+# The maintenance fork retains ctty7's existing menu, button and input changes
 # and adds instance-scoped Markdown and source editor styles, highlighting,
 # document resources, selection snapshots, adaptive tables and aligned hit testing.
 # Both packages use the same commit, also recorded in Cargo.lock.
@@ -307,10 +307,10 @@ version = "0.5.0"
 # that, since a path dependency can't resolve on CI.
 #
 # `tree-sitter-languages` compiles the grammars the code editor highlights with.
-gpui-component = { git = "https://github.com/cloudy-liu/gpui-component", rev = "e7711b27a74afaca714b3e52652e9c386195b6c8", version = "0.5.2", features = [
+gpui-component = { git = "https://github.com/cloudy-liu/gpui-component", rev = "9572b7fab9c0fcf73e34c6118f8a9f10f083f928", version = "0.5.2", features = [
     "tree-sitter-languages",
 ] }
-gpui-component-assets = { git = "https://github.com/cloudy-liu/gpui-component", rev = "e7711b27a74afaca714b3e52652e9c386195b6c8", version = "0.5.1" }
+gpui-component-assets = { git = "https://github.com/cloudy-liu/gpui-component", rev = "9572b7fab9c0fcf73e34c6118f8a9f10f083f928", version = "0.5.1" }
 
 gpui = { git = "https://github.com/zed-industries/zed", rev = "1d217ee39d381ac101b7cf49d3d22451ac1093fe" }
 # Base features are cross-platform (`font-kit`, `runtime_shaders` only map to the

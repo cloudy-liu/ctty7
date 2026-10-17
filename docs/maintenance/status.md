@@ -1,6 +1,6 @@
 # Project status
 
-Checked on 2026-10-11 against GitHub and the local checkout.
+Checked on 2026-10-18 against GitHub and the local checkout.
 This is a dated snapshot; query GitHub again before merging or preparing a release.
 
 ## Open work
@@ -13,9 +13,9 @@ daemon record cleanup. See the [release verification](../testing/release-v0.3.0.
 
 There are no open product issues at this check. Release documentation records
 the verified publication separately from the frozen release tag.
-The component fork
-`cloudy-liu/gpui-component` has no open PRs; its four PRs are merged and its
-issue tracker is disabled.
+The component fork `cloudy-liu/gpui-component` now has a `ctty7` stable
+integration branch. The application pins its exact commit; see
+[gpui-component maintenance](gpui-component.md).
 
 ## Completed work
 
@@ -66,7 +66,7 @@ these are verification gaps, not additional open GitHub tickets.
 - All nine [PR #90 CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/37444566340) passed on `73e99d52` before its merge.
 - All nine [PR #92 CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/37450774839) passed on `ffa76e55` before its merge. Local tests passed 2,985 cases with eight ignored.
 - All nine [PR #93 CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/37452292509) passed before the documentation merge.
-- The current component pin, `e35384ce1a842d02adfbd7c515195947145972e6`, includes merged component PR #4 and the table row-header and cell-wrapping follow-ups tracked by ctty7 PR #118.
+- The current component pin, `9572b7fab9c0fcf73e34c6118f8a9f10f083f928`, is the first pushed commit on the fork's `ctty7` integration branch. It combines the existing component integration line with the Markdown table, virtualization, and aligned-selection fixes; ctty7's locked metadata, dependency tree, build, and workspace tests pass. The component workspace's 309 component tests and macro test pass on Windows with `RUST_MIN_STACK=8388608`; without it, the queued-update test overflows the default test-thread stack.
 - [v0.2.2](https://github.com/cloudy-liu/ctty7/releases/tag/v0.2.2), published on 2026-10-10, is the previous release baseline and retains 12 program assets plus `checksums.txt`. Downloaded bytes, package layouts, versions, and public URLs were verified.
 - [v0.2.1](https://github.com/cloudy-liu/ctty7/releases/tag/v0.2.1), published on 2026-10-09, remains available with its original assets and checksums.
 - [v0.2.0](https://github.com/cloudy-liu/ctty7/releases/tag/v0.2.0), published on 2026-10-08, remains available with its original assets and checksums.
