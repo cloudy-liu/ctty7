@@ -1337,21 +1337,6 @@ impl Tty7App {
                 format!("{directory} › ")
             });
         let full_path = active.map(|f| SharedString::from(f.path.display().to_string()));
-        let path_label = gpui::StyledText::new(format!(
-            "{}{}",
-            directory.as_deref().unwrap_or_default(),
-            name.as_deref()
-                .unwrap_or_else(|| t(L10nKey::EditorNoFileOpen)),
-        ))
-        .with_highlights(directory.as_ref().map(|directory| {
-            (
-                0..directory.len(),
-                gpui::HighlightStyle {
-                    color: Some(cx.theme().muted_foreground),
-                    ..Default::default()
-                },
-            )
-        }));
         let dirty = active.is_some_and(|f| f.dirty);
         // `TITLE_BAR_LEAD` is the room macOS's traffic lights need. Only a
         // header that starts at the left edge of the window has them to clear,
@@ -1385,10 +1370,6 @@ impl Tty7App {
             )
             .border_b_1()
             .border_color(cx.theme().border)
-            .children(name.as_ref().map(|name| {
-                crate::ui::file_icons::FileIcon::for_file(name)
-                    .render(px(crate::ui::file_icons::ROW_ICON), window)
-            }))
             .child(
                 div()
                     .id("editor-document-path")
@@ -1397,17 +1378,61 @@ impl Tty7App {
                     .min_w_0()
                     .overflow_hidden()
                     .whitespace_nowrap()
-                    .text_ellipsis_start()
                     .text_sm()
                     .when_some(full_path, |this, path| {
                         this.tooltip(move |window, cx| {
                             gpui_component::tooltip::Tooltip::new(path.clone()).build(window, cx)
                         })
                     })
-                    .when(name.is_none(), |d| {
-                        d.text_color(cx.theme().muted_foreground)
-                    })
-                    .child(path_label),
+                    .child(
+                        h_flex()
+                            .min_w_0()
+                            .items_center()
+                            .when_some(directory, |row, directory| {
+                                row.child(
+                                    div()
+                                        .id("editor-document-directories")
+                                        .debug_selector(|| "editor-document-directories".into())
+                                        .flex_1()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .whitespace_nowrap()
+                                        .text_ellipsis_start()
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(directory),
+                                )
+                            })
+                            .when_some(name.as_ref(), |row, name| {
+                                row.child(
+                                    div()
+                                        .id("editor-document-icon")
+                                        .debug_selector(|| "editor-document-icon".into())
+                                        .flex_none()
+                                        .child(
+                                            crate::ui::file_icons::FileIcon::for_file(name).render(
+                                                px(crate::ui::file_icons::ROW_ICON),
+                                                window,
+                                            ),
+                                        ),
+                                )
+                                .child(
+                                    div()
+                                        .id("editor-document-name")
+                                        .debug_selector(|| "editor-document-name".into())
+                                        .flex_none()
+                                        .child(name.clone()),
+                                )
+                            })
+                            .when(name.is_none(), |row| {
+                                row.child(
+                                    div()
+                                        .id("editor-document-name")
+                                        .debug_selector(|| "editor-document-name".into())
+                                        .text_color(cx.theme().muted_foreground)
+                                        .child(t(L10nKey::EditorNoFileOpen)),
+                                )
+                            }),
+                    ),
             )
             .when(dirty, |d| {
                 d.child(
@@ -1704,6 +1729,52 @@ mod tests {
                 Some(PathBuf::from("/work/second/docs/guide.md"))
             );
         });
+    }
+
+    #[gpui::test]
+    fn document_header_places_the_file_icon_before_its_name(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/work/project/docs/guide.md".into(),
+                "# Guide\n".into(),
+                None,
+                window,
+                cx,
+            );
+            app.tab_code_mut().unwrap().roots = vec!["/work/project".into()];
+        });
+
+        for (path, has_directories) in [
+            ("/work/project/docs/guide.md", true),
+            ("/work/project/CONTEXT.md", false),
+        ] {
+            app.update_in(&mut vcx, |app, _, cx| {
+                let code = app.tab_code_mut().unwrap();
+                let active = code.active;
+                code.files[active].path = path.into();
+                cx.notify();
+            });
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+
+            let path = vcx.debug_bounds("editor-document-path").unwrap();
+            let icon = vcx.debug_bounds("editor-document-icon").unwrap();
+            let name = vcx.debug_bounds("editor-document-name").unwrap();
+            assert!(icon.left() < name.left(), "icon must precede filename");
+            assert!(icon.left() >= path.left() && icon.right() <= path.right());
+            assert!(name.left() < path.right(), "filename must remain visible");
+
+            let directories = vcx.debug_bounds("editor-document-directories");
+            assert_eq!(directories.is_some(), has_directories);
+            if let Some(directories) = directories {
+                assert!(directories.left() < icon.left());
+                assert!(directories.right() <= icon.left());
+            }
+        }
     }
 
     #[gpui::test]
