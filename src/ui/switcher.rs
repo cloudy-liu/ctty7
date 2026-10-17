@@ -926,9 +926,10 @@ impl Tty7App {
                         path: title
                             .context
                             .or_else(|| {
-                                tab.pane
-                                    .terminals()
-                                    .first()
+                                if title.ssh_target.is_some() {
+                                    return None;
+                                }
+                                tab.title_leaf(None, cx)
                                     .and_then(|leaf| {
                                         let leaf = leaf.read(cx);
                                         Some((leaf.cwd()?, leaf.display_home(cx)))
@@ -3733,6 +3734,103 @@ mod tests {
             tab_view_label(&view, 0, None, Some("dev-box")),
             "Production logs"
         );
+    }
+}
+
+#[cfg(test)]
+mod ssh_path_gpui_tests {
+    use crate::daemon::protocol::{DaemonMsg, RemoteContext, RemoteKind};
+    use crate::ui::app::{Tab, test_window};
+    use crate::ui::pane::{Pane, PaneSlot};
+    use gpui::{Axis, TestAppContext};
+    use std::path::PathBuf;
+
+    #[gpui::test]
+    fn switcher_paths_follow_the_named_pane_and_never_borrow_local_ssh_cwd(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, mut vcx) = test_window::harness(cx);
+        let (first, second, mut first_stream, mut second_stream) =
+            app.update_in(&mut vcx, |app, window, cx| {
+                let (first, first_stream) = crate::terminal::view::quiet_test_pane(1, window, cx);
+                let (second, second_stream) = crate::terminal::view::quiet_test_pane(2, window, cx);
+                let mut pane = Pane::leaf(PaneSlot::Ready(first.clone()));
+                assert!(pane.split_leaf(
+                    first.entity_id(),
+                    Axis::Horizontal,
+                    false,
+                    PaneSlot::Ready(second.clone()),
+                ));
+                let mut tab = Tab::new(pane);
+                tab.remember_tree_focus(Some(2), cx);
+                app.tabs.push(tab);
+                (first, second, first_stream, second_stream)
+            });
+        DaemonMsg::Cwd(PathBuf::from("/first-pane"))
+            .encode(&mut first_stream)
+            .unwrap();
+        DaemonMsg::Cwd(PathBuf::from("/ssh-client"))
+            .encode(&mut second_stream)
+            .unwrap();
+        for _ in 0..200 {
+            if first.read_with(&vcx, |view, _| view.cwd().is_some())
+                && second.read_with(&vcx, |view, _| view.cwd().is_some())
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        DaemonMsg::RemoteContext(Some(RemoteContext {
+            kind: RemoteKind::Ssh,
+            argv: vec!["ssh".into(), "prod-web".into()],
+            target: "prod-web".into(),
+        }))
+        .encode(&mut second_stream)
+        .unwrap();
+        for _ in 0..200 {
+            if second.read_with(&vcx, |view, _| view.remote_context().is_some()) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        app.update(&mut vcx, |app, cx| {
+            assert!(second.read(cx).remote_context().is_some());
+            for raw in ["", "bash", "~/projects/api"] {
+                second.update(cx, |view, _| view.title = raw.into());
+                let rows = app.tab_rows_for(app.workspace, cx);
+                assert_eq!(
+                    rows[0].path,
+                    if raw.starts_with('~') { raw } else { "" },
+                    "an SSH row must use only its remote-reported directory"
+                );
+            }
+        });
+        DaemonMsg::RemoteContext(None)
+            .encode(&mut second_stream)
+            .unwrap();
+        DaemonMsg::Cwd(PathBuf::from("/ssh-client"))
+            .encode(&mut second_stream)
+            .unwrap();
+        for _ in 0..200 {
+            if second.read_with(&vcx, |view, _| {
+                view.remote_context().is_none() && view.cwd().is_some()
+            }) {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        app.update(&mut vcx, |app, cx| {
+            assert!(second.read(cx).remote_context().is_none());
+            let expected = second.read(cx).cwd().unwrap();
+            assert_eq!(
+                app.tab_rows_for(app.workspace, cx)[0].path,
+                crate::ui::home::display_path(
+                    &expected,
+                    second.read(cx).display_home(cx).as_deref()
+                ),
+                "a local row must use the remembered pane's directory"
+            );
+        });
     }
 }
 

@@ -59,3 +59,21 @@ markdown-visual-tests -- --test-threads=1` passed 3078 tests with zero
 failures and 11 existing platform/ignored skips. `cargo check --locked
 --all-targets --features markdown-visual-tests`, `cargo fmt --all -- --check`,
 and the host-boundary check also passed.
+
+## Integration verification, 2026-10-17
+
+Merged the fork's current main without rewriting the PR branch. Two additional
+regressions failed before their fixes: the current-workspace switcher displayed
+`/first-pane` for an SSH shell with no known remote path, and a mirrored split
+displayed `prod-web` instead of the remembered `staging` connection.
+
+The switcher now suppresses local-directory fallback for SSH and uses the named
+pane for local fallback. Mirrored splits containing SSH keep the remembered
+pane's title, directory and connection together, including a local pane beside
+SSH. Local-only agent naming retains its existing policy.
+
+Windows validation passes 7 tab-view tests, 26 switcher tests and 2 SSH GPUI
+tests. These cover unknown and reported SSH paths, SSH exit, two remote splits,
+mixed local/SSH splits, WSL and remembered focus. Formatting, diff whitespace
+and the HostOps boundary check pass. The earlier native screenshots were not
+recaptured for this integration update; cross-platform validation runs in CI.

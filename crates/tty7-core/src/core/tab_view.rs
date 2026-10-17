@@ -195,25 +195,30 @@ pub fn tab_views_of(ws: &Workspace, panes: &[PaneRecord]) -> Vec<TabView> {
                 .iter()
                 .filter_map(|id| panes.iter().find(|p| p.id == *id))
                 .collect();
-            // Labels keep their existing first-pane and any-agent rules. The
-            // avatar follows the saved focus, falling back to the first pane.
-            let head = records.first();
+            let head = records.first().copied();
             let focused = tab
                 .focused_pane
                 .and_then(|id| records.iter().copied().find(|p| p.id == id))
-                .or(head.copied());
+                .or(head);
             let facts = records.iter().find_map(|p| p.agent.as_ref());
             // The title follows the agent for the same reason the facts do: an
             // agent's pane titles itself with what it is working on, while a
             // plain shell's says where it is — which `cwd` carries anyway. A
             // split with a shell in front would otherwise name the tab after a
             // directory and bury the agent.
-            let titled = records.iter().find(|p| p.agent.is_some()).or(head);
-            let location = titled.filter(|p| p.ssh_spec.is_some()).or(head);
+            // SSH identity and location follow the remembered pane, including
+            // when that pane is local. Keep the existing local-only agent policy.
+            let has_ssh = records.iter().any(|p| p.ssh_spec.is_some());
+            let titled = if has_ssh {
+                focused
+            } else {
+                records.iter().copied().find(|p| p.agent.is_some()).or(head)
+            };
+            let location = if has_ssh { titled } else { head };
             TabView {
                 id: tab.id,
                 name: tab.name.clone(),
-                title: head.map(|p| p.title.clone()).unwrap_or_default(),
+                title: location.map(|p| p.title.clone()).unwrap_or_default(),
                 osc_title: titled.and_then(|p| p.osc_title.clone()),
                 cwd: location.and_then(|p| p.cwd.clone()),
                 ssh_target: titled.and_then(|p| p.ssh_spec.as_ref()).map(|spec| {
@@ -403,12 +408,64 @@ mod tests {
         spec.display_name = Some("prod-web".into());
         ssh_panes[1].ssh_spec = Some(Box::new(spec));
         ssh_panes[1].osc_title = None;
+        ws.tabs[0].focused_pane = Some(2);
         let views = tab_views_of(&ws, &ssh_panes);
         assert_eq!(views[0].ssh_target.as_deref(), Some("prod-web"));
         assert_eq!(
             views[0].cwd, None,
             "a remote agent must not borrow a local split's cwd"
         );
+    }
+
+    #[test]
+    fn ssh_tab_views_keep_the_remembered_panes_identity_and_location_together() {
+        use crate::core::machine::{Axis, PaneNode};
+
+        let spec = |name: &str| {
+            let mut spec = crate::daemon::ssh::test_support::base_spec();
+            spec.display_name = Some(name.into());
+            Some(Box::new(spec))
+        };
+        let mut tab = Tab::leaf(1);
+        tab.root = PaneNode::Split {
+            axis: Axis::Horizontal,
+            ratio: 0.5,
+            a: Box::new(PaneNode::Leaf { pane: 1 }),
+            b: Box::new(PaneNode::Leaf { pane: 2 }),
+        };
+        tab.focused_pane = Some(2);
+        let mut ws = Workspace::default();
+        ws.tabs.push(tab);
+        let mut panes = vec![
+            PaneRecord {
+                cwd: Some("/srv/prod".into()),
+                osc_title: Some("~/prod".into()),
+                ssh_spec: spec("prod-web"),
+                ..PaneRecord::new(1)
+            },
+            PaneRecord {
+                cwd: Some("/srv/staging".into()),
+                osc_title: Some("~/staging".into()),
+                ssh_spec: spec("staging"),
+                ..PaneRecord::new(2)
+            },
+        ];
+        let selected = tab_views_of(&ws, &panes).remove(0);
+        assert_eq!(selected.ssh_target.as_deref(), Some("staging"));
+        assert_eq!(selected.osc_title.as_deref(), Some("~/staging"));
+        assert_eq!(selected.cwd.as_deref(), Some("/srv/staging"));
+
+        panes[0].ssh_spec = None;
+        let selected = tab_views_of(&ws, &panes).remove(0);
+        assert_eq!(selected.ssh_target.as_deref(), Some("staging"));
+        assert_eq!(selected.cwd.as_deref(), Some("/srv/staging"));
+
+        panes[0].ssh_spec = spec("prod-web");
+        panes[1].ssh_spec = None;
+        let selected = tab_views_of(&ws, &panes).remove(0);
+        assert!(selected.ssh_target.is_none());
+        assert_eq!(selected.osc_title.as_deref(), Some("~/staging"));
+        assert_eq!(selected.cwd.as_deref(), Some("/srv/staging"));
     }
 
     #[test]
