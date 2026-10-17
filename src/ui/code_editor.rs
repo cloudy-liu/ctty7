@@ -101,8 +101,10 @@ impl TabCode {
         if file.host.id() == tree_host
             && let Some(root) = crate::ui::file_tree::containing_root(&self.roots, &file.path)
         {
-            let project = root.file_name().map(Path::new).unwrap_or(root);
-            return Some(project.join(file.path.strip_prefix(root).unwrap()));
+            // The root is the boundary, not a breadcrumb. Cursor's document
+            // title starts with the path inside the project; a file directly
+            // under the root is therefore just its filename.
+            return Some(file.path.strip_prefix(root).unwrap().to_path_buf());
         }
         Some(file.path.clone())
     }
@@ -1670,13 +1672,22 @@ mod tests {
             code.roots = vec!["/work/first".into(), "/work/second".into()];
             assert_eq!(
                 code.active_display_path(HostId::LOCAL),
-                Some(PathBuf::from("second/docs/guide.md"))
+                Some(PathBuf::from("docs/guide.md"))
             );
             code.roots.push("/work/second/docs".into());
             assert_eq!(
                 code.active_display_path(HostId::LOCAL),
-                Some(PathBuf::from("docs/guide.md"))
+                Some(PathBuf::from("guide.md")),
+                "the path starts at the deepest matching project root"
             );
+            let active = code.active;
+            code.files[active].path = "/work/second/CONTEXT.md".into();
+            assert_eq!(
+                code.active_display_path(HostId::LOCAL),
+                Some(PathBuf::from("CONTEXT.md")),
+                "a file at the project root shows its filename without a root breadcrumb"
+            );
+            code.files[active].path = "/work/second/docs/guide.md".into();
             assert_eq!(
                 code.active_display_path(HostId(99)),
                 Some(PathBuf::from("/work/second/docs/guide.md")),
