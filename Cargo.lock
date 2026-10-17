@@ -3570,7 +3570,7 @@ dependencies = [
 [[package]]
 name = "gpui-component"
 version = "0.5.2"
-source = "git+https://github.com/cloudy-liu/gpui-component?rev=e594091c545b9af5a6fc1df290f90891da2a8c39#e594091c545b9af5a6fc1df290f90891da2a8c39"
+source = "git+https://github.com/cloudy-liu/gpui-component?rev=e7711b27a74afaca714b3e52652e9c386195b6c8#e7711b27a74afaca714b3e52652e9c386195b6c8"
 dependencies = [
  "aho-corasick",
  "anyhow",
@@ -3653,7 +3653,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-assets"
 version = "0.5.1"
-source = "git+https://github.com/cloudy-liu/gpui-component?rev=e594091c545b9af5a6fc1df290f90891da2a8c39#e594091c545b9af5a6fc1df290f90891da2a8c39"
+source = "git+https://github.com/cloudy-liu/gpui-component?rev=e7711b27a74afaca714b3e52652e9c386195b6c8#e7711b27a74afaca714b3e52652e9c386195b6c8"
 dependencies = [
  "anyhow",
  "gpui",
@@ -3667,7 +3667,7 @@ dependencies = [
 [[package]]
 name = "gpui-component-macros"
 version = "0.5.1"
-source = "git+https://github.com/cloudy-liu/gpui-component?rev=e594091c545b9af5a6fc1df290f90891da2a8c39#e594091c545b9af5a6fc1df290f90891da2a8c39"
+source = "git+https://github.com/cloudy-liu/gpui-component?rev=e7711b27a74afaca714b3e52652e9c386195b6c8#e7711b27a74afaca714b3e52652e9c386195b6c8"
 dependencies = [
  "proc-macro2",
  "quote",

@@ -34,6 +34,15 @@ pub(crate) struct SplitRow {
     pub(crate) right: Option<SplitCell>,
 }
 
+impl SplitRow {
+    pub(crate) fn cell(&self, side: Side) -> Option<&SplitCell> {
+        match side {
+            Side::Old => self.left.as_ref(),
+            Side::New => self.right.as_ref(),
+        }
+    }
+}
+
 /// Pairs each run of removals with the run of additions that follows it, so a
 /// rewritten line sits opposite the line it replaced. Whichever run is shorter
 /// leaves empty cells at the bottom of the pair.

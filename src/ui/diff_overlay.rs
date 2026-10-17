@@ -2,6 +2,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+#[cfg(feature = "markdown-visual-tests")]
+#[path = "diff_profile.rs"]
+pub(crate) mod profile;
+
 use gpui::{
     AnyElement, Background, FocusHandle, FontWeight, Hsla, KeyDownEvent, Pixels, SharedString,
     Window, div, prelude::*, px,
@@ -40,6 +44,57 @@ const UNIFIED_GUTTER_WIDTH: f32 = 34.;
 const DIFF_MARKER_WIDTH: f32 = 12.;
 const DIFF_DIVIDER_WIDTH: f32 = 1.;
 const DIFF_LINE_END_PADDING: f32 = 4.;
+const DIFF_ROW_HEIGHT: f32 = 19.;
+
+/// Reserve the complete hunk height, but build and lay out only clipped-in rows.
+/// The outer file list still owns scrolling, including selection autoscroll.
+fn visible_diff_rows(
+    count: usize,
+    min_width: f32,
+    render: impl 'static + FnOnce(std::ops::Range<usize>, &mut Window, &mut gpui::App) -> AnyElement,
+) -> impl IntoElement {
+    gpui::canvas(
+        move |bounds, window, cx| {
+            let visible = bounds.intersect(&window.content_mask().bounds);
+            if visible.size.width <= px(0.) || visible.size.height <= px(0.) {
+                return None;
+            }
+            let first = ((visible.top() - bounds.top()).as_f32() / DIFF_ROW_HEIGHT)
+                .floor()
+                .max(0.) as usize;
+            let end = (((visible.bottom() - bounds.top()).as_f32() / DIFF_ROW_HEIGHT).ceil()
+                as usize)
+                .min(count);
+            let mut rows = render(first..end, window, cx);
+            rows.layout_as_root(
+                gpui::size(
+                    gpui::AvailableSpace::Definite(bounds.size.width),
+                    gpui::AvailableSpace::Definite(px((end - first) as f32 * DIFF_ROW_HEIGHT)),
+                ),
+                window,
+                cx,
+            );
+            rows.prepaint_at(
+                gpui::point(
+                    bounds.left(),
+                    bounds.top() + px(first as f32 * DIFF_ROW_HEIGHT),
+                ),
+                window,
+                cx,
+            );
+            Some(rows)
+        },
+        |_, rows, window, cx| {
+            if let Some(mut rows) = rows {
+                rows.paint(window, cx);
+            }
+        },
+    )
+    .w_full()
+    .min_w(px(min_width.ceil()))
+    .h(px(count as f32 * DIFF_ROW_HEIGHT))
+    .flex_shrink_0()
+}
 
 pub(crate) enum DiffLoad {
     Loading,
@@ -1145,7 +1200,7 @@ impl Tty7App {
                         DiffViewMode::Split => HunkRows::Split(split_hunk(&hunk.lines)),
                         DiffViewMode::Unified => HunkRows::Unified(unified_rows(&hunk.lines)),
                     };
-                    (hunk, rows)
+                    (hunk.header.clone(), Arc::new(rows))
                 })
                 .collect();
             let closing_row = if file.truncated.is_some() {
@@ -1196,127 +1251,203 @@ impl Tty7App {
                 .get(self.active)
                 .and_then(|tab| tab.diff_overlay.as_ref())
                 .map(|overlay| overlay.scroll.clone());
-            let mut columns = h_flex()
-                .debug_selector(|| "diff-columns".into())
-                .w_full()
-                .items_stretch();
-            for (column, &side) in sides.iter().enumerate() {
-                let mut row_index = 0;
-                let mut body = v_flex().w_full().flex_shrink_0();
-                let measure = |text: &str| {
-                    crate::ui::tab_strip::measure_text(window.text_system(), &font, font_size, text)
-                };
-                let mut width = 0_f32;
-                for (h, (hunk, rows)) in hunks.iter().enumerate() {
-                    width = width.max(measure(&hunk.header) + 16.);
-                    body = body.child(
-                        div()
-                            .w_full()
-                            .flex_shrink_0()
-                            .px_2()
-                            .py_0p5()
-                            .bg(palette.header)
-                            .text_xs()
-                            .font_family(self.font_family.clone())
-                            .text_color(palette.hunk)
-                            .whitespace_nowrap()
-                            .child(hunk.header.clone()),
-                    );
-                    match rows {
-                        HunkRows::Split(rows) => {
-                            let side = side.expect("split column");
-                            for (r, row) in rows.iter().enumerate() {
-                                let cell = match side {
-                                    Side::Old => row.left.as_ref(),
-                                    Side::New => row.right.as_ref(),
-                                };
-                                if let Some(cell) = cell {
-                                    width = width.max(
-                                        measure(&split_text(cell, side))
-                                            + SPLIT_GUTTER_WIDTH
-                                            + DIFF_LINE_END_PADDING,
-                                    );
-                                }
-                                let radius = if closing_row == Some((h, r)) {
-                                    rounding::inner_radius(
-                                        rounding::CARD_RADIUS,
-                                        rounding::HAIRLINE,
-                                    )
-                                } else {
-                                    px(0.)
-                                };
-                                body = body.child(
-                                    self.diff_split_cell_selected(
-                                        cell,
-                                        side,
-                                        radius,
-                                        cell.map(|_| SelectionLine {
-                                            state: selection.clone(),
-                                            column,
-                                            row: row_index,
-                                            font: font.clone(),
-                                            font_size: px(font_size),
-                                        }),
-                                        cx,
-                                    )
-                                    .flex_none()
-                                    .w_full()
-                                    .h(px(19.))
-                                    .text_xs()
-                                    .font_family(self.font_family.clone()),
-                                );
-                                if cell.is_some() {
-                                    row_index += 1;
-                                }
-                            }
-                        }
-                        HunkRows::Unified(rows) => {
-                            for (r, row) in rows.iter().enumerate() {
-                                width = width.max(
-                                    measure(&row.text)
-                                        + UNIFIED_GUTTER_WIDTH * 2.
-                                        + DIFF_DIVIDER_WIDTH
-                                        + DIFF_MARKER_WIDTH
-                                        + DIFF_LINE_END_PADDING,
-                                );
-                                body = body.child(
-                                    self.diff_unified_row_selected(
-                                        row,
-                                        closing_row == Some((h, r)),
-                                        Some(SelectionLine {
-                                            state: selection.clone(),
-                                            column,
-                                            row: row_index,
-                                            font: font.clone(),
-                                            font_size: px(font_size),
-                                        }),
-                                        cx,
-                                    )
-                                    .flex_shrink_0(),
-                                );
-                                row_index += 1;
-                            }
-                        }
+            let mut hunk_style = window.text_style();
+            hunk_style.font_size = gpui::rems(0.75).into();
+            let hunk_height =
+                hunk_style.line_height_in_pixels(window.rem_size()) + window.rem_size() * 0.25;
+            let body_height = hunk_height * hunks.len() as f32
+                + px(
+                    hunks.iter().map(|(_, rows)| rows.len()).sum::<usize>() as f32
+                        * DIFF_ROW_HEIGHT,
+                )
+                + px(12.);
+            // Keep each horizontal offset even while its file is offscreen.
+            let horizontal: Vec<_> = sides
+                .iter()
+                .map(|side| {
+                    let key = match side {
+                        Some(Side::Old) => "diff-old-scroll",
+                        Some(Side::New) => "diff-new-scroll",
+                        None => "diff-unified-scroll",
+                    };
+                    let scroll = window
+                        .use_keyed_state((key, idx), cx, |_, _| gpui::ScrollHandle::new())
+                        .read(cx)
+                        .clone();
+                    (key, scroll)
+                })
+                .collect();
+            let owner = cx.entity();
+            let columns = gpui::canvas(
+                move |bounds, window, cx| {
+                    let visible = bounds.intersect(&window.content_mask().bounds);
+                    if visible.size.width <= px(0.) || visible.size.height <= px(0.) {
+                        selection.update(cx, |state, _| state.cancel_drag());
+                        return None;
                     }
-                }
-                let key = match side {
-                    Some(Side::Old) => "diff-old-scroll",
-                    Some(Side::New) => "diff-new-scroll",
-                    None => "diff-unified-scroll",
-                };
-                let scroll = window
-                    .use_keyed_state((key, idx), cx, |_, _| gpui::ScrollHandle::new())
-                    .read(cx)
-                    .clone();
-                if side == Some(Side::New) {
-                    columns = columns.child(
-                        div()
-                            .flex_shrink_0()
-                            .w(px(DIFF_DIVIDER_WIDTH))
-                            .bg(palette.border),
-                    );
-                }
-                columns = columns.child(
+                    let mut columns = owner.update(cx, |app, cx| {
+                        let palette = diff_palette(cx);
+                        let mut columns = h_flex()
+                            .debug_selector(|| "diff-columns".into())
+                            .w_full()
+                            .items_stretch();
+                        for (column, &side) in sides.iter().enumerate() {
+                            let mut row_index = 0;
+                            let mut body = v_flex().w_full().flex_shrink_0();
+                            let measure = |text: &str| {
+                                crate::ui::tab_strip::measure_text(
+                                    window.text_system(),
+                                    &font,
+                                    font_size,
+                                    text,
+                                )
+                            };
+                            let mut width = 0_f32;
+                            for (header, rows) in &hunks {
+                                width = width.max(measure(header) + 16.);
+                                match rows.as_ref() {
+                                    HunkRows::Split(rows) => {
+                                        let side = side.expect("split column");
+                                        for cell in rows.iter().filter_map(|row| row.cell(side)) {
+                                            width = width.max(
+                                                measure(&split_text(cell, side))
+                                                    + SPLIT_GUTTER_WIDTH
+                                                    + DIFF_LINE_END_PADDING,
+                                            );
+                                        }
+                                    }
+                                    HunkRows::Unified(rows) => {
+                                        for row in rows {
+                                            width = width.max(
+                                                measure(&row.text)
+                                                    + UNIFIED_GUTTER_WIDTH * 2.
+                                                    + DIFF_DIVIDER_WIDTH
+                                                    + DIFF_MARKER_WIDTH
+                                                    + DIFF_LINE_END_PADDING,
+                                            );
+                                        }
+                                    }
+                                }
+                            }
+                            for (h, (header, rows)) in hunks.iter().enumerate() {
+                                body = body.child(
+                                    div()
+                                        .w_full()
+                                        .h(hunk_height)
+                                        .flex_shrink_0()
+                                        .px_2()
+                                        .py_0p5()
+                                        .bg(palette.header)
+                                        .text_xs()
+                                        .font_family(app.font_family.clone())
+                                        .text_color(palette.hunk)
+                                        .whitespace_nowrap()
+                                        .child(header.clone()),
+                                );
+                                let row_offset = row_index;
+                                match rows.as_ref() {
+                                    HunkRows::Split(rows) => {
+                                        let side = side.expect("split column");
+                                        row_index += rows
+                                            .iter()
+                                            .filter(|row| row.cell(side).is_some())
+                                            .count();
+                                    }
+                                    HunkRows::Unified(rows) => {
+                                        row_index += rows.len();
+                                    }
+                                }
+                                let owner = cx.entity();
+                                let rows = Arc::clone(rows);
+                                let selection = selection.clone();
+                                let font = font.clone();
+                                body = body.child(visible_diff_rows(
+                                    rows.len(),
+                                    width,
+                                    move |range, _, cx| {
+                                        owner.update(cx, |app, cx| {
+                                            let mut body = v_flex().w_full();
+                                            let mut row_index = row_offset;
+                                            match rows.as_ref() {
+                                                HunkRows::Split(rows) => {
+                                                    let side = side.expect("split column");
+                                                    row_index += rows[..range.start]
+                                                        .iter()
+                                                        .filter(|row| row.cell(side).is_some())
+                                                        .count();
+                                                    for r in range {
+                                                        let cell = rows[r].cell(side);
+                                                        let radius = if closing_row == Some((h, r))
+                                                        {
+                                                            rounding::inner_radius(
+                                                                rounding::CARD_RADIUS,
+                                                                rounding::HAIRLINE,
+                                                            )
+                                                        } else {
+                                                            px(0.)
+                                                        };
+                                                        body = body.child(
+                                                            app.diff_split_cell_selected(
+                                                                cell,
+                                                                side,
+                                                                radius,
+                                                                cell.map(|_| SelectionLine {
+                                                                    state: selection.clone(),
+                                                                    column,
+                                                                    row: row_index,
+                                                                    font: font.clone(),
+                                                                    font_size: px(font_size),
+                                                                }),
+                                                                cx,
+                                                            )
+                                                            .flex_none()
+                                                            .w_full()
+                                                            .h(px(DIFF_ROW_HEIGHT))
+                                                            .text_xs()
+                                                            .font_family(app.font_family.clone()),
+                                                        );
+                                                        if cell.is_some() {
+                                                            row_index += 1;
+                                                        }
+                                                    }
+                                                }
+                                                HunkRows::Unified(rows) => {
+                                                    for r in range {
+                                                        body = body.child(
+                                                            app.diff_unified_row_selected(
+                                                                &rows[r],
+                                                                closing_row == Some((h, r)),
+                                                                Some(SelectionLine {
+                                                                    state: selection.clone(),
+                                                                    column,
+                                                                    row: row_offset + r,
+                                                                    font: font.clone(),
+                                                                    font_size: px(font_size),
+                                                                }),
+                                                                cx,
+                                                            )
+                                                            .flex_shrink_0(),
+                                                        );
+                                                    }
+                                                }
+                                            }
+                                            body.into_any_element()
+                                        })
+                                    },
+                                ));
+                            }
+                            let (key, scroll) = &horizontal[column];
+                            let key = *key;
+                            let scroll = scroll.clone();
+                            if side == Some(Side::New) {
+                                columns = columns.child(
+                                    div()
+                                        .flex_shrink_0()
+                                        .w(px(DIFF_DIVIDER_WIDTH))
+                                        .bg(palette.border),
+                                );
+                            }
+                            columns = columns.child(
                     div()
                         .relative()
                         .flex_1()
@@ -1366,7 +1497,29 @@ impl Tty7App {
                                 ),
                         ),
                 );
-            }
+                        }
+                        columns.into_any_element()
+                    });
+                    columns.layout_as_root(
+                        gpui::size(
+                            gpui::AvailableSpace::Definite(bounds.size.width),
+                            gpui::AvailableSpace::Definite(bounds.size.height),
+                        ),
+                        window,
+                        cx,
+                    );
+                    columns.prepaint_at(bounds.origin, window, cx);
+                    Some(columns)
+                },
+                |_, columns, window, cx| {
+                    if let Some(mut columns) = columns {
+                        columns.paint(window, cx);
+                    }
+                },
+            )
+            .w_full()
+            .h(body_height)
+            .flex_shrink_0();
             card = card.child(columns);
             if let Some(reason) = file.truncated {
                 let note = match reason {
@@ -3032,6 +3185,313 @@ mod github_theme_gpui_tests {
         file: FileDiff,
         mode: DiffViewMode,
         vertical: gpui::ScrollHandle,
+    }
+
+    struct ManyDiffs {
+        app: gpui::Entity<Tty7App>,
+        snapshot: DiffSnapshot,
+        vertical: gpui::ScrollHandle,
+    }
+
+    impl gpui::Render for ManyDiffs {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            self.app.update(cx, |app, cx| {
+                div()
+                    .w(px(1000.))
+                    .h(px(700.))
+                    .flex()
+                    .child(app.diff_file_list(
+                        &self.snapshot,
+                        &HashMap::new(),
+                        None,
+                        &self.vertical,
+                        window,
+                        cx,
+                    ))
+            })
+        }
+    }
+
+    fn many_diffs() -> DiffSnapshot {
+        let files = (0..24)
+            .map(|file| {
+                let text = (0..300)
+                    .map(|row| format!("file {file} line {row}: let value = calculate(input);\n"))
+                    .collect::<String>();
+                git_diff::synthesize_added(
+                    &format!("file-{file}.rs"),
+                    text.as_bytes(),
+                    &git_diff::DiffBudget::PANEL,
+                )
+            })
+            .collect();
+        let snapshot = DiffSnapshot {
+            files,
+            ..Default::default()
+        };
+        assert!(!snapshot.stats().oversized);
+        snapshot
+    }
+
+    #[gpui::test]
+    fn diff_only_shapes_visible_rows_and_reaches_the_last_file(cx: &mut TestAppContext) {
+        use crate::ui::diff_selection::geometry_probe;
+        let (app, _) = test_window::harness(cx);
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            cx.update(|cx| cx.global_mut::<Config>().diff_view = mode);
+            let vertical = gpui::ScrollHandle::new();
+            let (_, vcx) = cx.add_window_view(|_, _| ManyDiffs {
+                app: app.clone(),
+                snapshot: many_diffs(),
+                vertical: vertical.clone(),
+            });
+            for end in [false, true] {
+                if end {
+                    vertical.set_offset(point(px(0.), px(-1_000_000.)));
+                }
+                geometry_probe::reset();
+                vcx.update(|window, cx| {
+                    window.refresh();
+                    let _ = window.draw(cx);
+                });
+                let shaped = geometry_probe::count();
+                assert!(
+                    shaped > 0 && shaped < 80,
+                    "shaped {shaped} rows in {mode:?}"
+                );
+                let card = vcx
+                    .debug_bounds(if end { "diff-card-23" } else { "diff-card-0" })
+                    .unwrap();
+                assert!(card.top() < px(700.) && card.bottom() > px(0.));
+                if end {
+                    let column = if mode == DiffViewMode::Split { 1 } else { 0 };
+                    let selector = if column == 1 {
+                        "diff-selection-text-1-299"
+                    } else {
+                        "diff-selection-text-0-299"
+                    };
+                    assert!(vcx.debug_bounds(selector).is_some(), "last row must render");
+                }
+            }
+        }
+    }
+
+    #[gpui::test]
+    fn diff_selection_spans_rows_that_scroll_out_of_view(cx: &mut TestAppContext) {
+        let (app, _) = test_window::harness(cx);
+        let source = (0..200)
+            .map(|row| format!("line-{row:03}\n"))
+            .collect::<String>();
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            let vertical = gpui::ScrollHandle::new();
+            let (_, vcx) = cx.add_window_view(|_, _| LongDiff {
+                app: app.clone(),
+                mode,
+                vertical: vertical.clone(),
+                file: git_diff::synthesize_added(
+                    "selection.txt",
+                    source.as_bytes(),
+                    &git_diff::DiffBudget::SINGLE_FILE,
+                ),
+            });
+            let split = mode == DiffViewMode::Split;
+            let top = vcx
+                .debug_bounds(if split {
+                    "diff-selection-text-1-0"
+                } else {
+                    "diff-selection-text-0-0"
+                })
+                .unwrap();
+            let (a, b) = vcx.update(|window, cx| {
+                let font = gpui::Font {
+                    family: app.read(cx).font_family.clone().into(),
+                    ..Default::default()
+                };
+                let size = window.rem_size().as_f32() * 0.75;
+                let width = |text: &str| {
+                    crate::ui::tab_strip::measure_text(window.text_system(), &font, size, text)
+                };
+                (
+                    width(if split { "+ " } else { "" }),
+                    width(if split { "+ line-199" } else { "line-199" }),
+                )
+            });
+            let start = point(top.left() + px(a), top.center().y);
+            vcx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vertical.set_offset(point(px(0.), px(-100_000.)));
+            vcx.update(|window, cx| {
+                window.refresh();
+                let _ = window.draw(cx);
+            });
+            let bottom = vcx
+                .debug_bounds(if split {
+                    "diff-selection-text-1-199"
+                } else {
+                    "diff-selection-text-0-199"
+                })
+                .unwrap();
+            let end = point(bottom.left() + px(b), bottom.center().y);
+            vcx.simulate_mouse_move(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.simulate_keystrokes("secondary-c");
+            assert_eq!(
+                vcx.update(|_, cx| cx.read_from_clipboard().unwrap().text().unwrap()),
+                source.trim_end()
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn diff_horizontal_offset_survives_scrolling_past_the_file(cx: &mut TestAppContext) {
+        let (app, _) = test_window::harness(cx);
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            cx.update(|cx| cx.global_mut::<Config>().diff_view = mode);
+            let mut snapshot = many_diffs();
+            snapshot.files[0].hunks[0].lines[0].text = format!("{}END", "x".repeat(600));
+            let vertical = gpui::ScrollHandle::new();
+            let (_, vcx) = cx.add_window_view(|_, _| ManyDiffs {
+                app: app.clone(),
+                snapshot,
+                vertical: vertical.clone(),
+            });
+            let split = mode == DiffViewMode::Split;
+            let viewport = vcx
+                .debug_bounds(if split {
+                    "diff-new-scroll"
+                } else {
+                    "diff-unified-scroll"
+                })
+                .unwrap();
+            vcx.simulate_event(gpui::ScrollWheelEvent {
+                position: point(viewport.center().x, px(80.)),
+                delta: gpui::ScrollDelta::Pixels(point(px(-100_000.), px(0.))),
+                ..Default::default()
+            });
+            vcx.run_until_parked();
+            let selector = if split {
+                "diff-selection-text-1-0"
+            } else {
+                "diff-selection-text-0-0"
+            };
+            let before = vcx.debug_bounds(selector).unwrap();
+            assert!(before.left() < viewport.left());
+            vertical.set_offset(point(px(0.), px(-1_000_000.)));
+            vcx.update(|window, cx| {
+                window.refresh();
+                let _ = window.draw(cx);
+            });
+            vertical.set_offset(point(px(0.), px(0.)));
+            vcx.update(|window, cx| {
+                window.refresh();
+                let _ = window.draw(cx);
+            });
+            assert_eq!(
+                vcx.debug_bounds(selector).unwrap().left(),
+                before.left(),
+                "{mode:?}"
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn short_hunks_keep_the_full_column_width_after_horizontal_scroll(cx: &mut TestAppContext) {
+        use crate::ui::diff_selection::geometry_probe;
+        let (app, _) = test_window::harness(cx);
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            let mut file = git_diff::synthesize_added(
+                "width.txt",
+                b"short\n",
+                &git_diff::DiffBudget::SINGLE_FILE,
+            );
+            file.hunks.push(git_diff::Hunk {
+                header: "@@ -0,0 +20 @@".into(),
+                lines: vec![git_diff::DiffLine {
+                    kind: LineKind::Added,
+                    old_no: None,
+                    new_no: Some(20),
+                    text: "x".repeat(600),
+                }],
+            });
+            let (_, vcx) = cx.add_window_view(|_, _| LongDiff {
+                app: app.clone(),
+                file,
+                mode,
+                vertical: gpui::ScrollHandle::new(),
+            });
+            let viewport = vcx
+                .debug_bounds(if mode == DiffViewMode::Split {
+                    "diff-new-scroll"
+                } else {
+                    "diff-unified-scroll"
+                })
+                .unwrap();
+            vcx.simulate_event(gpui::ScrollWheelEvent {
+                position: viewport.center(),
+                delta: gpui::ScrollDelta::Pixels(point(px(-100_000.), px(0.))),
+                ..Default::default()
+            });
+            vcx.run_until_parked();
+            geometry_probe::reset();
+            vcx.update(|window, cx| {
+                window.refresh();
+                let _ = window.draw(cx);
+            });
+            assert_eq!(
+                geometry_probe::count(),
+                2,
+                "both hunk rows span the column in {mode:?}"
+            );
+        }
+    }
+
+    #[gpui::test]
+    #[ignore = "manual diff frame benchmark; run with --ignored --nocapture"]
+    fn diff_many_files_frame_profile(cx: &mut TestAppContext) {
+        let (app, _) = test_window::harness(cx);
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            cx.update(|cx| cx.global_mut::<Config>().diff_view = mode);
+            let snapshot = many_diffs();
+            let vertical = gpui::ScrollHandle::new();
+            let start = std::time::Instant::now();
+            let (_, vcx) = cx.add_window_view(|_, _| ManyDiffs {
+                app: app.clone(),
+                snapshot,
+                vertical: vertical.clone(),
+            });
+            vcx.run_until_parked();
+            let first_ms = start.elapsed().as_secs_f64() * 1000.;
+            let mut samples = Vec::new();
+            for frame in 0..30 {
+                let start = std::time::Instant::now();
+                vcx.simulate_event(gpui::ScrollWheelEvent {
+                    position: point(px(900.), px(350.)),
+                    delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-120.))),
+                    ..Default::default()
+                });
+                vcx.run_until_parked();
+                if frame >= 5 {
+                    samples.push(start.elapsed().as_secs_f64() * 1000.);
+                }
+            }
+            assert!(
+                vertical.offset().y < px(-1000.),
+                "profile must scroll the diff"
+            );
+            samples.sort_by(f64::total_cmp);
+            eprintln!(
+                "DIFF_FRAME_PROFILE {}",
+                serde_json::json!({
+                    "mode": format!("{mode:?}"), "files": 24, "lines": 7200,
+                    "first_frame_ms": first_ms,
+                    "scroll_median_ms": samples[samples.len()/2],
+                    "scroll_p95_ms": samples[samples.len()*95/100],
+                })
+            );
+            assert!(
+                first_ms < 250.,
+                "opening the diff blocks for {first_ms:.1} ms"
+            );
+        }
     }
 
     #[gpui::test]

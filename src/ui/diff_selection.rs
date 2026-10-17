@@ -15,6 +15,20 @@ use unicode_segmentation::UnicodeSegmentation as _;
 use crate::core::config::DiffViewMode;
 use crate::ui::i18n::{L10nKey, t};
 
+#[cfg(test)]
+pub(crate) mod geometry_probe {
+    thread_local! { static ROWS: std::cell::Cell<usize> = const { std::cell::Cell::new(0) }; }
+    pub(crate) fn reset() {
+        ROWS.set(0);
+    }
+    pub(crate) fn count() -> usize {
+        ROWS.get()
+    }
+    pub(super) fn record() {
+        ROWS.set(ROWS.get() + 1);
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Position {
     row: usize,
@@ -99,6 +113,11 @@ impl DiffSelection {
         for column in &mut self.columns {
             column.geometry.fill(None);
         }
+    }
+
+    pub(crate) fn cancel_drag(&mut self) {
+        self.pointer = None;
+        self.drag_task = None;
     }
 
     fn range(&self) -> Option<(Position, Position)> {
@@ -527,6 +546,8 @@ impl SelectionLine {
                 .child(
                     canvas(
                         move |bounds, window, cx| {
+                            #[cfg(test)]
+                            geometry_probe::record();
                             let raw = geometry.read(cx).columns[column].lines[row].clone();
                             let line = window.text_system().shape_line(
                                 display.clone(),
@@ -619,6 +640,22 @@ fn display_boundaries(raw: &str, prefix: usize) -> Vec<(usize, usize)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[gpui::test]
+    fn cancelling_a_hidden_drag_keeps_the_selection(cx: &mut gpui::TestAppContext) {
+        let selection = cx.new(DiffSelection::new);
+        selection.update(cx, |s, cx| {
+            s.configure(DiffViewMode::Unified, vec![vec!["selected".into()]]);
+            s.anchor = Some(Position { row: 0, byte: 0 });
+            s.head = Some(Position { row: 0, byte: 8 });
+            s.pointer = Some(point(px(0.), px(0.)));
+            s.drag_task = Some(cx.spawn(async move |_, _| std::future::pending::<()>().await));
+            s.cancel_drag();
+            assert!(s.pointer.is_none());
+            assert!(s.drag_task.is_none());
+            assert_eq!(s.text(), "selected");
+        });
+    }
 
     #[gpui::test]
     fn partial_multiline_selection_preserves_original_unicode_and_tabs(
