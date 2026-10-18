@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::{Arc, OnceLock};
 
@@ -243,6 +243,17 @@ pub struct Config {
     /// config file on every save once there is more than one entry.
     #[serde(default)]
     pub sidebar_group_names: BTreeMap<String, String>,
+    /// Folded sidebar groups, keyed by the same root path string as
+    /// [`Self::sidebar_group_names`] (`""` for the Scratch group). A `BTreeSet`
+    /// rather than a `HashSet` so the config file keeps a stable order across
+    /// saves.
+    #[serde(default)]
+    pub sidebar_collapsed_groups: BTreeSet<String>,
+    /// Pinned sidebar groups, in the order they appear at the top of the
+    /// sidebar. Each entry is a repo or directory root path (`""` is never
+    /// pinned).
+    #[serde(default)]
+    pub sidebar_pinned_groups: Vec<String>,
     #[serde(default, deserialize_with = "de_lenient")]
     pub notify_on_command_finish: NotifyMode,
     /// Audio for Agent completion/input, independent of desktop notifications.
@@ -631,6 +642,8 @@ impl Default for Config {
             sidebar_diff_preview: true,
             sidebar_agent_status_text: true,
             sidebar_group_names: BTreeMap::new(),
+            sidebar_collapsed_groups: BTreeSet::new(),
+            sidebar_pinned_groups: Vec::new(),
             notify_on_command_finish: NotifyMode::Unfocused,
             agent_notification_sound: NotifyMode::Unfocused,
             check_for_updates: true,
@@ -1474,6 +1487,45 @@ mod tests {
         // A config predating the key parses to the default empty map.
         let old: Config = serde_json::from_str("{}").unwrap();
         assert!(old.sidebar_group_names.is_empty());
+    }
+
+    #[test]
+    fn sidebar_collapsed_and_pinned_groups_round_trip_and_default_empty() {
+        let mut cfg = Config::default();
+        assert!(cfg.sidebar_collapsed_groups.is_empty());
+        assert!(cfg.sidebar_pinned_groups.is_empty());
+
+        let alpha = r"D:\gh-prj\alpha";
+        let beta = r"D:\gh-prj\beta";
+        cfg.sidebar_collapsed_groups.insert(beta.into());
+        cfg.sidebar_collapsed_groups.insert(String::new());
+        cfg.sidebar_collapsed_groups.insert(alpha.into());
+        cfg.sidebar_pinned_groups = vec![beta.into(), alpha.into()];
+
+        let text = serde_json::to_string(&cfg).unwrap();
+        assert!(
+            text.contains(
+                r#""sidebar_collapsed_groups":["","D:\\gh-prj\\alpha","D:\\gh-prj\\beta"]"#
+            ),
+            "collapsed groups serialize in sorted order: {text}"
+        );
+        assert!(
+            text.contains(r#""sidebar_pinned_groups":["D:\\gh-prj\\beta","D:\\gh-prj\\alpha"]"#),
+            "pinned groups preserve user order: {text}"
+        );
+
+        let back: Config = serde_json::from_str(&text).unwrap();
+        assert!(back.sidebar_collapsed_groups.contains(alpha));
+        assert!(back.sidebar_collapsed_groups.contains(beta));
+        assert!(back.sidebar_collapsed_groups.contains(""));
+        assert_eq!(
+            back.sidebar_pinned_groups,
+            vec![beta.to_string(), alpha.to_string()]
+        );
+
+        let old: Config = serde_json::from_str("{}").unwrap();
+        assert!(old.sidebar_collapsed_groups.is_empty());
+        assert!(old.sidebar_pinned_groups.is_empty());
     }
 
     #[test]

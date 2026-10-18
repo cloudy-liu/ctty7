@@ -64,6 +64,15 @@ fn agent_icon(path: &str) -> Option<&'static [u8]> {
         "icons/chevron-right-thin.svg" => {
             include_bytes!("../../assets/icons/chevron-right-thin.svg")
         }
+        "icons/chevrons-up-down.svg" => {
+            include_bytes!("../../assets/icons/chevrons-up-down.svg")
+        }
+        "icons/chevrons-down-up.svg" => {
+            include_bytes!("../../assets/icons/chevrons-down-up.svg")
+        }
+        "icons/pin.svg" => include_bytes!("../../assets/icons/pin.svg"),
+        "icons/pin-filled.svg" => include_bytes!("../../assets/icons/pin-filled.svg"),
+        "icons/pin-off.svg" => include_bytes!("../../assets/icons/pin-off.svg"),
         "icons/folder-open.svg" => include_bytes!("../../assets/icons/folder-open.svg"),
         "icons/info.svg" => include_bytes!("../../assets/icons/info.svg"),
         "icons/eye.svg" => include_bytes!("../../assets/icons/eye.svg"),
@@ -182,6 +191,11 @@ mod tests {
             "icons/git-branch.svg",
             "icons/git-sync.svg",
             "icons/git-commit.svg",
+            "icons/pin.svg",
+            "icons/pin-filled.svg",
+            "icons/pin-off.svg",
+            "icons/chevrons-up-down.svg",
+            "icons/chevrons-down-up.svg",
         ] {
             assert!(
                 Assets.load(path).unwrap().is_some(),

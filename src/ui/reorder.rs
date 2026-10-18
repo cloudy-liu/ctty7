@@ -53,9 +53,25 @@ pub(crate) fn preview(
     })
 }
 
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub(crate) enum PendingOrder {
+    Tabs(Vec<usize>),
+    PinnedGroups(Vec<String>),
+}
+
 pub(crate) fn set_pending(state: &ReorderState, surface: &Surface, order: Vec<usize>) {
     if let Some(r) = state.borrow().as_ref().filter(|r| r.surface == *surface) {
-        *r.pending.borrow_mut() = Some(order);
+        *r.pending.borrow_mut() = Some(PendingOrder::Tabs(order));
+    }
+}
+
+pub(crate) fn set_pending_pinned(state: &ReorderState, order: Vec<String>) {
+    if let Some(r) = state
+        .borrow()
+        .as_ref()
+        .filter(|r| r.surface == Surface::PinnedGroups)
+    {
+        *r.pending.borrow_mut() = Some(PendingOrder::PinnedGroups(order));
     }
 }
 
@@ -65,7 +81,7 @@ pub(crate) fn clear_pending(state: &ReorderState) {
     }
 }
 
-pub(crate) fn take_pending(state: &ReorderState) -> Option<Vec<usize>> {
+pub(crate) fn take_pending(state: &ReorderState) -> Option<PendingOrder> {
     state.borrow_mut().take()?.pending.into_inner()
 }
 
@@ -97,6 +113,7 @@ pub(crate) enum Surface {
     Strip,
     SidebarRows(Option<PathBuf>),
     SidebarGroups,
+    PinnedGroups,
 }
 
 pub(crate) struct Reorder {
@@ -108,7 +125,7 @@ pub(crate) struct Reorder {
     grab: Point<Pixels>,
     prev: Cell<usize>,
     generation: Cell<usize>,
-    pending: RefCell<Option<Vec<usize>>>,
+    pending: RefCell<Option<PendingOrder>>,
     /// The tab this drag picked up, for the surfaces that drag tabs. `None` on
     /// a surface that drags something else — a sidebar group, say, which is
     /// several tabs and cannot be merged into one.
@@ -389,7 +406,10 @@ mod tests {
         *state.borrow_mut() = Some(column(3, 30., 2., 0));
         clear_pending(&state);
         set_pending(&state, &mine, vec![1, 0, 2]);
-        assert_eq!(take_pending(&state), Some(vec![1, 0, 2]));
+        assert_eq!(
+            take_pending(&state),
+            Some(PendingOrder::Tabs(vec![1, 0, 2]))
+        );
     }
 
     #[test]

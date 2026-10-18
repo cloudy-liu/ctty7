@@ -1,11 +1,14 @@
 use gpui::{
-    Animation, AnimationExt as _, AnyElement, Axis, Bounds, Context, Div, FontWeight, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, SharedString, Stateful, Window, canvas,
-    deferred, div, ease_out_quint, linear_color_stop, linear_gradient, prelude::*, px,
+    Animation, AnimationExt as _, AnyElement, Axis, Bounds, ClickEvent, Context, Div, FontWeight,
+    MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, SharedString, Stateful,
+    Window, canvas, deferred, div, ease_out_quint, linear_color_stop, linear_gradient, prelude::*,
+    px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::Input;
-use gpui_component::menu::{ContextMenu, ContextMenuExt as _, PopupMenuItem};
+use gpui_component::menu::{
+    ContextMenu, ContextMenuExt as _, DropdownMenu as _, PopupMenu, PopupMenuItem,
+};
 use gpui_component::{ActiveTheme as _, Icon, IconName, Sizable as _, h_flex, v_flex};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -166,7 +169,23 @@ impl Tty7App {
             .gap_0p5();
 
         let keys: Rc<Vec<Option<PathBuf>>> = Rc::new(self.sidebar_group_keys(cx));
-        let sections = sidebar_sections(&keys);
+        let is_local = self.can_spawn_locally(cx);
+        let pinned_cfg: Rc<Vec<String>> = Rc::new(self.sidebar_pinned_groups(cx).to_vec());
+        if is_local {
+            self.probe_pinned_dirs(&keys, &pinned_cfg, cx);
+        }
+        let keep_empty =
+            |p: &Path| is_local && self.pinned_dir_cache.borrow().get(p) == Some(&true);
+        let sections = self.sidebar_sections(&keys, cx);
+        let headed_keys: Vec<String> = sections
+            .iter()
+            .filter(|s| s.name.is_some())
+            .map(|s| group_name_key(&s.key))
+            .collect();
+        let all_collapsed = !headed_keys.is_empty()
+            && headed_keys
+                .iter()
+                .all(|k| cx.global::<Config>().sidebar_collapsed_groups.contains(k));
 
         // ⌘N runs ActivateTabN, which goes through `activate_visual` — the
         // Nth row as the sidebar lays it out, not the Nth tab in `self.tabs`.
@@ -239,9 +258,42 @@ impl Tty7App {
         };
         let dark_sidebar = crate::ui::presets::surface_is_dark(cx.theme().sidebar);
         let rem = window.rem_size().as_f32();
-        let rendered = |ix: &usize| !visible_by_section[*ix].is_empty();
+        let rendered = |ix: &usize| {
+            !visible_by_section[*ix].is_empty()
+                || (sections[*ix].pinned && sections[*ix].tabs.is_empty() && query.is_empty())
+        };
+        let pinned_slots: Vec<usize> = (0..sections.len())
+            .filter(|&ix| sections[ix].key.is_some() && sections[ix].pinned)
+            .filter(rendered)
+            .collect();
+        let pinned_groups = pinned_slots.len();
+        let pinned_group_slots: Rc<RefCell<Vec<Bounds<Pixels>>>> =
+            Rc::new(RefCell::new(vec![Bounds::default(); pinned_groups]));
+        let pinned_preview = reorder::preview(
+            &self.reorder,
+            &Surface::PinnedGroups,
+            pinned_groups,
+            pointer,
+        );
+        let pinned_roots: Vec<PathBuf> = pinned_slots
+            .iter()
+            .filter_map(|&ix| sections[ix].key.clone())
+            .collect();
+        let pinned_slot_display: Vec<usize> = match &pinned_preview {
+            Some(p) => {
+                if let (Some(from), Some(to)) =
+                    (pinned_roots.get(p.from), pinned_roots.get(p.target))
+                    && let Some(order) = reordered_pinned(&pinned_cfg, from, to)
+                {
+                    reorder::set_pending_pinned(&self.reorder, order);
+                }
+                p.order.clone()
+            }
+            None => (0..pinned_groups).collect(),
+        };
+
         let repo_slots: Vec<usize> = (0..sections.len())
-            .filter(|&ix| sections[ix].key.is_some())
+            .filter(|&ix| sections[ix].key.is_some() && !sections[ix].pinned)
             .filter(rendered)
             .collect();
         let repo_groups = repo_slots.len();
@@ -264,32 +316,75 @@ impl Tty7App {
             }
             None => (0..repo_groups).collect(),
         };
-        let mut blocks: Vec<(Option<usize>, usize)> = slot_display
+
+        let scratch_slots: Vec<usize> = (0..sections.len())
+            .filter(|&ix| sections[ix].key.is_none())
+            .filter(rendered)
+            .collect();
+        let unpinned_headed_count = repo_groups
+            + scratch_slots
+                .iter()
+                .filter(|&&ix| sections[ix].name.is_some())
+                .count();
+        let show_pin_divider = pinned_groups > 0 && unpinned_headed_count > 0;
+        let mut divider_inserted = false;
+
+        let mut blocks: Vec<(Option<(Surface, usize)>, usize)> = pinned_slot_display
             .into_iter()
-            .map(|slot| (Some(slot), repo_slots[slot]))
+            .map(|slot| (Some((Surface::PinnedGroups, slot)), pinned_slots[slot]))
             .collect();
         blocks.extend(
-            (0..sections.len())
-                .filter(|&ix| sections[ix].key.is_none())
-                .filter(rendered)
-                .map(|ix| (None, ix)),
+            slot_display
+                .into_iter()
+                .map(|slot| (Some((Surface::SidebarGroups, slot)), repo_slots[slot])),
         );
+        blocks.extend(scratch_slots.into_iter().map(|ix| (None, ix)));
 
         for (group_slot, group_ix) in blocks {
             let section = &sections[group_ix];
+            let (drag_slots, active_preview, anim_prefix) = match &group_slot {
+                Some((Surface::PinnedGroups, _)) => {
+                    (&pinned_group_slots, &pinned_preview, "pinned-group-slide")
+                }
+                _ => (&group_slots, &group_preview, "group-slide"),
+            };
+            let slot_ix = group_slot.as_ref().map(|(_, slot)| *slot);
+            if show_pin_divider && !section.pinned && !divider_inserted {
+                divider_inserted = true;
+                list = list.child(
+                    div()
+                        .mx(px(12.))
+                        .my(px(6.))
+                        .h(px(1.))
+                        .bg(cx.theme().sidebar_border),
+                );
+            }
             let group_key = section.key.clone();
+            let group_key_str = group_name_key(&group_key);
+            let stored_collapsed = section.name.is_some()
+                && cx
+                    .global::<Config>()
+                    .sidebar_collapsed_groups
+                    .contains(&group_key_str);
+            let effective_collapsed = stored_collapsed && query.is_empty();
             let mut rows: Vec<ContextMenu<Stateful<Div>>> = Vec::new();
             let visible = visible_by_section[group_ix].clone();
-            let visible_tabs: Vec<usize> = visible.clone();
+            let visible_count = visible.len();
+            let draw_visible: Vec<usize> = if effective_collapsed {
+                Vec::new()
+            } else {
+                visible.clone()
+            };
+            let visible_tabs: Vec<usize> = draw_visible.clone();
             let row_slots: Rc<RefCell<Vec<Bounds<Pixels>>>> =
-                Rc::new(RefCell::new(vec![Bounds::default(); visible.len()]));
+                Rc::new(RefCell::new(vec![Bounds::default(); draw_visible.len()]));
             let row_preview = reorder::preview(
                 &self.reorder,
                 &Surface::SidebarRows(group_key.clone()),
-                visible.len(),
+                draw_visible.len(),
                 pointer,
             );
-            for (slot, i) in visible.into_iter().enumerate() {
+            for (slot, i) in draw_visible.into_iter().enumerate() {
                 let badge_pos = badge_pos[i];
                 let tab = &self.tabs[i];
                 let is_active = i == active;
@@ -895,15 +990,22 @@ impl Tty7App {
                 }));
             }
 
-            if rows.is_empty() {
+            let kept_empty_pin = section.pinned && section.tabs.is_empty() && query.is_empty();
+            if visible_count == 0 && !kept_empty_pin {
                 continue;
             }
 
             let row_display: Vec<usize> = match &row_preview {
                 Some(p) => {
-                    if let Some(order) =
-                        reordered_rows(&keys, &group_key, &visible_tabs, p.from, p.target)
-                    {
+                    if let Some(order) = reordered_rows(
+                        &keys,
+                        &pinned_cfg,
+                        &keep_empty,
+                        &group_key,
+                        &visible_tabs,
+                        p.from,
+                        p.target,
+                    ) {
                         reorder::set_pending(
                             &self.reorder,
                             &Surface::SidebarRows(group_key.clone()),
@@ -914,10 +1016,10 @@ impl Tty7App {
                 }
                 None => (0..rows.len()).collect(),
             };
-            let row_count = rows.len();
+            let tab_count = section.tabs.len();
             let mut rows: Vec<Option<ContextMenu<Stateful<Div>>>> =
                 rows.into_iter().map(Some).collect();
-            let rows: Vec<AnyElement> = row_display
+            let mut rows: Vec<AnyElement> = row_display
                 .into_iter()
                 .map(|slot| match &row_preview {
                     Some(p) if p.from == slot => deferred(
@@ -950,6 +1052,62 @@ impl Tty7App {
                         .into_any_element(),
                 })
                 .collect();
+
+            if kept_empty_pin
+                && !effective_collapsed
+                && let Some(path) = section.key.clone()
+            {
+                let shown_name = section
+                    .name
+                    .clone()
+                    .map(|n| effective_group_name(cx.global::<Config>(), &section.key, n))
+                    .unwrap_or_default();
+                let placeholder_label = t_fmt(L10nKey::SidebarNewTabIn, &[("name", &shown_name)]);
+                let ghost = h_flex()
+                    .id(("sidebar-ghost", group_ix))
+                    .group(SharedString::from(format!("sidebar-ghost-{group_ix}")))
+                    .cursor_pointer()
+                    .w_full()
+                    .py_1()
+                    .pl_2()
+                    .pr_2()
+                    .gap_2()
+                    .items_center()
+                    .rounded_lg()
+                    .text_xs()
+                    .text_color(cx.theme().muted_foreground)
+                    .hover(|s| {
+                        s.bg(gpui::rgb(sf.hover))
+                            .text_color(cx.theme().sidebar_foreground)
+                    })
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.new_tab_at(path.clone(), window, cx);
+                    }))
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .size(px(row_metrics::AVATAR))
+                            .rounded_full()
+                            .border_1()
+                            .border_dashed()
+                            .border_color(cx.theme().muted_foreground.opacity(0.6))
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .child(
+                                Icon::empty()
+                                    .path("icons/plus.svg")
+                                    .size(px(11.))
+                                    .text_color(cx.theme().muted_foreground),
+                            ),
+                    )
+                    .child(div().flex_1().min_w_0().truncate().child(placeholder_label))
+                    .into_any_element();
+                rows.push(ghost);
+            }
+
             let header = section.name.clone().map(|name| {
                 let shown = effective_group_name(cx.global::<Config>(), &section.key, name);
                 let rename_input = self
@@ -957,25 +1115,36 @@ impl Tty7App {
                     .as_ref()
                     .filter(|r| r.key == section.key)
                     .map(|r| r.input.clone());
+                let has_active = section.tabs.contains(&active);
+                let folded_active = effective_collapsed && has_active;
+                let header_group = SharedString::from(format!("sidebar-group-head-{group_ix}"));
+                let fg = cx.theme().sidebar_foreground;
+                let muted = cx.theme().muted_foreground;
+                let accent = cx.theme().primary;
+                let hover_bg = gpui::rgb(sf.hover);
                 let base = h_flex()
                     .id(("sidebar-group", group_ix))
+                    .group(header_group.clone())
+                    .relative()
                     .w_full()
+                    .h(px(28.))
                     .items_center()
-                    .gap_1p5()
-                    .pl_2()
+                    .gap_1()
+                    .pl_1()
                     .pr_1p5()
-                    .pt_1p5()
-                    .pb_0p5()
-                    .text_size(px(11.))
-                    .text_color(cx.theme().muted_foreground)
-                    .when_some(group_slot, |header, slot| {
+                    .rounded_md()
+                    .cursor_pointer()
+                    .text_size(px(12.))
+                    .text_color(if folded_active { fg } else { muted })
+                    .hover(move |s| s.bg(hover_bg).text_color(fg))
+                    .when_some(group_slot.clone(), |header, (surface, slot)| {
+                        let slots = drag_slots.clone();
                         crate::ui::reorder::cursor_grab(header).on_drag(DragGroup, {
                             let state = self.reorder.clone();
-                            let slots = group_slots.clone();
                             move |_drag, grab, _window, cx| {
                                 cx.stop_propagation();
                                 *state.borrow_mut() = Some(Reorder::new(
-                                    Surface::SidebarGroups,
+                                    surface.clone(),
                                     slot,
                                     slots.borrow().clone(),
                                     Axis::Vertical,
@@ -1003,65 +1172,211 @@ impl Tty7App {
                         )
                         .into_any_element();
                 }
-                let label: SharedString = shown.to_uppercase().into();
+
+                let chevron_path = if effective_collapsed {
+                    "icons/chevron-right-thin.svg"
+                } else {
+                    "icons/chevron-down-thin.svg"
+                };
+                let chevron_color = if folded_active { accent } else { muted };
+                let chevron = div()
+                    .flex_shrink_0()
+                    .size(px(16.))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .text_color(chevron_color)
+                    .when(!folded_active, |d| {
+                        d.group_hover(header_group.clone(), move |s| s.text_color(fg))
+                    })
+                    .child(Icon::empty().path(chevron_path).size(px(12.)));
+
+                let status_dots: Option<Div> = if effective_collapsed {
+                    let dot_colors: Vec<gpui::Rgba> = section
+                        .tabs
+                        .iter()
+                        .filter_map(|&ti| {
+                            self.tabs[ti]
+                                .focused_agent_badge(Some(window), cx)
+                                .indicator()
+                        })
+                        .filter(|&ind| ind != crate::ui::status_indicator::StatusIndicator::Unknown)
+                        .map(|ind| ind.color(cx.theme().sidebar))
+                        .collect();
+                    (!dot_colors.is_empty()).then(|| {
+                        let extra = dot_colors.len().saturating_sub(4);
+                        let mut row = h_flex().flex_shrink_0().items_center().gap(px(3.)).ml_1();
+                        for color in dot_colors.into_iter().take(4) {
+                            row = row.child(div().size(px(6.)).rounded_full().bg(color));
+                        }
+                        if extra > 0 {
+                            row = row.child(
+                                div()
+                                    .text_size(px(11.))
+                                    .text_color(muted)
+                                    .child(format!("+{extra}")),
+                            );
+                        }
+                        row
+                    })
+                } else {
+                    None
+                };
+
+                let label: SharedString = shown.clone().into();
                 let menu_app = cx.entity().downgrade();
+                let dropdown_app = menu_app.clone();
                 let key = section.key.clone();
-                base.child(
-                    div()
-                        .flex_shrink(1.)
-                        .min_w_0()
-                        .truncate()
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child(label),
-                )
-                .child(
-                    div()
-                        .flex_shrink_0()
-                        .text_color(cx.theme().muted_foreground.opacity(0.7))
-                        .child(row_count.to_string()),
-                )
-                .context_menu(move |menu, _window, _cx| {
-                    let app = menu_app.clone();
-                    let key = key.clone();
-                    let current = shown.clone();
-                    menu.min_w(px(160.)).item(
-                        PopupMenuItem::new(t(L10nKey::SidebarRenameGroup)).on_click(
-                            move |_, window, cx| {
-                                let _ = app.update(cx, |this, cx| {
-                                    this.start_group_rename(
-                                        key.clone(),
-                                        current.clone(),
-                                        window,
-                                        cx,
-                                    )
-                                });
-                            },
-                        ),
+                let dropdown_key = key.clone();
+                let click_key_str = group_key_str.clone();
+                let click_headed = headed_keys.clone();
+                let menu_headed = headed_keys.clone();
+                let dropdown_headed = headed_keys.clone();
+                let is_pinned = section.pinned;
+                let current_for_menu = shown.clone();
+                let current_for_dropdown = shown.clone();
+
+                let actions = h_flex()
+                    .id(("sidebar-group-actions", group_ix))
+                    .absolute()
+                    .right_0()
+                    .top_0()
+                    .bottom_0()
+                    .pl_1p5()
+                    .pr_1p5()
+                    .rounded_md()
+                    .bg(hover_bg)
+                    .items_center()
+                    .gap(px(2.))
+                    .invisible()
+                    .group_hover(header_group.clone(), |s| s.visible())
+                    .on_any_mouse_down(|_, _, cx| cx.stop_propagation())
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .when(is_local && section.key.is_some(), |act| {
+                        let pin_key = group_key_str.clone();
+                        let icon_path = if is_pinned {
+                            "icons/pin-off.svg"
+                        } else {
+                            "icons/pin.svg"
+                        };
+                        let tip = if is_pinned {
+                            t(L10nKey::SidebarUnpinGroup)
+                        } else {
+                            t(L10nKey::SidebarPinGroup)
+                        };
+                        act.child(
+                            Button::new(("sidebar-group-pin", group_ix))
+                                .icon(Icon::empty().path(icon_path))
+                                .ghost()
+                                .xsmall()
+                                .tooltip(tip)
+                                .on_click(cx.listener(move |this, _, _window, cx| {
+                                    cx.stop_propagation();
+                                    this.toggle_pin_group(&pin_key, cx);
+                                })),
+                        )
+                    })
+                    .child({
+                        let new_key = section.key.clone();
+                        Button::new(("sidebar-group-new", group_ix))
+                            .icon(Icon::empty().path("icons/plus.svg"))
+                            .ghost()
+                            .xsmall()
+                            .tooltip(t(L10nKey::SidebarNewTabHere))
+                            .on_click(cx.listener(move |this, _, window, cx| {
+                                cx.stop_propagation();
+                                this.new_tab_in_group(new_key.clone(), window, cx);
+                            }))
+                    })
+                    .child(
+                        Button::new(("sidebar-group-more", group_ix))
+                            .icon(Icon::empty().path("icons/ellipsis.svg"))
+                            .ghost()
+                            .xsmall()
+                            .tooltip(t(L10nKey::TabTooltipMore))
+                            .dropdown_menu(move |menu, _window, _cx| {
+                                Self::group_header_menu(
+                                    menu,
+                                    &dropdown_app,
+                                    dropdown_key.clone(),
+                                    current_for_dropdown.clone(),
+                                    is_pinned,
+                                    is_local,
+                                    dropdown_headed.clone(),
+                                )
+                            }),
+                    );
+
+                base.on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .on_click(cx.listener(move |this, ev: &ClickEvent, _window, cx| {
+                        cx.stop_propagation();
+                        if ev.modifiers().alt {
+                            this.collapse_other_groups(&click_key_str, &click_headed, cx);
+                        } else {
+                            this.toggle_group_collapsed(&click_key_str, cx);
+                        }
+                    }))
+                    .child(chevron)
+                    .child(
+                        div()
+                            .flex_shrink(1.)
+                            .min_w_0()
+                            .truncate()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(label),
                     )
-                })
-                .into_any_element()
+                    .when(is_pinned, |b| {
+                        b.child(
+                            div()
+                                .flex_shrink_0()
+                                .size(px(12.))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_color(muted)
+                                .child(Icon::empty().path("icons/pin-filled.svg").size(px(11.))),
+                        )
+                    })
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .text_color(muted.opacity(0.7))
+                            .child(tab_count.to_string()),
+                    )
+                    .children(status_dots)
+                    .child(actions)
+                    .context_menu(move |menu, _window, _cx| {
+                        Self::group_header_menu(
+                            menu,
+                            &menu_app,
+                            key.clone(),
+                            current_for_menu.clone(),
+                            is_pinned,
+                            is_local,
+                            menu_headed.clone(),
+                        )
+                    })
+                    .into_any_element()
             });
 
             let block = v_flex()
                 .w_full()
                 .gap(px(ROW_GAP))
                 .when(
-                    group_preview
+                    active_preview
                         .as_ref()
-                        .is_some_and(|p| Some(p.from) == group_slot),
+                        .is_some_and(|p| Some(p.from) == slot_ix),
                     |b| b.opacity(0.75),
                 )
                 .children(header)
                 .children(rows)
-                .when_some(group_slot, |block, slot| {
+                .when_some(group_slot.clone(), |block, (_, slot)| {
+                    let slots = drag_slots.clone();
                     block.child(
                         canvas(
-                            {
-                                let slots = group_slots.clone();
-                                move |bounds, _window, _cx| {
-                                    if let Some(s) = slots.borrow_mut().get_mut(slot) {
-                                        *s = bounds;
-                                    }
+                            move |bounds, _window, _cx| {
+                                if let Some(s) = slots.borrow_mut().get_mut(slot) {
+                                    *s = bounds;
                                 }
                             },
                             |_, _, _, _| {},
@@ -1072,7 +1387,7 @@ impl Tty7App {
                 });
 
             any_rows = true;
-            list = list.child(match (&group_preview, group_slot) {
+            list = list.child(match (active_preview, slot_ix) {
                 (Some(p), Some(slot)) if p.from == slot => {
                     deferred(block.relative().top(p.held)).into_any_element()
                 }
@@ -1081,7 +1396,7 @@ impl Tty7App {
                     block
                         .with_animation(
                             (
-                                SharedString::from(format!("group-slide-{}", p.generation)),
+                                SharedString::from(format!("{anim_prefix}-{}", p.generation)),
                                 slot,
                             ),
                             Animation::new(std::time::Duration::from_millis(REORDER_SLIDE_MS))
@@ -1167,6 +1482,29 @@ impl Tty7App {
             .child(self.workspace_head(cx));
 
         let chip_inset = crate::ui::app::CONTENT_INSET - 7. + 4.;
+        let toggle_all_btn = (!headed_keys.is_empty()).then(|| {
+            let toggle_headed = headed_keys.clone();
+            let icon_path = if all_collapsed {
+                "icons/chevrons-up-down.svg"
+            } else {
+                "icons/chevrons-down-up.svg"
+            };
+            let tip = if all_collapsed {
+                t(L10nKey::SidebarExpandAll)
+            } else {
+                t(L10nKey::SidebarCollapseAll)
+            };
+            div().flex_shrink_0().child(
+                Button::new("sidebar-toggle-all")
+                    .icon(Icon::empty().path(icon_path))
+                    .ghost()
+                    .xsmall()
+                    .tooltip(tip)
+                    .on_click(cx.listener(move |this, _, _window, cx| {
+                        this.set_all_groups_collapsed(&toggle_headed, !all_collapsed, cx);
+                    })),
+            )
+        });
         let top_bar = h_flex()
             .flex_shrink_0()
             .items_center()
@@ -1192,7 +1530,8 @@ impl Tty7App {
                     .flex_1()
                     .min_w_0()
                     .child(Input::new(&self.sidebar_search).appearance(false).pl_0()),
-            );
+            )
+            .children(toggle_all_btn);
 
         let container: Rc<Cell<Option<Bounds<Pixels>>>> = Rc::new(Cell::new(None));
         // Read while there is still a `cx` to read it from: the drag handler
@@ -1407,10 +1746,222 @@ impl Tty7App {
             return (0..self.tabs.len()).collect();
         }
         let keys = self.sidebar_group_keys(cx);
-        sidebar_sections(&keys)
+        self.sidebar_sections(&keys, cx)
             .into_iter()
             .flat_map(|s| s.tabs)
             .collect()
+    }
+
+    fn sidebar_pinned_groups<'a>(&self, cx: &'a gpui::App) -> &'a [String] {
+        if self.can_spawn_locally(cx) {
+            &cx.global::<Config>().sidebar_pinned_groups
+        } else {
+            &[]
+        }
+    }
+
+    fn sidebar_sections(&self, keys: &[Option<PathBuf>], cx: &gpui::App) -> Vec<Section> {
+        let pinned = self.sidebar_pinned_groups(cx);
+        let cache = self.pinned_dir_cache.borrow();
+        sidebar_sections(keys, pinned, &|p| cache.get(p) == Some(&true))
+    }
+
+    fn probe_pinned_dirs(
+        &self,
+        keys: &[Option<PathBuf>],
+        pinned: &[String],
+        cx: &mut Context<Self>,
+    ) {
+        let Some(local_host) =
+            crate::ui::host_registry::HostRegistry::lookup(cx, crate::ui::host_ops::HostId::LOCAL)
+        else {
+            return;
+        };
+        for p_str in pinned {
+            if p_str.is_empty() {
+                continue;
+            }
+            let path = PathBuf::from(p_str);
+            if keys.iter().flatten().any(|k| k == &path) {
+                continue;
+            }
+            if self.pinned_dir_cache.borrow().contains_key(&path) {
+                continue;
+            }
+            if !self.pinned_dir_probes.borrow_mut().begin(path.clone()) {
+                continue;
+            }
+            let probe_path = path.clone();
+            crate::ui::host_ops::HostOps::run(
+                local_host.clone(),
+                cx,
+                move |h| h.stat(&probe_path).map(|m| m.is_dir).unwrap_or(false),
+                move |this, is_dir, cx| {
+                    if this.pinned_dir_probes.borrow_mut().finish(&path) {
+                        this.pinned_dir_cache.borrow_mut().insert(path, is_dir);
+                    }
+                    cx.notify();
+                },
+            );
+        }
+    }
+
+    fn toggle_group_collapsed(&mut self, key: &str, cx: &mut Context<Self>) {
+        self.update_config(cx, |cfg| {
+            if !cfg.sidebar_collapsed_groups.remove(key) {
+                cfg.sidebar_collapsed_groups.insert(key.to_string());
+            }
+        });
+    }
+
+    pub(crate) fn unfold_group(&mut self, key: &str, cx: &mut Context<Self>) {
+        if cx.global::<Config>().sidebar_collapsed_groups.contains(key) {
+            self.update_config(cx, |cfg| {
+                cfg.sidebar_collapsed_groups.remove(key);
+            });
+        }
+    }
+
+    fn collapse_other_groups(&mut self, keep: &str, all_headed: &[String], cx: &mut Context<Self>) {
+        self.update_config(cx, |cfg| {
+            cfg.sidebar_collapsed_groups.remove(keep);
+            for k in all_headed {
+                if k != keep {
+                    cfg.sidebar_collapsed_groups.insert(k.clone());
+                }
+            }
+        });
+    }
+
+    fn set_all_groups_collapsed(
+        &mut self,
+        all_headed: &[String],
+        collapse: bool,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_config(cx, |cfg| {
+            for k in all_headed {
+                if collapse {
+                    cfg.sidebar_collapsed_groups.insert(k.clone());
+                } else {
+                    cfg.sidebar_collapsed_groups.remove(k);
+                }
+            }
+        });
+    }
+
+    fn toggle_pin_group(&mut self, key: &str, cx: &mut Context<Self>) {
+        if key.is_empty() || !self.can_spawn_locally(cx) {
+            return;
+        }
+        let path = PathBuf::from(key);
+        self.pinned_dir_cache.borrow_mut().remove(&path);
+        self.pinned_dir_probes.borrow_mut().invalidate(&path);
+        self.update_config(cx, |cfg| {
+            if let Some(pos) = cfg.sidebar_pinned_groups.iter().position(|k| k == key) {
+                cfg.sidebar_pinned_groups.remove(pos);
+            } else {
+                cfg.sidebar_pinned_groups.push(key.to_string());
+            }
+        });
+    }
+
+    fn new_tab_in_group(
+        &mut self,
+        key: Option<PathBuf>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.unfold_group(&group_name_key(&key), cx);
+        match key {
+            Some(path) => self.new_tab_at(path, window, cx),
+            None => self.new_tab(window, cx),
+        }
+    }
+
+    fn group_header_menu(
+        mut menu: PopupMenu,
+        app: &gpui::WeakEntity<Self>,
+        key: Option<PathBuf>,
+        current_name: String,
+        is_pinned: bool,
+        is_local: bool,
+        all_headed: Vec<String>,
+    ) -> PopupMenu {
+        menu = menu.min_w(px(160.));
+        let key_str = group_name_key(&key);
+        if is_local && key.is_some() {
+            let pin_label = if is_pinned {
+                t(L10nKey::SidebarUnpinGroup)
+            } else {
+                t(L10nKey::SidebarPinGroup)
+            };
+            let app_pin = app.clone();
+            let pin_key = key_str.clone();
+            menu = menu.item(
+                PopupMenuItem::new(pin_label).on_click(move |_, _window, cx| {
+                    let _ = app_pin.update(cx, |this, cx| {
+                        this.toggle_pin_group(&pin_key, cx);
+                    });
+                }),
+            );
+        }
+        let app_new = app.clone();
+        let new_key = key.clone();
+        menu = menu.item(PopupMenuItem::new(t(L10nKey::SidebarNewTabHere)).on_click(
+            move |_, window, cx| {
+                let _ = app_new.update(cx, |this, cx| {
+                    this.new_tab_in_group(new_key.clone(), window, cx);
+                });
+            },
+        ));
+        let app_rename = app.clone();
+        let rename_key = key.clone();
+        menu = menu
+            .item(PopupMenuItem::new(t(L10nKey::SidebarRenameGroup)).on_click(
+                move |_, window, cx| {
+                    let _ = app_rename.update(cx, |this, cx| {
+                        this.start_group_rename(
+                            rename_key.clone(),
+                            current_name.clone(),
+                            window,
+                            cx,
+                        )
+                    });
+                },
+            ))
+            .separator();
+
+        let app_others = app.clone();
+        let others_keep = key_str.clone();
+        let others_headed = all_headed.clone();
+        let app_collapse = app.clone();
+        let collapse_headed = all_headed.clone();
+        let app_expand = app.clone();
+        let expand_headed = all_headed;
+        menu.item(
+            PopupMenuItem::new(t(L10nKey::SidebarCollapseOthers)).on_click(
+                move |_, _window, cx| {
+                    let _ = app_others.update(cx, |this, cx| {
+                        this.collapse_other_groups(&others_keep, &others_headed, cx);
+                    });
+                },
+            ),
+        )
+        .item(
+            PopupMenuItem::new(t(L10nKey::SidebarCollapseAll)).on_click(move |_, _window, cx| {
+                let _ = app_collapse.update(cx, |this, cx| {
+                    this.set_all_groups_collapsed(&collapse_headed, true, cx);
+                });
+            }),
+        )
+        .item(
+            PopupMenuItem::new(t(L10nKey::SidebarExpandAll)).on_click(move |_, _window, cx| {
+                let _ = app_expand.update(cx, |this, cx| {
+                    this.set_all_groups_collapsed(&expand_headed, false, cx);
+                });
+            }),
+        )
     }
 
     pub(crate) fn activate_visual(
@@ -1480,32 +2031,62 @@ struct Section {
     key: Option<PathBuf>,
     name: Option<String>,
     tabs: Vec<usize>,
+    pinned: bool,
 }
 
-fn sidebar_sections(keys: &[Option<PathBuf>]) -> Vec<Section> {
-    let mut group_order: Vec<&PathBuf> = Vec::new();
+fn sidebar_sections(
+    keys: &[Option<PathBuf>],
+    pinned: &[String],
+    keep_empty: &dyn Fn(&Path) -> bool,
+) -> Vec<Section> {
+    let mut active_groups: Vec<PathBuf> = Vec::new();
     for k in keys.iter().flatten() {
-        if !group_order.iter().any(|g| *g == k) {
-            group_order.push(k);
+        if !active_groups.contains(k) {
+            active_groups.push(k.clone());
         }
     }
-    if group_order.is_empty() {
+    let mut pinned_order: Vec<PathBuf> = Vec::new();
+    for p_str in pinned {
+        if p_str.is_empty() {
+            continue;
+        }
+        let path = PathBuf::from(p_str);
+        if (active_groups.contains(&path) || keep_empty(&path)) && !pinned_order.contains(&path) {
+            pinned_order.push(path);
+        }
+    }
+    let unpinned_order: Vec<PathBuf> = active_groups
+        .into_iter()
+        .filter(|g| !pinned_order.contains(g))
+        .collect();
+    if pinned_order.is_empty() && unpinned_order.is_empty() {
         return vec![Section {
             key: None,
             name: None,
             tabs: (0..keys.len()).collect(),
+            pinned: false,
         }];
     }
-    let names = group_names(&group_order);
-    let mut sections: Vec<Section> = group_order
-        .iter()
+    let pinned_count = pinned_order.len();
+    let mut all_groups = Vec::with_capacity(pinned_count + unpinned_order.len());
+    all_groups.extend(pinned_order);
+    all_groups.extend(unpinned_order);
+    let refs: Vec<&PathBuf> = all_groups.iter().collect();
+    let names = group_names(&refs);
+    let mut sections: Vec<Section> = all_groups
+        .into_iter()
         .zip(names)
-        .map(|(root, name)| Section {
-            key: Some((*root).clone()),
-            name: Some(name),
-            tabs: (0..keys.len())
-                .filter(|&i| keys[i].as_ref() == Some(*root))
-                .collect(),
+        .enumerate()
+        .map(|(idx, (root, name))| {
+            let tabs = (0..keys.len())
+                .filter(|&i| keys[i].as_ref() == Some(&root))
+                .collect();
+            Section {
+                key: Some(root),
+                name: Some(name),
+                tabs,
+                pinned: idx < pinned_count,
+            }
         })
         .collect();
     let scratch: Vec<usize> = (0..keys.len()).filter(|&i| keys[i].is_none()).collect();
@@ -1514,6 +2095,7 @@ fn sidebar_sections(keys: &[Option<PathBuf>]) -> Vec<Section> {
             key: None,
             name: Some(t(L10nKey::SidebarScratchGroup).to_string()),
             tabs: scratch,
+            pinned: false,
         });
     }
     sections
@@ -1539,6 +2121,8 @@ fn effective_group_name(cfg: &Config, key: &Option<PathBuf>, derived: String) ->
 
 fn reordered_rows(
     keys: &[Option<PathBuf>],
+    pinned: &[String],
+    keep_empty: &dyn Fn(&Path) -> bool,
     group: &Option<PathBuf>,
     visible: &[usize],
     from: usize,
@@ -1554,7 +2138,10 @@ fn reordered_rows(
     members.insert(at, moved);
 
     let mut out: Vec<usize> = Vec::with_capacity(keys.len());
-    for g in sidebar_sections(keys).iter().map(|s| &s.key) {
+    for g in sidebar_sections(keys, pinned, keep_empty)
+        .iter()
+        .map(|s| &s.key)
+    {
         if g == group {
             out.extend_from_slice(&members);
         } else {
@@ -1562,6 +2149,20 @@ fn reordered_rows(
         }
     }
     Some(out)
+}
+
+fn reordered_pinned(pinned: &[String], from: &Path, to: &Path) -> Option<Vec<String>> {
+    if from == to {
+        return None;
+    }
+    let from_str = from.to_string_lossy();
+    let to_str = to.to_string_lossy();
+    let mut order: Vec<String> = pinned.to_vec();
+    let fi = order.iter().position(|k| k == from_str.as_ref())?;
+    let ti = order.iter().position(|k| k == to_str.as_ref())?;
+    let moved = order.remove(fi);
+    order.insert(ti, moved);
+    Some(order)
 }
 
 fn regrouped_order(keys: &[Option<PathBuf>], from: &Path, to: &Path) -> Option<Vec<usize>> {
@@ -1645,6 +2246,57 @@ mod tests {
 
     fn p(s: &str) -> PathBuf {
         PathBuf::from(s)
+    }
+
+    #[gpui::test]
+    fn remote_windows_ignore_local_pins_and_cannot_change_them(cx: &mut gpui::TestAppContext) {
+        use crate::core::session::{
+            RemoteRef, RemoteTarget, WindowView, WindowViews, WorkspaceId, WorkspaceStore,
+        };
+        use crate::ui::app::{Tab, test_window::harness};
+        use crate::ui::pane::Pane;
+
+        let (app, mut vcx) = harness(cx);
+        app.update(&mut vcx, |app, cx| {
+            let pinned = vec!["/w/alpha".to_string(), "/w/empty".to_string()];
+            let cfg = cx.global_mut::<Config>();
+            cfg.tab_bar_position = crate::core::config::TabBarPosition::Left;
+            cfg.sidebar_pinned_groups = pinned.clone();
+            app.tabs = ["/w/beta", "/w/alpha"]
+                .map(|key| {
+                    let tab = Tab::new(Pane::Empty);
+                    *tab.sidebar_group.borrow_mut() = Some(p(key));
+                    tab
+                })
+                .into();
+            app.pinned_dir_cache
+                .borrow_mut()
+                .insert(p("/w/empty"), true);
+            assert_eq!(app.visual_tab_order(cx), vec![1, 0]);
+
+            let remote = WindowView::on_remote(RemoteRef::new(
+                RemoteTarget::Alias {
+                    alias: "build-box".into(),
+                },
+                WorkspaceId::new(),
+            ));
+            app.workspace = remote.id;
+            WorkspaceStore::install_for_test(
+                cx,
+                WindowViews {
+                    views: vec![remote],
+                    active: None,
+                },
+            );
+
+            assert_eq!(app.visual_tab_order(cx), vec![0, 1]);
+            let sections = app.sidebar_sections(&app.sidebar_group_keys(cx), cx);
+            assert_eq!(sections.len(), 2, "local empty pins stay hidden remotely");
+            assert!(sections.iter().all(|section| !section.pinned));
+            app.toggle_pin_group("/w/remote", cx);
+            app.toggle_pin_group("/w/alpha", cx);
+            assert_eq!(cx.global::<Config>().sidebar_pinned_groups, pinned);
+        });
     }
 
     #[test]
@@ -1754,24 +2406,105 @@ mod tests {
             Some(p("/w/alpha")),
             Some(p("/w/beta")),
         ];
-        let sections = sidebar_sections(&keys);
-        let shape: Vec<(Option<PathBuf>, Option<String>, Vec<usize>)> = sections
+        let sections = sidebar_sections(&keys, &[], &|_| true);
+        let shape: Vec<(Option<PathBuf>, Option<String>, Vec<usize>, bool)> = sections
             .into_iter()
-            .map(|s| (s.key, s.name, s.tabs))
+            .map(|s| (s.key, s.name, s.tabs, s.pinned))
             .collect();
         assert_eq!(
             shape,
             vec![
-                (Some(p("/w/beta")), Some("beta".into()), vec![0, 3]),
-                (Some(p("/w/alpha")), Some("alpha".into()), vec![2]),
-                (None, Some("Scratch".into()), vec![1]),
+                (Some(p("/w/beta")), Some("beta".into()), vec![0, 3], false),
+                (Some(p("/w/alpha")), Some("alpha".into()), vec![2], false),
+                (None, Some("Scratch".into()), vec![1], false),
             ]
         );
 
-        let flat = sidebar_sections(&[None, None]);
+        let flat = sidebar_sections(&[None, None], &[], &|_| true);
         assert_eq!(flat.len(), 1);
         assert_eq!(flat[0].name, None);
         assert_eq!(flat[0].tabs, vec![0, 1]);
+        assert!(!flat[0].pinned);
+    }
+
+    #[test]
+    fn sections_place_pinned_groups_first_in_stored_order_and_keep_empty_ones_on_local() {
+        let keys = vec![
+            Some(p("/w/beta")),
+            None,
+            Some(p("/w/alpha")),
+            Some(p("/w/gamma")),
+        ];
+        let pinned = vec![
+            "/w/gamma".to_string(),
+            "".to_string(),
+            "/w/absent".to_string(),
+            "/w/alpha".to_string(),
+            "/w/gamma".to_string(),
+        ];
+
+        let local_sections = sidebar_sections(&keys, &pinned, &|_| true);
+        let local_shape: Vec<(Option<PathBuf>, Option<String>, Vec<usize>, bool)> = local_sections
+            .into_iter()
+            .map(|s| (s.key, s.name, s.tabs, s.pinned))
+            .collect();
+        assert_eq!(
+            local_shape,
+            vec![
+                (Some(p("/w/gamma")), Some("gamma".into()), vec![3], true),
+                (Some(p("/w/absent")), Some("absent".into()), vec![], true),
+                (Some(p("/w/alpha")), Some("alpha".into()), vec![2], true),
+                (Some(p("/w/beta")), Some("beta".into()), vec![0], false),
+                (None, Some("Scratch".into()), vec![1], false),
+            ]
+        );
+
+        let remote_sections = sidebar_sections(&keys, &pinned, &|_| false);
+        let remote_shape: Vec<(Option<PathBuf>, Option<String>, Vec<usize>, bool)> =
+            remote_sections
+                .into_iter()
+                .map(|s| (s.key, s.name, s.tabs, s.pinned))
+                .collect();
+        assert_eq!(
+            remote_shape,
+            vec![
+                (Some(p("/w/gamma")), Some("gamma".into()), vec![3], true),
+                (Some(p("/w/alpha")), Some("alpha".into()), vec![2], true),
+                (Some(p("/w/beta")), Some("beta".into()), vec![0], false),
+                (None, Some("Scratch".into()), vec![1], false),
+            ],
+            "absent pinned groups are omitted when keep_empty rejects them"
+        );
+
+        let remote_flat = sidebar_sections(&[None, None], &["/w/absent".into()], &|_| false);
+        assert_eq!(remote_flat.len(), 1);
+        assert_eq!(remote_flat[0].name, None);
+        assert_eq!(remote_flat[0].tabs, vec![0, 1]);
+    }
+
+    #[test]
+    fn reordered_pinned_moves_within_pinned_list() {
+        let pinned = vec![
+            "/w/alpha".to_string(),
+            "/w/beta".to_string(),
+            "/w/gamma".to_string(),
+        ];
+        assert_eq!(
+            reordered_pinned(&pinned, &p("/w/gamma"), &p("/w/alpha")),
+            Some(vec![
+                "/w/gamma".to_string(),
+                "/w/alpha".to_string(),
+                "/w/beta".to_string(),
+            ])
+        );
+        assert_eq!(
+            reordered_pinned(&pinned, &p("/w/alpha"), &p("/w/alpha")),
+            None
+        );
+        assert_eq!(
+            reordered_pinned(&pinned, &p("/w/unknown"), &p("/w/alpha")),
+            None
+        );
     }
 
     /// The badge on a row and the tab ⌘N opens are two readings of one order,
@@ -1786,12 +2519,13 @@ mod tests {
             Some(p("/w/alpha")),
             Some(p("/w/beta")),
         ];
+        let pinned = vec!["/w/alpha".to_string()];
         // What `visual_tab_order` returns for a left tab bar.
-        let order: Vec<usize> = sidebar_sections(&keys)
+        let order: Vec<usize> = sidebar_sections(&keys, &pinned, &|_| true)
             .into_iter()
             .flat_map(|s| s.tabs)
             .collect();
-        assert_eq!(order, vec![0, 3, 2, 1]);
+        assert_eq!(order, vec![2, 0, 3, 1]);
 
         let mut badge_pos = vec![0usize; keys.len()];
         for (n, i) in order.iter().copied().enumerate() {
@@ -1818,14 +2552,17 @@ mod tests {
         ];
         let alpha = Some(p("/w/alpha"));
         assert_eq!(
-            reordered_rows(&keys, &alpha, &[0, 2], 0, 1),
+            reordered_rows(&keys, &[], &|_| true, &alpha, &[0, 2], 0, 1),
             Some(vec![2, 0, 1, 3])
         );
         assert_eq!(
-            reordered_rows(&keys, &alpha, &[0, 2], 1, 0),
+            reordered_rows(&keys, &[], &|_| true, &alpha, &[0, 2], 1, 0),
             Some(vec![2, 0, 1, 3])
         );
-        assert_eq!(reordered_rows(&keys, &alpha, &[0, 2], 1, 1), None);
+        assert_eq!(
+            reordered_rows(&keys, &[], &|_| true, &alpha, &[0, 2], 1, 1),
+            None
+        );
     }
 
     #[test]
@@ -1833,7 +2570,7 @@ mod tests {
         let keys = vec![Some(p("/w/a")), Some(p("/w/a")), Some(p("/w/a"))];
         let a = Some(p("/w/a"));
         assert_eq!(
-            reordered_rows(&keys, &a, &[0, 2], 0, 1),
+            reordered_rows(&keys, &[], &|_| true, &a, &[0, 2], 0, 1),
             Some(vec![1, 2, 0])
         );
     }
