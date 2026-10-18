@@ -950,6 +950,10 @@ pub struct Tty7App {
     /// the sidebar — and takes no part in the reading.
     pub(crate) strip_slots: Rc<RefCell<Vec<Bounds<Pixels>>>>,
     pub(crate) sidebar_slots: Rc<RefCell<Vec<Bounds<Pixels>>>>,
+    /// Off-thread `stat` results for empty pinned sidebar groups so render
+    /// never touches the filesystem on the UI thread.
+    pub(crate) pinned_dir_cache: RefCell<std::collections::HashMap<std::path::PathBuf, bool>>,
+    pub(crate) pinned_dir_probes: RefCell<crate::ui::host_ops::InFlight<std::path::PathBuf>>,
     /// Where the active tab's panes were last drawn, which is the frame of
     /// reference a drag's landing is worked out in.
     pub(crate) pane_area: Rc<Cell<Option<Bounds<Pixels>>>>,
@@ -1548,6 +1552,8 @@ impl Tty7App {
             pane_detach: Cell::new(None),
             strip_slots: Rc::new(RefCell::new(Vec::new())),
             sidebar_slots: Rc::new(RefCell::new(Vec::new())),
+            pinned_dir_cache: RefCell::new(std::collections::HashMap::new()),
+            pinned_dir_probes: RefCell::new(Default::default()),
             pane_area: Rc::new(Cell::new(None)),
             sidebar_search,
             _sidebar_search_sub: sidebar_search_sub,
@@ -3449,6 +3455,27 @@ impl Tty7App {
         }
     }
 
+    fn place_new_tab(
+        &mut self,
+        tab: Tab,
+        group: Option<Option<std::path::PathBuf>>,
+        insert_at: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let group_key = group.as_ref().map(crate::ui::tab_sidebar::group_name_key);
+        if let Some(group) = group {
+            *tab.sidebar_group.borrow_mut() = group;
+        }
+        self.tabs.insert(insert_at, tab);
+        self.maximized = None;
+        self.active = insert_at;
+        if let Some(key) = group_key {
+            self.unfold_group(&key, cx);
+        }
+        self.focus_active(window, cx);
+    }
+
     pub(crate) fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.new_tab_with_shell(None, window, cx);
     }
@@ -3529,15 +3556,9 @@ impl Tty7App {
         // Something opened, so whatever the last failure was is stale.
         self.startup_error = None;
         self.remember_active_pane(window, cx);
-        self.maximized = None;
         let insert_at = self.new_tab_insert_at(cx);
         let new_tab = Tab::new(Pane::leaf(tab));
-        if let Some(group) = group {
-            *new_tab.sidebar_group.borrow_mut() = group;
-        }
-        self.tabs.insert(insert_at, new_tab);
-        self.active = insert_at;
-        self.focus_active(window, cx);
+        self.place_new_tab(new_tab, group, insert_at, window, cx);
         self.save_session(cx);
         cx.notify();
     }
@@ -4190,14 +4211,8 @@ impl Tty7App {
             .and_then(|view| view.read(cx).spawnable_cwd());
         let group = self.spawn_group(cwd.as_deref(), cx);
         let fresh = Tab::new(crate::ui::pane::Pane::leaf(slot));
-        if let Some(group) = group {
-            *fresh.sidebar_group.borrow_mut() = group;
-        }
         let at = at.min(self.tabs.len());
-        self.tabs.insert(at, fresh);
-        self.maximized = None;
-        self.active = at;
-        self.focus_active(window, cx);
+        self.place_new_tab(fresh, group, at, window, cx);
         self.save_session(cx);
         cx.notify();
     }
@@ -4673,15 +4688,9 @@ impl Tty7App {
         match placement {
             ForkPlacement::NewTab => {
                 self.remember_active_pane(window, cx);
-                self.maximized = None;
                 let insert_at = self.new_tab_insert_at(cx);
                 let tab = Tab::new(Pane::leaf(new));
-                if let Some(group) = group {
-                    *tab.sidebar_group.borrow_mut() = group;
-                }
-                self.tabs.insert(insert_at, tab);
-                self.active = insert_at;
-                self.focus_active(window, cx);
+                self.place_new_tab(tab, group, insert_at, window, cx);
             }
             ForkPlacement::Split { axis, before } => {
                 let placed = self.tabs.get_mut(index).is_some_and(|tab| {
@@ -7246,7 +7255,16 @@ impl Render for Tty7App {
             if let Some((tab, zone)) = self.tab_merge.take() {
                 self.merge_tab(tab, zone, window, cx);
             } else if let Some(order) = order {
-                self.apply_tab_order(&order, cx);
+                match order {
+                    crate::ui::reorder::PendingOrder::Tabs(order) => {
+                        self.apply_tab_order(&order, cx);
+                    }
+                    crate::ui::reorder::PendingOrder::PinnedGroups(pinned) => {
+                        self.update_config(cx, |cfg| {
+                            cfg.sidebar_pinned_groups = pinned;
+                        });
+                    }
+                }
             }
             // Also what ends the pane drag, so it is taken whichever of the two
             // readings the last frame left behind.
@@ -11111,6 +11129,41 @@ mod shell_menu_gpui_tests {
                 app.shells.shells
             );
         });
+    }
+}
+
+#[cfg(test)]
+mod sidebar_new_tab_gpui_tests {
+    use super::{Tab, test_window::harness};
+    use crate::core::config::Config;
+    use crate::ui::pane::Pane;
+
+    #[gpui::test]
+    fn placing_a_tab_unfolds_only_its_known_group(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        for group in [Some(Some("/w/repo".into())), Some(None), None] {
+            app.update_in(&mut vcx, |app, window, cx| {
+                cx.global_mut::<Config>().sidebar_collapsed_groups =
+                    ["/w/repo", "", "/w/other"].map(str::to_string).into();
+                let tab = Tab::new(Pane::Empty);
+                let tab_id = tab.tree_id.get();
+                app.place_new_tab(tab, group.clone(), 0, window, cx);
+
+                assert_eq!(app.active, 0);
+                assert_eq!(app.tabs[app.active].tree_id.get(), tab_id);
+                assert_eq!(
+                    app.tabs[0].sidebar_group.borrow().as_ref(),
+                    group.as_ref().and_then(Option::as_ref)
+                );
+                let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+                assert!(folded.contains("/w/other"));
+                assert_eq!(
+                    folded.contains("/w/repo"),
+                    group != Some(Some("/w/repo".into()))
+                );
+                assert_eq!(folded.contains(""), group != Some(None));
+            });
+        }
     }
 }
 
