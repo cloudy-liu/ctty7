@@ -17,7 +17,7 @@ pub(super) struct KeyFlags {
     /// SS3 form of the arrow keys, because that is what `kcuu1` & co. spell.
     app_cursor: bool,
     /// ConPTY asked the host to encode keys as `KEY_EVENT_RECORD`s
-    /// (`CSI ? 9001 h`). Shift+Enter is the chord that needs it.
+    /// (`CSI ? 9001 h`). Modified Enter and Escape need complete key records.
     win32_input: bool,
 }
 
@@ -124,12 +124,7 @@ pub(super) fn keystroke_to_bytes(ks: &gpui::Keystroke, flags: KeyFlags) -> Optio
 
 fn encode_win32(ks: &gpui::Keystroke) -> Option<Vec<u8>> {
     let m = &ks.modifiers;
-    if ks.key.as_str() != "enter" || !(m.shift || m.alt || m.control) {
-        return None;
-    }
-    Some(super::win32_input::encode_win32_enter(
-        m.shift, m.alt, m.control,
-    ))
+    super::win32_input::encode_win32_key(&ks.key, m.shift, m.alt, m.control)
 }
 
 pub(super) fn tab_bytes(shift: bool, flags: KeyFlags) -> Vec<u8> {
@@ -1257,6 +1252,48 @@ mod tests {
             keystroke_to_bytes(&ks(none, "enter", None), win32()),
             Some(b"\r".to_vec()),
             "plain Enter stays CR; only modified Enter needs the KEY_EVENT form"
+        );
+    }
+
+    #[test]
+    fn win32_mode_encodes_escape_as_a_complete_key_event() {
+        for (modifiers, state) in [
+            (Modifiers::default(), 0),
+            (
+                Modifiers {
+                    shift: true,
+                    ..Default::default()
+                },
+                16,
+            ),
+            (
+                Modifiers {
+                    alt: true,
+                    ..Default::default()
+                },
+                2,
+            ),
+            (
+                Modifiers {
+                    control: true,
+                    ..Default::default()
+                },
+                8,
+            ),
+        ] {
+            assert_eq!(
+                keystroke_to_bytes(&ks(modifiers, "escape", None), win32()),
+                Some(format!("\x1b[27;1;27;1;{state};1_\x1b[27;1;27;0;{state};1_").into_bytes())
+            );
+        }
+        let none = Modifiers::default();
+        assert_eq!(
+            keystroke_to_bytes(&ks(none, "escape", None), KeyFlags::default()),
+            Some(b"\x1b".to_vec())
+        );
+        assert_eq!(
+            keystroke_to_bytes(&ks(none, "escape", None), kitty().with_win32_input(true)),
+            Some(b"\x1b[27u".to_vec())
         );
     }
 

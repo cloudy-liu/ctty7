@@ -91,16 +91,25 @@ fn csi_decset_contains_9001(params: &[u8]) -> bool {
     rest.split(|&b| b == b';').any(|p| p == b"9001")
 }
 
-/// Win32 `KEY_EVENT_RECORD` encoding for a chord that legacy VT would collapse.
+/// Win32 `KEY_EVENT_RECORD` encoding for modified Enter and Escape.
 ///
-/// Only modified Enter is encoded: that is the chord ConPTY otherwise reports
-/// as a plain `VK_RETURN`. Unmodified keys stay on the legacy byte path.
+/// Modified Enter would otherwise collapse to a plain `VK_RETURN`. Escape
+/// needs a complete record too: after the first Win32 input sequence, ConPTY
+/// buffers a lone ESC as the start of an incomplete sequence.
 /// Press and release are both emitted — WezTerm does the same, and crossterm
 /// on Windows matches `insert_newline` on press while ignoring release.
-pub(crate) fn encode_win32_enter(shift: bool, alt: bool, control: bool) -> Vec<u8> {
-    const VK_RETURN: u32 = 13;
-    const SCAN_RETURN: u32 = 28;
-    const UNICODE_CR: u32 = 13;
+pub(crate) fn encode_win32_key(
+    key: &str,
+    shift: bool,
+    alt: bool,
+    control: bool,
+) -> Option<Vec<u8>> {
+    // Virtual key, scan code, and Unicode character for KEY_EVENT_RECORD.
+    let (vk, scan, unicode) = match key {
+        "enter" if shift || alt || control => (13, 28, 13),
+        "escape" => (27, 1, 27),
+        _ => return None,
+    };
     const SHIFT_PRESSED: u32 = 0x10;
     const LEFT_ALT_PRESSED: u32 = 0x02;
     const LEFT_CTRL_PRESSED: u32 = 0x08;
@@ -109,16 +118,14 @@ pub(crate) fn encode_win32_enter(shift: bool, alt: bool, control: bool) -> Vec<u
         + u32::from(control) * LEFT_CTRL_PRESSED;
     let mut out = Vec::new();
     for down in [1u32, 0] {
-        out.extend_from_slice(
-            format!("\x1b[{VK_RETURN};{SCAN_RETURN};{UNICODE_CR};{down};{cs};1_").as_bytes(),
-        );
+        out.extend_from_slice(format!("\x1b[{vk};{scan};{unicode};{down};{cs};1_").as_bytes());
     }
-    out
+    Some(out)
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Win32InputModeScanner, csi_decset_contains_9001, encode_win32_enter};
+    use super::{Win32InputModeScanner, csi_decset_contains_9001, encode_win32_key};
 
     fn modes(bytes: &[u8]) -> Vec<bool> {
         let mut got = Vec::new();
@@ -163,16 +170,16 @@ mod tests {
     #[test]
     fn shift_enter_is_vk_return_with_shift_pressed() {
         assert_eq!(
-            encode_win32_enter(true, false, false),
-            b"\x1b[13;28;13;1;16;1_\x1b[13;28;13;0;16;1_".to_vec()
+            encode_win32_key("enter", true, false, false),
+            Some(b"\x1b[13;28;13;1;16;1_\x1b[13;28;13;0;16;1_".to_vec())
         );
     }
 
     #[test]
     fn ctrl_enter_uses_left_ctrl() {
         assert_eq!(
-            encode_win32_enter(false, false, true),
-            b"\x1b[13;28;13;1;8;1_\x1b[13;28;13;0;8;1_".to_vec()
+            encode_win32_key("enter", false, false, true),
+            Some(b"\x1b[13;28;13;1;8;1_\x1b[13;28;13;0;8;1_".to_vec())
         );
     }
 }
