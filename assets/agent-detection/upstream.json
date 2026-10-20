@@ -1,6 +1,6 @@
 {
   "repository": "herdrdev/herdr",
-  "commit": "241b99cd397bb642eaabcfee1647bcecffb26be1",
+  "commit": "2ecf19a92fc3a7fff75b6ce3655ef04f4625ec01",
   "manifests": {
     "amp.toml": {
       "path": "src/detect/manifests/amp.toml",
@@ -14,8 +14,8 @@
     },
     "claude.toml": {
       "path": "src/detect/manifests/claude.toml",
-      "version": "2026.09.11.1",
-      "sha256": "038d0aa23fee3f9b39cb3c9ca117d0f95b0b3a5873cf0f38284ccbac279c9664"
+      "version": "2026.10.11.1",
+      "sha256": "e8b816a70edc1b5f91479acc9977f1f132a55b0c93845682611e91bdf8aa1920"
     },
     "codex.toml": {
       "path": "src/detect/manifests/codex.toml",

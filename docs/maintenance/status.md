@@ -5,11 +5,11 @@ This is a dated snapshot; query GitHub again before merging or preparing a relea
 
 ## Open work
 
-The v0.3.0 release is published and Latest. PRs #128 through #132,
-agent notification PR #138, and release preparation #139 are merged. It adds
-cross-platform agent sounds, independent notification policies, Copy Name,
-and fixes for paste, Cursor identity, Codex status, Mermaid navigation, and
-daemon record cleanup. See the [release verification](../testing/release-v0.3.0.md).
+The v0.6.0 release is published and Latest. PRs #154 through #161 and release
+preparation #163 and #164 are merged. The release adds pinned, collapsible
+sidebar groups and full-file diff context, with faster diff rendering,
+Markdown table fixes, document breadcrumbs, and SSH tab names. See the
+[release notes](../releases/v0.6.0.md) for the remaining verification limits.
 
 There are no open product issues at this check. Release documentation records
 the verified publication separately from the frozen release tag.
@@ -21,6 +21,7 @@ integration branch. The application pins its exact commit; see
 
 | Work | Completion |
 | --- | --- |
+| v0.6.0 publication | Published on 2026-10-18 and set Latest. Sidebar groups, full-file diffs, rendering improvements, and the stable component pin are included. |
 | v0.3.0 publication | Published on 2026-10-11 and set Latest after all nine frozen source CI jobs, all ten Release jobs, downloaded assets and checksums, package contents, embedded audio, and public endpoints passed verification. |
 | v0.2.2 publication | Published on 2026-10-10 and set Latest after all nine frozen source CI jobs, all ten Release jobs, downloaded assets and checksums, package contents, and public endpoints passed verification. |
 | SSH tab identity and update recovery | PRs #122, #124, and #125 merged. Native badge fixtures and regression coverage are recorded in the [SSH tab](../testing/ssh-tab-identity.md), [certificate trust](../testing/update-system-trust.md), and [update recovery](../testing/update-recovery.md) records. |
@@ -56,8 +57,10 @@ these are verification gaps, not additional open GitHub tickets.
 
 ## Source and release state
 
+- Published tag `v0.6.0` points to `edf1339d`, including GPUI integration #160, sidebar groups #161, and release preparation #163 and #164. [v0.6.0](https://github.com/cloudy-liu/ctty7/releases/tag/v0.6.0) is Latest; [English notes](../releases/v0.6.0.md) record the release changes and verification limits.
+- [v0.5.0...v0.6.0](https://github.com/cloudy-liu/ctty7/compare/v0.5.0...v0.6.0) is the current release comparison. This status refresh does not repeat asset or native acceptance checks from release publication.
 - Published tag `v0.3.0` points to `3fc65a9d`, including PRs #128 through #132, #138, and release preparation #139. All nine [source CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/38155517374) and all ten [Release jobs](https://github.com/cloudy-liu/ctty7/actions/runs/38155524755) passed. See [verification](../testing/release-v0.3.0.md).
-- [v0.3.0](https://github.com/cloudy-liu/ctty7/releases/tag/v0.3.0) is Latest and has 12 program assets plus `checksums.txt`; downloaded bytes, package layouts, versions, embedded notification audio, and public URLs were verified.
+- [v0.3.0](https://github.com/cloudy-liu/ctty7/releases/tag/v0.3.0) remains available with 12 program assets plus `checksums.txt`; downloaded bytes, package layouts, versions, embedded notification audio, and public URLs were verified at publication.
 - [v0.2.2...v0.3.0](https://github.com/cloudy-liu/ctty7/compare/v0.2.2...v0.3.0) includes agent sounds, Copy Name, paste, identity, status, diagram, and daemon fixes. [English notes](../releases/v0.3.0.md) record remaining manual acceptance limits.
 
 - Published tag `v0.2.2` points to `cafd9ae5`, including PRs #122 through #125 and release preparation #126. All nine [source CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/38008120429) and all ten [Release jobs](https://github.com/cloudy-liu/ctty7/actions/runs/38008127254) passed. See [verification](../testing/release-v0.2.2.md).
@@ -67,7 +70,7 @@ these are verification gaps, not additional open GitHub tickets.
 - All nine [PR #92 CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/37450774839) passed on `ffa76e55` before its merge. Local tests passed 2,985 cases with eight ignored.
 - All nine [PR #93 CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/37452292509) passed before the documentation merge.
 - The current component pin, `9572b7fab9c0fcf73e34c6118f8a9f10f083f928`, is the first pushed commit on the fork's `ctty7` integration branch. It combines the existing component integration line with the Markdown table, virtualization, and aligned-selection fixes; ctty7's locked metadata, dependency tree, build, and workspace tests pass. The component workspace's 309 component tests and macro test pass on Windows with `RUST_MIN_STACK=8388608`; without it, the queued-update test overflows the default test-thread stack.
-- [v0.2.2](https://github.com/cloudy-liu/ctty7/releases/tag/v0.2.2), published on 2026-10-10, is the previous release baseline and retains 12 program assets plus `checksums.txt`. Downloaded bytes, package layouts, versions, and public URLs were verified.
+- [v0.2.2](https://github.com/cloudy-liu/ctty7/releases/tag/v0.2.2), published on 2026-10-10, remains available with 12 program assets plus `checksums.txt`. Downloaded bytes, package layouts, versions, and public URLs were verified at publication.
 - [v0.2.1](https://github.com/cloudy-liu/ctty7/releases/tag/v0.2.1), published on 2026-10-09, remains available with its original assets and checksums.
 - [v0.2.0](https://github.com/cloudy-liu/ctty7/releases/tag/v0.2.0), published on 2026-10-08, remains available with its original assets and checksums.
 - [v0.1.0](https://github.com/cloudy-liu/ctty7/releases/tag/v0.1.0), published on 2026-09-29, remains available as an older release.

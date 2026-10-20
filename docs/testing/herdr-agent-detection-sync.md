@@ -3,9 +3,13 @@
 ## Scope
 
 The accepted change synchronizes all 14 agents already registered in ctty7's
-screen detector at Herdr commit `241b99cd397bb642eaabcfee1647bcecffb26be1`.
-AGY, Grok, Pi and Codex had stale upstream rules; the other ten were current.
-The previous directory-wide source note covered only the Codex update.
+screen detector at Herdr commit `2ecf19a92fc3a7fff75b6ce3655ef04f4625ec01`.
+The initial sync at `241b99cd397bb642eaabcfee1647bcecffb26be1` updated
+AGY, Grok, Pi and Codex. The 2026-10-18 follow-up updates Claude to manifest
+version `2026.10.11.1`; the other thirteen files retain their existing bytes.
+Claude's added rule recognizes a live form footer above a named-session
+divider, allowing wrapped controls and a counted task panel while rejecting
+newer free-form activity below the divider.
 
 The upstream files remain byte-identical, with their own versions and SHA-256
 in `assets/agent-detection/upstream.json`. Codex's ctty7 ready-prompt rule lives
@@ -86,6 +90,10 @@ The attached JPG files are original Computer Use captures, without retouching:
 ![After: completed foreground turn](images/herdr-agy-after-finished.jpg)
 
 ## Verification limits
+
+The 2026-10-18 manifest follow-up passes the offline inventory check and its
+four Python regression tests. Native acceptance of the added Claude
+named-session form rule has not been performed.
 
 A live Antigravity CLI 1.3.4 session was launched separately with a read-only
 fixture. Its Gemini request failed with HTTP 400, `User location is not
