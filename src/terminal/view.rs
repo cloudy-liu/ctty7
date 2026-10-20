@@ -498,6 +498,10 @@ const INTEGRATION_NOTICE_TIMEOUT: std::time::Duration = std::time::Duration::fro
 
 const OPPORTUNISTIC_GIT_GAP: std::time::Duration = std::time::Duration::from_millis(1500);
 
+/// Retry unanswered repository probes for idle panes without probing on every
+/// terminal poll.
+const GIT_RETRY_GAP: std::time::Duration = std::time::Duration::from_secs(10);
+
 /// How long a title the program set has to stand before the tab adopts it.
 ///
 /// Long enough that a command which is over almost as soon as it started never
@@ -537,6 +541,7 @@ const MAX_HISTORY_BYTES: u64 = 4 << 20;
 enum GitRefresh {
     Edge,
     Opportunistic,
+    Retry,
 }
 
 fn known_pty_shim(fg: &str) -> Option<&'static str> {
@@ -1747,6 +1752,14 @@ impl TerminalView {
         if cwd.is_some() {
             self.refresh_git_status(cwd, GitRefresh::Opportunistic, cx);
         }
+    }
+
+    fn git_retry_due(&self, cx: &App) -> bool {
+        let Some(cwd) = self.git_status_cwd.as_deref() else {
+            return false;
+        };
+        cx.try_global::<crate::terminal::git_status::GitStatusCache>()
+            .is_some_and(|cache| cache.retry_due(self.host_id, cwd, GIT_RETRY_GAP))
     }
 
     pub fn selection_text(&self) -> Option<String> {
@@ -3429,6 +3442,8 @@ impl TerminalView {
             self.refresh_git_status(cwd_now, GitRefresh::Edge, cx);
         } else if tool_activity {
             self.refresh_git_status(cwd_now, GitRefresh::Opportunistic, cx);
+        } else if self.git_retry_due(cx) {
+            self.refresh_git_status(cwd_now, GitRefresh::Retry, cx);
         }
 
         self.follow_history_scope(cx);
@@ -3588,6 +3603,7 @@ impl TerminalView {
             GitRefresh::Opportunistic => {
                 cache.begin_probe_throttled(id, &cwd, OPPORTUNISTIC_GIT_GAP)
             }
+            GitRefresh::Retry => cache.begin_probe_throttled(id, &cwd, GIT_RETRY_GAP),
         });
         if !claimed {
             return;
@@ -3597,10 +3613,16 @@ impl TerminalView {
         crate::ui::host_ops::HostOps::run_detached(
             host,
             cx,
-            move |h| crate::terminal::git_status::probe(h, &probe_cwd),
+            move |h| crate::terminal::git_status::probe_repo(h, &probe_cwd),
             move |cx, result| {
-                let rerun = cx.update_global::<GitStatusCache, _>(|cache, _| {
-                    cache.finish_probe(id, &cwd, result)
+                let rerun = cx.update_global::<GitStatusCache, _>(|cache, _| match result {
+                    crate::terminal::git_status::RepoProbe::Repo(snapshot) => {
+                        cache.finish_probe(id, &cwd, Some(snapshot))
+                    }
+                    crate::terminal::git_status::RepoProbe::NotARepo => {
+                        cache.finish_probe(id, &cwd, None)
+                    }
+                    crate::terminal::git_status::RepoProbe::Failed => cache.fail_probe(id, &cwd),
                 });
                 if rerun {
                     let _ = pane.update(cx, |view, cx| {
