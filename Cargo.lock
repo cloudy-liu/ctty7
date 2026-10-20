@@ -11142,7 +11142,7 @@ dependencies = [
 
 [[package]]
 name = "tty7"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -11204,7 +11204,7 @@ dependencies = [
 
 [[package]]
 name = "tty7-cli"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "alacritty_terminal",
  "anyhow",
@@ -11219,7 +11219,7 @@ dependencies = [
 
 [[package]]
 name = "tty7-core"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "anyhow",
  "base64 0.22.1",
@@ -11253,7 +11253,7 @@ dependencies = [
 
 [[package]]
 name = "tty7-server"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "libc",
  "tempfile",
