@@ -9256,6 +9256,9 @@ mod gpui_tests {
         let pane = window.update(cx, |_, _, cx| cx.entity()).unwrap();
         window
             .update(cx, |view, window, cx| {
+                // Pane focus alone survives switching to another application.
+                // This test represents a reader watching an active window.
+                window.activate_window();
                 view.focus_handle.clone().focus(window, cx);
             })
             .unwrap();
@@ -9264,6 +9267,7 @@ mod gpui_tests {
         report_agent_status(AgentStatus::Done, &pane, cx, &mut daemon);
         window
             .update(cx, |view, window, cx| {
+                assert!(window.is_window_active());
                 assert!(view.focus_handle.is_focused(window));
                 view.poll_agent_status(false, window, cx);
                 assert!(
@@ -14733,6 +14737,12 @@ mod agent_notification_tests {
         let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
         visual.deactivate_window();
         cx.run_until_parked();
+        window
+            .update(cx, |_, window, cx| {
+                assert!(!window.is_window_active());
+                assert!(view.read(cx).focus_handle.is_focused(window));
+            })
+            .unwrap();
         report(AgentStatus::Working, &mut daemon, window, &view, cx);
         report(AgentStatus::Done, &mut daemon, window, &view, cx);
         assert!(cx.update(|cx| view.read(cx).agent_result_unread()));
@@ -14740,6 +14750,27 @@ mod agent_notification_tests {
             .update(cx, |_, window, _| window.activate_window())
             .unwrap();
         cx.run_until_parked();
+        assert!(!cx.update(|cx| view.read(cx).agent_result_unread()));
+    }
+
+    #[gpui::test]
+    fn a_foreground_windows_selected_pane_reads_its_completed_result(cx: &mut TestAppContext) {
+        let (window, view, mut daemon) = harness(cx);
+        window
+            .update(cx, |_, window, cx| {
+                window.activate_window();
+                view.read(cx).focus_handle.clone().focus(window, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        window
+            .update(cx, |_, window, cx| {
+                assert!(window.is_window_active());
+                assert!(view.read(cx).focus_handle.is_focused(window));
+            })
+            .unwrap();
+        report(AgentStatus::Working, &mut daemon, window, &view, cx);
+        report(AgentStatus::Done, &mut daemon, window, &view, cx);
         assert!(!cx.update(|cx| view.read(cx).agent_result_unread()));
     }
 

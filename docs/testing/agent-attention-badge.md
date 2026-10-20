@@ -66,6 +66,10 @@ after its hold period and does not write real workspace/session settings.
   pane in an inactive window incorrectly reported its result as already read.
   It passes after checking both window activation and pane focus, including
   clearing on return to the selected pane.
+- Foreground tests explicitly activate the window as well as focus its pane.
+  GPUI test windows start inactive; pane focus alone does not establish the
+  foreground case. Cross-platform tests cover both foreground and background
+  completion, including their activation/focus preconditions.
 - Notification/channel/focus integration tests and tray rendering/state tests
   pass, including the dark circle, white center and transparent outer corners.
 - The Windows production and native-fixture paths compile. Taskbar updates run
