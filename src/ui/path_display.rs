@@ -121,6 +121,36 @@ pub(crate) fn native_separators(path: &Path) -> Cow<'_, Path> {
     Cow::Borrowed(path)
 }
 
+/// Use ordinary drive/UNC spelling for local Windows display and root matching.
+/// Keep the canonical path on the buffer for file operations and leave remote
+/// paths alone: a backslash can be part of a remote Unix filename.
+pub(crate) fn readable_path(path: &Path, host: HostId) -> Cow<'_, Path> {
+    if !host.is_local() {
+        return Cow::Borrowed(path);
+    }
+    #[cfg(windows)]
+    {
+        use std::path::{Component, Prefix};
+
+        let mut components = path.components();
+        if let Some(Component::Prefix(prefix)) = components.next() {
+            let mut readable = match prefix.kind() {
+                Prefix::VerbatimDisk(drive) => PathBuf::from(format!("{}:", drive as char)),
+                Prefix::VerbatimUNC(server, share) => {
+                    let mut unc = PathBuf::from(r"\\");
+                    unc.push(server);
+                    unc.push(share);
+                    unc
+                }
+                _ => return Cow::Borrowed(path),
+            };
+            readable.push(components.as_path());
+            return Cow::Owned(readable);
+        }
+    }
+    Cow::Borrowed(path)
+}
+
 /// Shortens `path` to start from `~` when it is (inside) `home` — the home
 /// directory of the machine `path` is on, not of this one.
 ///
@@ -174,6 +204,31 @@ fn abbreviate_under<'a>(path: &'a str, home: &str) -> Cow<'a, str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(windows)]
+    #[test]
+    fn readable_paths_hide_local_windows_namespace_prefixes() {
+        for (path, expected) in [
+            (r"\\?\C:\项目\阅读说明.md", r"C:\项目\阅读说明.md"),
+            (
+                r"\\?\UNC\server\share\src\main.rs",
+                r"\\server\share\src\main.rs",
+            ),
+            (r"\\?\UNC\server\share\", r"\\server\share\"),
+            (r"C:\src\main.rs", r"C:\src\main.rs"),
+            (r"\\server\share\main.rs", r"\\server\share\main.rs"),
+            (r"\\?\Volume{test}\file", r"\\?\Volume{test}\file"),
+        ] {
+            assert_eq!(
+                readable_path(Path::new(path), HostId::LOCAL).as_ref(),
+                Path::new(expected)
+            );
+            assert!(matches!(
+                readable_path(Path::new(path), HostId(99)),
+                Cow::Borrowed(_)
+            ));
+        }
+    }
 
     #[test]
     fn a_path_under_home_shortens_to_tilde() {

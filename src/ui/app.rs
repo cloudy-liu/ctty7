@@ -1917,6 +1917,7 @@ impl Tty7App {
                     leaf_id: leaf.entity_id().as_u64(),
                     agent,
                     status,
+                    unread: view.agent_result_unread(),
                     detail,
                 });
             }

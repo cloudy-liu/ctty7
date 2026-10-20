@@ -3675,7 +3675,8 @@ impl TerminalView {
                 // built, before its leaf was attached, never gets the blur that
                 // would clear `self.focused` — trusting the cached flag there
                 // drops the badge on the one pane the reader is not looking at.
-                self.agent_result_unread = !self.focus_handle.is_focused(window);
+                self.agent_result_unread =
+                    !window.is_window_active() || !self.focus_handle.is_focused(window);
                 self.keep_unread_on_focus = false;
             }
             Some(AgentStatus::Done) => {}
@@ -9255,6 +9256,9 @@ mod gpui_tests {
         let pane = window.update(cx, |_, _, cx| cx.entity()).unwrap();
         window
             .update(cx, |view, window, cx| {
+                // Pane focus alone survives switching to another application.
+                // This test represents a reader watching an active window.
+                window.activate_window();
                 view.focus_handle.clone().focus(window, cx);
             })
             .unwrap();
@@ -9263,6 +9267,7 @@ mod gpui_tests {
         report_agent_status(AgentStatus::Done, &pane, cx, &mut daemon);
         window
             .update(cx, |view, window, cx| {
+                assert!(window.is_window_active());
                 assert!(view.focus_handle.is_focused(window));
                 view.poll_agent_status(false, window, cx);
                 assert!(
@@ -14721,6 +14726,52 @@ mod agent_notification_tests {
             std::thread::sleep(std::time::Duration::from_millis(5));
         }
         panic!("agent hook report never reached the view");
+    }
+
+    #[gpui::test]
+    fn a_background_windows_selected_pane_keeps_its_result_unread_until_viewed(
+        cx: &mut TestAppContext,
+    ) {
+        let (window, view, mut daemon) = harness(cx);
+        cx.run_until_parked();
+        let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.deactivate_window();
+        cx.run_until_parked();
+        window
+            .update(cx, |_, window, cx| {
+                assert!(!window.is_window_active());
+                assert!(view.read(cx).focus_handle.is_focused(window));
+            })
+            .unwrap();
+        report(AgentStatus::Working, &mut daemon, window, &view, cx);
+        report(AgentStatus::Done, &mut daemon, window, &view, cx);
+        assert!(cx.update(|cx| view.read(cx).agent_result_unread()));
+        window
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        assert!(!cx.update(|cx| view.read(cx).agent_result_unread()));
+    }
+
+    #[gpui::test]
+    fn a_foreground_windows_selected_pane_reads_its_completed_result(cx: &mut TestAppContext) {
+        let (window, view, mut daemon) = harness(cx);
+        window
+            .update(cx, |_, window, cx| {
+                window.activate_window();
+                view.read(cx).focus_handle.clone().focus(window, cx);
+            })
+            .unwrap();
+        cx.run_until_parked();
+        window
+            .update(cx, |_, window, cx| {
+                assert!(window.is_window_active());
+                assert!(view.read(cx).focus_handle.is_focused(window));
+            })
+            .unwrap();
+        report(AgentStatus::Working, &mut daemon, window, &view, cx);
+        report(AgentStatus::Done, &mut daemon, window, &view, cx);
+        assert!(!cx.update(|cx| view.read(cx).agent_result_unread()));
     }
 
     #[gpui::test]
