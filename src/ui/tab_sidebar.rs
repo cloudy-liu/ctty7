@@ -1134,7 +1134,7 @@ impl Tty7App {
                     .pr_1p5()
                     .rounded_md()
                     .cursor_pointer()
-                    .text_size(px(12.))
+                    .text_size(px(13.))
                     .text_color(if folded_active { fg } else { muted })
                     .hover(move |s| s.bg(hover_bg).text_color(fg))
                     .when_some(group_slot.clone(), |header, (surface, slot)| {
