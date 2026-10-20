@@ -319,7 +319,7 @@ pub fn open_from_cli(cx: &mut App, path: Option<std::path::PathBuf>) {
     cx.activate(true);
     let _ = handle.update(cx, move |_, window, cx| {
         if let Some(path) = path {
-            app.update(cx, |app, cx| app.new_tab_at(path, window, cx));
+            app.update(cx, |app, cx| app.open_path(path, window, cx));
         }
         window.activate_window();
     });

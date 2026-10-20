@@ -1673,7 +1673,7 @@ fn open_parked_path(cx: &mut App, client_ws: WorkspaceId) {
         return;
     };
     let _ = handle.update(cx, move |_, window, cx| {
-        app.update(cx, |app, cx| app.new_tab_at(path, window, cx));
+        app.update(cx, |app, cx| app.open_path(path, window, cx));
     });
 }
 

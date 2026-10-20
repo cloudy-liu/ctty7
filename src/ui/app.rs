@@ -836,6 +836,37 @@ pub(crate) struct LoopbackForwardPanelState {
     pub(crate) mf_error: Option<String>,
 }
 
+/// Same budget as the file tree's reveal: enough frames for a row to be
+/// laid out, then stop so a visible row does not keep requesting scroll.
+const PATH_OPEN_REVEAL_RENDERS: u8 = 60;
+
+/// One folder opened from outside the window (Explorer, `--open-path`,
+/// `tty7 <path>`, or the first terminal of a fresh window). In-app "new tab
+/// here" does not create one of these.
+struct PathOpenReveal {
+    tab: tty7_core::core::machine::TabId,
+    /// The directory the open asked for, until the shell reports its own cwd.
+    cwd: std::path::PathBuf,
+    /// `true` while the repo probe has not answered. After it has, a later
+    /// group change (a `cd`) must not unfold anything else.
+    awaiting_probe: bool,
+    /// Group key already unfolded for this open. A probe that lands in a
+    /// different group restarts [`PATH_OPEN_REVEAL_RENDERS`]; the same key
+    /// does not.
+    revealed_key: String,
+    /// `None` once the painted row has bounds, or the budget above is spent.
+    /// Restarted when `revealed_key` changes.
+    scroll_left: Option<u8>,
+}
+
+fn advance_path_reveal_scroll(left: u8, row_painted: bool, bounds_ready: bool) -> Option<u8> {
+    if row_painted && bounds_ready {
+        None
+    } else {
+        left.checked_sub(1)
+    }
+}
+
 pub struct Tty7App {
     pub(crate) tabs: Vec<Tab>,
     pub(crate) active: usize,
@@ -921,6 +952,9 @@ pub struct Tty7App {
     pub(crate) sidebar_collapsed: bool,
     pub(crate) run_badge_animation: Rc<RefCell<crate::ui::tab_strip::RunBadgeAnimation>>,
     pub(crate) sidebar_scroll: gpui::ScrollHandle,
+    /// Path opens still waiting to unfold a group or to scroll their row in.
+    /// Several can be in flight; a newer open does not cancel an older one.
+    path_open_reveals: RefCell<Vec<PathOpenReveal>>,
     pub(crate) reorder: Rc<RefCell<Option<crate::ui::reorder::Reorder>>>,
     /// The pane the pointer is over, so only that one offers its drag handle.
     pub(crate) pane_hover: Rc<Cell<Option<gpui::EntityId>>>,
@@ -1377,6 +1411,10 @@ impl Tty7App {
             cx.observe_global::<crate::terminal::git_status::GitStatusCache>(|this, cx| {
                 this.maybe_refresh_diff_overlay(cx);
                 this.right_panel_refresh_changes(cx);
+                // The left rail is not built while the tab bar is on top, so
+                // the sidebar's deferred reveal never runs. A probe publishes
+                // through `update_global`, which notifies this observer.
+                this.apply_settled_path_opens(cx);
                 cx.notify();
             });
         cx.default_global::<crate::terminal::pane_liveness::PaneLivenessCache>();
@@ -1415,6 +1453,9 @@ impl Tty7App {
         apply_theme(Some(window), cx);
         set_menus(cx);
         let mut startup_error: Option<gpui::SharedString> = None;
+        // A restored session is not a path open. Only a window that is born
+        // on the folder the launch asked for arms the reveal below.
+        let fresh_path = session.is_none().then(|| initial_cwd.clone()).flatten();
         let (tabs, active) = match session {
             None => match new_terminal(
                 pane_ws.clone(),
@@ -1545,6 +1586,7 @@ impl Tty7App {
                 crate::ui::tab_strip::RunBadgeAnimation::new(cx),
             )),
             sidebar_scroll: gpui::ScrollHandle::new(),
+            path_open_reveals: RefCell::new(Vec::new()),
             reorder: Rc::new(RefCell::new(None)),
             pane_hover: Rc::new(Cell::new(None)),
             pane_drag: Rc::new(RefCell::new(None)),
@@ -1645,6 +1687,12 @@ impl Tty7App {
             true
         });
 
+        if let Some(path) = fresh_path
+            && !app.tabs.is_empty()
+        {
+            let group = app.spawn_group(Some(&path), cx);
+            app.finish_path_open(0, path, group, cx);
+        }
         app.focus_active(window, cx);
         app
     }
@@ -3477,6 +3525,221 @@ impl Tty7App {
         self.focus_active(window, cx);
     }
 
+    /// Show a hidden left rail for this open only. The saved preference and
+    /// the tab bar's position stay as the user left them.
+    fn reveal_left_rail_for_path_open(&mut self, cx: &App) {
+        if cx.global::<Config>().tab_bar_position == TabBarPosition::Left {
+            self.sidebar_collapsed = false;
+        }
+    }
+
+    /// The tab is already in the list. Unfold whatever group is known now
+    /// (Scratch, when it is not) and remember the open so a later probe can
+    /// unfold the group it actually lands in.
+    fn finish_path_open(
+        &mut self,
+        index: usize,
+        cwd: std::path::PathBuf,
+        group: Option<Option<std::path::PathBuf>>,
+        cx: &mut Context<Self>,
+    ) {
+        self.reveal_left_rail_for_path_open(cx);
+        let grouping = cx.global::<Config>().sidebar_grouping;
+        let key = match &group {
+            Some(resolved) => crate::ui::tab_sidebar::group_name_key(resolved),
+            None => String::new(),
+        };
+        if grouping != crate::core::config::SidebarGrouping::None {
+            if let Some(resolved) = group.clone() {
+                if let Some(tab) = self.tabs.get_mut(index) {
+                    *tab.sidebar_group.borrow_mut() = resolved;
+                }
+            }
+            self.unfold_group(&key, cx);
+        }
+        let Some(tab) = self.tabs.get(index) else {
+            return;
+        };
+        let id = tab.tree_id.get();
+        self.path_open_reveals.borrow_mut().push(PathOpenReveal {
+            tab: id,
+            cwd,
+            awaiting_probe: group.is_none(),
+            revealed_key: key,
+            scroll_left: Some(PATH_OPEN_REVEAL_RENDERS),
+        });
+    }
+
+    /// Place a tab that a path open just created, and arm its reveal.
+    /// Flat grouping passes no group into [`Self::place_new_tab`], which
+    /// would otherwise unfold a header Flat does not have.
+    pub(crate) fn accept_path_open(
+        &mut self,
+        tab: Tab,
+        cwd: std::path::PathBuf,
+        group: Option<Option<std::path::PathBuf>>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let place_group = if cx.global::<Config>().sidebar_grouping
+            == crate::core::config::SidebarGrouping::None
+        {
+            None
+        } else {
+            group.clone()
+        };
+        let insert_at = self.new_tab_insert_at(cx);
+        self.place_new_tab(tab, place_group, insert_at, window, cx);
+        self.finish_path_open(self.active, cwd, group, cx);
+    }
+
+    fn settled_path_opens(
+        &self,
+        cx: &App,
+    ) -> Vec<(
+        tty7_core::core::machine::TabId,
+        Option<std::path::PathBuf>,
+        std::path::PathBuf,
+    )> {
+        let pending: Vec<_> = self
+            .path_open_reveals
+            .borrow()
+            .iter()
+            .filter(|reveal| reveal.awaiting_probe)
+            .map(|reveal| (reveal.tab, reveal.cwd.clone()))
+            .collect();
+        let Some(cache) = cx.try_global::<crate::terminal::git_status::GitStatusCache>() else {
+            return Vec::new();
+        };
+        let mut settled = Vec::new();
+        for (tab, stored) in pending {
+            let Some(tab_ref) = self.tabs.iter().find(|t| t.tree_id.get() == tab) else {
+                continue;
+            };
+            let Some((host, cwd)) = crate::ui::tab_sidebar::probed_group_cwd(tab_ref, &stored, cx)
+            else {
+                continue;
+            };
+            let Some(known) = cache.known_repo_for(host, &cwd) else {
+                continue;
+            };
+            settled.push((tab, known, cwd));
+        }
+        settled
+    }
+
+    /// `known` is the cache's three-valued answer. `None` means the probe has
+    /// not run, and the Scratch unfold from [`Self::finish_path_open`] stands.
+    fn resolve_path_open(
+        &mut self,
+        tab: tty7_core::core::machine::TabId,
+        known: Option<Option<std::path::PathBuf>>,
+        cwd: &std::path::Path,
+        cx: &mut Context<Self>,
+    ) {
+        if known.is_none() {
+            return;
+        }
+        let grouping = cx.global::<Config>().sidebar_grouping;
+        let resolved = crate::ui::tab_sidebar::resolved_group(grouping, known, cwd);
+        let unfold = {
+            let mut reveals = self.path_open_reveals.borrow_mut();
+            let Some(reveal) = reveals
+                .iter_mut()
+                .find(|reveal| reveal.tab == tab && reveal.awaiting_probe)
+            else {
+                return;
+            };
+            reveal.awaiting_probe = false;
+            if grouping != crate::core::config::SidebarGrouping::None
+                && let Some(group) = resolved.as_ref()
+            {
+                let key = crate::ui::tab_sidebar::group_name_key(group);
+                if key != reveal.revealed_key {
+                    reveal.revealed_key = key;
+                    reveal.scroll_left = Some(PATH_OPEN_REVEAL_RENDERS);
+                }
+            }
+            grouping != crate::core::config::SidebarGrouping::None
+        };
+        if unfold && let Some(resolved) = resolved {
+            let key = crate::ui::tab_sidebar::group_name_key(&resolved);
+            self.unfold_group(&key, cx);
+        }
+    }
+
+    fn apply_settled_path_opens(&mut self, cx: &mut Context<Self>) {
+        let settled = self.settled_path_opens(cx);
+        for (tab, known, cwd) in settled {
+            self.resolve_path_open(tab, Some(known), &cwd, cx);
+        }
+        self.retain_path_open_reveals();
+    }
+
+    fn retain_path_open_reveals(&self) {
+        let live: Vec<_> = self.tabs.iter().map(|tab| tab.tree_id.get()).collect();
+        self.path_open_reveals.borrow_mut().retain(|reveal| {
+            live.contains(&reveal.tab) && (reveal.awaiting_probe || reveal.scroll_left.is_some())
+        });
+    }
+
+    /// Fold writes save config. Rendering must not do that on the way down,
+    /// so a settled probe is applied after this frame.
+    pub(crate) fn schedule_path_open_reveal(&self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settled_path_opens(cx).is_empty() {
+            return;
+        }
+        cx.defer_in(window, |this, _window, cx| {
+            this.apply_settled_path_opens(cx);
+        });
+    }
+
+    /// Scroll each path-open row to its painted sidebar child, not its index
+    /// in `self.tabs`. A missing row or missing bounds spends one frame of
+    /// budget. A row that already has bounds stops.
+    pub(crate) fn drive_path_reveal_scroll(
+        &self,
+        rows: &[(tty7_core::core::machine::TabId, usize)],
+    ) {
+        let plan: Vec<_> = {
+            let reveals = self.path_open_reveals.borrow();
+            reveals
+                .iter()
+                .enumerate()
+                .filter_map(|(index, reveal)| {
+                    let left = reveal.scroll_left?;
+                    let painted = rows
+                        .iter()
+                        .find(|(id, _)| *id == reveal.tab)
+                        .map(|(_, ix)| *ix);
+                    Some((index, left, painted))
+                })
+                .collect()
+        };
+        let mut updates = Vec::new();
+        for (index, left, painted) in plan {
+            let (row_painted, bounds_ready) = if let Some(ix) = painted {
+                self.sidebar_scroll.scroll_to_item(ix);
+                (true, self.sidebar_scroll.bounds_for_item(ix).is_some())
+            } else {
+                (false, false)
+            };
+            updates.push((
+                index,
+                advance_path_reveal_scroll(left, row_painted, bounds_ready),
+            ));
+        }
+        {
+            let mut reveals = self.path_open_reveals.borrow_mut();
+            for (index, next) in updates {
+                if let Some(reveal) = reveals.get_mut(index) {
+                    reveal.scroll_left = next;
+                }
+            }
+        }
+        self.retain_path_open_reveals();
+    }
+
     pub(crate) fn new_tab(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.new_tab_with_shell(None, window, cx);
     }
@@ -3487,7 +3750,18 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.new_tab_with_cwd(Some(cwd), None, window, cx);
+        self.new_tab_with_cwd(Some(cwd), None, false, window, cx);
+    }
+
+    /// A folder from Explorer, `--open-path`, `tty7 <path>`, or a hydrated
+    /// window. In-app "new tab here" stays on [`Self::new_tab_at`].
+    pub(crate) fn open_path(
+        &mut self,
+        cwd: std::path::PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.new_tab_with_cwd(Some(cwd), None, true, window, cx);
     }
 
     pub(crate) fn new_tab_with_shell(
@@ -3501,7 +3775,7 @@ impl Tty7App {
                 .focused_or_first(window, cx)
                 .and_then(|leaf| leaf.read(cx).spawnable_cwd())
         });
-        self.new_tab_with_cwd(cwd, shell, window, cx);
+        self.new_tab_with_cwd(cwd, shell, false, window, cx);
     }
 
     /// A shell taken out of the new-tab menu, wherever the ⌥ key said to put
@@ -3525,12 +3799,14 @@ impl Tty7App {
         &mut self,
         cwd: Option<std::path::PathBuf>,
         shell: Option<ShellSpec>,
+        reveal: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         if !self.guard_local_spawn(window, cx) {
             return;
         }
+        let opened = cwd.clone();
         let group = self.spawn_group(cwd.as_deref(), cx);
         let tab = match new_terminal(
             self.window_workspace(cx),
@@ -3548,6 +3824,7 @@ impl Tty7App {
                 let text = t_fmt(L10nKey::AppOpenTerminalFailed, &[("error", &e.to_string())]);
                 // A retry from the home screen fails the same way; keep the
                 // reason on screen rather than only in a toast that leaves.
+                // A failed spawn never arms a path-open reveal.
                 self.startup_error = Some(gpui::SharedString::from(text.clone()));
                 window.push_notification(text, cx);
                 cx.notify();
@@ -3557,9 +3834,13 @@ impl Tty7App {
         // Something opened, so whatever the last failure was is stale.
         self.startup_error = None;
         self.remember_active_pane(window, cx);
-        let insert_at = self.new_tab_insert_at(cx);
         let new_tab = Tab::new(Pane::leaf(tab));
-        self.place_new_tab(new_tab, group, insert_at, window, cx);
+        if reveal && let Some(path) = opened {
+            self.accept_path_open(new_tab, path, group, window, cx);
+        } else {
+            let insert_at = self.new_tab_insert_at(cx);
+            self.place_new_tab(new_tab, group, insert_at, window, cx);
+        }
         self.save_session(cx);
         cx.notify();
     }
@@ -11136,8 +11417,11 @@ mod shell_menu_gpui_tests {
 #[cfg(test)]
 mod sidebar_new_tab_gpui_tests {
     use super::{Tab, test_window::harness};
-    use crate::core::config::Config;
+    use crate::core::config::{Config, SidebarGrouping, TabBarPosition};
+    use crate::terminal::git_status::{GitStatusCache, RepoSnapshot};
+    use crate::ui::host_ops::HostId;
     use crate::ui::pane::Pane;
+    use gpui::BorrowAppContext;
 
     #[gpui::test]
     fn placing_a_tab_unfolds_only_its_known_group(cx: &mut gpui::TestAppContext) {
@@ -11165,6 +11449,419 @@ mod sidebar_new_tab_gpui_tests {
                 assert_eq!(folded.contains(""), group != Some(None));
             });
         }
+    }
+
+    fn fold(cx: &mut gpui::App, extra: &[&str]) {
+        let mut groups: std::collections::BTreeSet<String> =
+            ["/w/repo", "", "/w/other"].map(str::to_string).into();
+        for key in extra {
+            groups.insert((*key).to_string());
+        }
+        cx.global_mut::<Config>().sidebar_collapsed_groups = groups;
+    }
+
+    fn note_repo(cx: &mut gpui::App, cwd: &str, home: &str) {
+        cx.global_mut::<GitStatusCache>().finish_probe(
+            HostId::LOCAL,
+            std::path::Path::new(cwd),
+            Some(RepoSnapshot {
+                root: home.into(),
+                home: home.into(),
+                branch: "main".into(),
+                counts: None,
+            }),
+        );
+    }
+
+    fn note_plain(cx: &mut gpui::App, cwd: &str) {
+        cx.global_mut::<GitStatusCache>().finish_probe(
+            HostId::LOCAL,
+            std::path::Path::new(cwd),
+            None,
+        );
+    }
+
+    fn open_at(
+        app: &gpui::Entity<super::Tty7App>,
+        vcx: &mut gpui::VisualTestContext,
+        cwd: &str,
+        group: Option<Option<std::path::PathBuf>>,
+    ) -> tty7_core::core::machine::TabId {
+        app.update_in(vcx, |app, window, cx| {
+            let tab = Tab::new(Pane::Empty);
+            let id = tab.tree_id.get();
+            app.accept_path_open(tab, cwd.into(), group, window, cx);
+            id
+        })
+    }
+
+    #[test]
+    fn path_reveal_scroll_stops_when_the_painted_row_has_bounds() {
+        assert_eq!(super::advance_path_reveal_scroll(60, true, true), None);
+        assert_eq!(super::advance_path_reveal_scroll(60, true, false), Some(59));
+        assert_eq!(super::advance_path_reveal_scroll(1, false, false), Some(0));
+        assert_eq!(super::advance_path_reveal_scroll(0, true, false), None);
+    }
+
+    #[gpui::test]
+    fn path_open_unfolds_only_the_known_target_group(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |_, _, cx| fold(cx, &[]));
+        let id = open_at(&app, &mut vcx, "/w/repo", Some(Some("/w/repo".into())));
+        app.update(&mut vcx, |app, cx| {
+            assert_eq!(app.tabs[app.active].tree_id.get(), id);
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(!folded.contains("/w/repo"));
+            assert!(folded.contains("/w/other"));
+            assert!(folded.contains(""));
+        });
+    }
+
+    #[gpui::test]
+    fn path_open_unfolds_scratch_then_the_repo_the_probe_finds(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |_, _, cx| fold(cx, &[]));
+        let id = open_at(&app, &mut vcx, "/w/nested", None);
+        app.update(&mut vcx, |app, cx| {
+            assert_eq!(app.tabs[app.active].tree_id.get(), id);
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(!folded.contains(""));
+            assert!(folded.contains("/w/repo"));
+            assert!(folded.contains("/w/other"));
+        });
+        app.update_in(&mut vcx, |app, _, cx| {
+            note_repo(cx, "/w/nested", "/w/repo");
+            app.apply_settled_path_opens(cx);
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(!folded.contains(""));
+            assert!(!folded.contains("/w/repo"));
+            assert!(folded.contains("/w/other"));
+        });
+    }
+
+    #[gpui::test]
+    fn path_open_unfolds_a_plain_folder_when_grouping_by_repo_or_folder(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |_, _, cx| {
+            cx.global_mut::<Config>().sidebar_grouping = SidebarGrouping::RepoOrDirectory;
+            fold(cx, &["/w/plain"]);
+        });
+        open_at(&app, &mut vcx, "/w/plain", None);
+        app.update_in(&mut vcx, |app, _, cx| {
+            note_plain(cx, "/w/plain");
+            app.apply_settled_path_opens(cx);
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(!folded.contains("/w/plain"));
+            assert!(!folded.contains(""));
+            assert!(folded.contains("/w/repo"));
+        });
+    }
+
+    #[gpui::test]
+    fn path_open_keeps_the_tab_the_user_activated(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        let (ordinary, opened) = app.update_in(&mut vcx, |app, window, cx| {
+            fold(cx, &[]);
+            let ordinary_tab = Tab::new(Pane::Empty);
+            let ordinary = ordinary_tab.tree_id.get();
+            app.place_new_tab(ordinary_tab, None, 0, window, cx);
+            let opened_tab = Tab::new(Pane::Empty);
+            let opened = opened_tab.tree_id.get();
+            app.accept_path_open(opened_tab, "/w/nested".into(), None, window, cx);
+            app.activate(0, window, cx);
+            (ordinary, opened)
+        });
+        app.update_in(&mut vcx, |app, _, cx| {
+            assert_eq!(app.tabs[app.active].tree_id.get(), ordinary);
+            note_repo(cx, "/w/nested", "/w/repo");
+            app.apply_settled_path_opens(cx);
+            assert_eq!(app.tabs[app.active].tree_id.get(), ordinary);
+            assert_ne!(ordinary, opened);
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(!folded.contains("/w/repo"));
+            assert!(folded.contains("/w/other"));
+        });
+    }
+
+    #[gpui::test]
+    fn two_path_opens_each_unfold_their_own_group(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |_, _, cx| fold(cx, &[]));
+        let first = open_at(&app, &mut vcx, "/w/nested", None);
+        let second = open_at(&app, &mut vcx, "/w/other", Some(Some("/w/other".into())));
+        app.update(&mut vcx, |app, cx| {
+            assert_eq!(app.tabs[app.active].tree_id.get(), second);
+            assert_ne!(first, second);
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(!folded.contains(""));
+            assert!(!folded.contains("/w/other"));
+            assert!(folded.contains("/w/repo"));
+        });
+        app.update_in(&mut vcx, |app, _, cx| {
+            note_repo(cx, "/w/nested", "/w/repo");
+            app.apply_settled_path_opens(cx);
+            assert_eq!(app.tabs[app.active].tree_id.get(), second);
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(!folded.contains("/w/repo"));
+            assert!(!folded.contains("/w/other"));
+            assert!(!folded.contains(""));
+        });
+    }
+
+    #[gpui::test]
+    fn a_settled_path_open_does_not_unfold_a_later_group(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |_, _, cx| fold(cx, &[]));
+        let id = open_at(&app, &mut vcx, "/w/nested", None);
+        app.update_in(&mut vcx, |app, _, cx| {
+            note_repo(cx, "/w/nested", "/w/repo");
+            app.apply_settled_path_opens(cx);
+            app.resolve_path_open(
+                id,
+                Some(Some("/w/other".into())),
+                std::path::Path::new("/w/other"),
+                cx,
+            );
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(!folded.contains("/w/repo"));
+            assert!(folded.contains("/w/other"));
+        });
+    }
+
+    #[gpui::test]
+    fn flat_grouping_shows_a_hidden_rail_without_unfolding(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |app, _, cx| {
+            {
+                let cfg = cx.global_mut::<Config>();
+                cfg.sidebar_grouping = SidebarGrouping::None;
+                cfg.sidebar_collapsed = true;
+                cfg.tab_bar_position = TabBarPosition::Left;
+            }
+            app.sidebar_collapsed = true;
+            fold(cx, &[]);
+        });
+        let id = open_at(&app, &mut vcx, "/w/repo", Some(Some("/w/repo".into())));
+        app.update(&mut vcx, |app, cx| {
+            assert_eq!(app.tabs[app.active].tree_id.get(), id);
+            assert!(!app.sidebar_collapsed);
+            assert!(cx.global::<Config>().sidebar_collapsed);
+            assert_eq!(cx.global::<Config>().tab_bar_position, TabBarPosition::Left);
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(folded.contains("/w/repo"));
+            assert!(folded.contains("/w/other"));
+            assert!(folded.contains(""));
+        });
+    }
+
+    #[gpui::test]
+    fn a_hidden_left_rail_is_shown_without_saving_that(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |app, _, cx| {
+            {
+                let cfg = cx.global_mut::<Config>();
+                cfg.sidebar_collapsed = true;
+                cfg.tab_bar_position = TabBarPosition::Left;
+            }
+            app.sidebar_collapsed = true;
+            fold(cx, &[]);
+        });
+        open_at(&app, &mut vcx, "/w/repo", Some(Some("/w/repo".into())));
+        app.update(&mut vcx, |app, cx| {
+            assert!(!app.sidebar_collapsed);
+            assert!(cx.global::<Config>().sidebar_collapsed);
+            assert_eq!(cx.global::<Config>().tab_bar_position, TabBarPosition::Left);
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(!folded.contains("/w/repo"));
+            assert!(folded.contains("/w/other"));
+            assert!(folded.contains(""));
+        });
+    }
+
+    #[gpui::test]
+    fn a_top_tab_bar_stays_put_while_the_group_unfolds(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |app, _, cx| {
+            {
+                let cfg = cx.global_mut::<Config>();
+                cfg.tab_bar_position = TabBarPosition::Top;
+                cfg.sidebar_collapsed = true;
+            }
+            app.sidebar_collapsed = true;
+            fold(cx, &[]);
+        });
+        let id = open_at(&app, &mut vcx, "/w/repo", Some(Some("/w/repo".into())));
+        app.update(&mut vcx, |app, cx| {
+            assert_eq!(app.tabs[app.active].tree_id.get(), id);
+            assert_eq!(cx.global::<Config>().tab_bar_position, TabBarPosition::Top);
+            assert!(app.sidebar_collapsed);
+            assert!(cx.global::<Config>().sidebar_collapsed);
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(!folded.contains("/w/repo"));
+            assert!(folded.contains("/w/other"));
+        });
+    }
+
+    #[gpui::test]
+    fn a_top_tab_bar_unfolds_the_repo_a_late_probe_finds(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        let ordinary = app.update_in(&mut vcx, |app, window, cx| {
+            cx.global_mut::<Config>().tab_bar_position = TabBarPosition::Top;
+            fold(cx, &[]);
+            let ordinary_tab = Tab::new(Pane::Empty);
+            let ordinary = ordinary_tab.tree_id.get();
+            app.place_new_tab(ordinary_tab, None, 0, window, cx);
+            let opened_tab = Tab::new(Pane::Empty);
+            app.accept_path_open(opened_tab, "/w/nested".into(), None, window, cx);
+            app.activate(0, window, cx);
+            assert_eq!(app.tabs[app.active].tree_id.get(), ordinary);
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(folded.contains("/w/repo"));
+            assert!(folded.contains("/w/other"));
+            ordinary
+        });
+        app.update(&mut vcx, |_app, cx| {
+            cx.update_global::<GitStatusCache, _>(|cache, _| {
+                cache.finish_probe(
+                    HostId::LOCAL,
+                    std::path::Path::new("/w/nested"),
+                    Some(RepoSnapshot {
+                        root: "/w/repo".into(),
+                        home: "/w/repo".into(),
+                        branch: "main".into(),
+                        counts: None,
+                    }),
+                );
+            });
+        });
+        vcx.background_executor.run_until_parked();
+        app.update(&mut vcx, |app, cx| {
+            assert_eq!(app.tabs[app.active].tree_id.get(), ordinary);
+            assert_eq!(cx.global::<Config>().tab_bar_position, TabBarPosition::Top);
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(!folded.contains("/w/repo"));
+            assert!(folded.contains("/w/other"));
+        });
+    }
+
+    #[gpui::test]
+    fn an_ordinary_placed_tab_does_not_unfold_when_its_group_resolves(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (app, mut vcx) = harness(cx);
+        let id = app.update_in(&mut vcx, |app, window, cx| {
+            fold(cx, &[]);
+            let tab = Tab::new(Pane::Empty);
+            let id = tab.tree_id.get();
+            app.place_new_tab(tab, None, 0, window, cx);
+            id
+        });
+        app.update_in(&mut vcx, |app, _, cx| {
+            note_repo(cx, "/w/nested", "/w/repo");
+            app.apply_settled_path_opens(cx);
+            app.resolve_path_open(
+                id,
+                Some(Some("/w/repo".into())),
+                std::path::Path::new("/w/repo"),
+                cx,
+            );
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(folded.contains("/w/repo"));
+            assert!(folded.contains("/w/other"));
+            assert!(folded.contains(""));
+        });
+    }
+
+    #[gpui::test]
+    fn path_open_scroll_budget_ends_without_painted_bounds(cx: &mut gpui::TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |_, _, cx| fold(cx, &[]));
+        let id = open_at(&app, &mut vcx, "/w/repo", Some(Some("/w/repo".into())));
+        // Headless frames may already have spent part of the budget. What
+        // matters is that it ends, and a later drive does not start it again.
+        for _ in 0..80 {
+            let done = app.update_in(&mut vcx, |app, _, _| {
+                let pending = app
+                    .path_open_reveals
+                    .borrow()
+                    .iter()
+                    .any(|reveal| reveal.scroll_left.is_some());
+                if pending {
+                    app.drive_path_reveal_scroll(&[(id, 3)]);
+                }
+                !app.path_open_reveals
+                    .borrow()
+                    .iter()
+                    .any(|reveal| reveal.scroll_left.is_some())
+            });
+            if done {
+                break;
+            }
+        }
+        app.update_in(&mut vcx, |app, _, _| {
+            assert!(
+                app.path_open_reveals
+                    .borrow()
+                    .iter()
+                    .all(|reveal| reveal.scroll_left.is_none())
+            );
+            app.drive_path_reveal_scroll(&[(id, 3)]);
+            assert!(
+                app.path_open_reveals
+                    .borrow()
+                    .iter()
+                    .all(|reveal| reveal.scroll_left.is_none())
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn a_spent_scratch_scroll_restarts_when_the_probe_lands_elsewhere(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |_, _, cx| fold(cx, &[]));
+        let id = open_at(&app, &mut vcx, "/w/nested", None);
+        for _ in 0..80 {
+            let done = app.update_in(&mut vcx, |app, _, _| {
+                let pending = app
+                    .path_open_reveals
+                    .borrow()
+                    .iter()
+                    .any(|reveal| reveal.scroll_left.is_some());
+                if pending {
+                    app.drive_path_reveal_scroll(&[(id, 3)]);
+                }
+                !app.path_open_reveals
+                    .borrow()
+                    .iter()
+                    .any(|reveal| reveal.scroll_left.is_some())
+            });
+            if done {
+                break;
+            }
+        }
+        app.update_in(&mut vcx, |app, _, cx| {
+            assert!(
+                app.path_open_reveals
+                    .borrow()
+                    .iter()
+                    .any(|reveal| { reveal.tab == id && reveal.scroll_left.is_none() })
+            );
+            note_repo(cx, "/w/nested", "/w/repo");
+            app.apply_settled_path_opens(cx);
+            assert!(
+                app.path_open_reveals
+                    .borrow()
+                    .iter()
+                    .any(|reveal| { reveal.tab == id && reveal.scroll_left.is_some() })
+            );
+            let folded = &cx.global::<Config>().sidebar_collapsed_groups;
+            assert!(!folded.contains("/w/repo"));
+            assert!(folded.contains("/w/other"));
+        });
     }
 }
 

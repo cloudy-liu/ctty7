@@ -1,8 +1,8 @@
 use gpui::{
     Animation, AnimationExt as _, AnyElement, Axis, Bounds, ClickEvent, Context, Div, FontWeight,
     MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, SharedString, Stateful,
-    Window, canvas, deferred, div, ease_out_quint, linear_color_stop, linear_gradient, prelude::*,
-    px,
+    Window, canvas, deferred, div, ease_out_quint, linear_color_stop, linear_gradient, point,
+    prelude::*, px, size,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::Input;
@@ -169,6 +169,9 @@ impl Tty7App {
             .gap_0p5();
 
         let keys: Rc<Vec<Option<PathBuf>>> = Rc::new(self.sidebar_group_keys(cx));
+        // Fold updates save config. Doing that here re-enters render, so the
+        // reveal waits until this frame has finished painting.
+        self.schedule_path_open_reveal(window, cx);
         let is_local = self.can_spawn_locally(cx);
         let pinned_cfg: Rc<Vec<String>> = Rc::new(self.sidebar_pinned_groups(cx).to_vec());
         if is_local {
@@ -269,6 +272,8 @@ impl Tty7App {
         let pinned_groups = pinned_slots.len();
         let pinned_group_slots: Rc<RefCell<Vec<Bounds<Pixels>>>> =
             Rc::new(RefCell::new(vec![Bounds::default(); pinned_groups]));
+        let pinned_bounds_seen: Rc<RefCell<Vec<bool>>> =
+            Rc::new(RefCell::new(vec![false; pinned_groups]));
         let pinned_preview = reorder::preview(
             &self.reorder,
             &Surface::PinnedGroups,
@@ -299,6 +304,8 @@ impl Tty7App {
         let repo_groups = repo_slots.len();
         let group_slots: Rc<RefCell<Vec<Bounds<Pixels>>>> =
             Rc::new(RefCell::new(vec![Bounds::default(); repo_groups]));
+        let group_bounds_seen: Rc<RefCell<Vec<bool>>> =
+            Rc::new(RefCell::new(vec![false; repo_groups]));
         let group_preview =
             reorder::preview(&self.reorder, &Surface::SidebarGroups, repo_groups, pointer);
         let repo_roots: Vec<PathBuf> = repo_slots
@@ -340,17 +347,32 @@ impl Tty7App {
         );
         blocks.extend(scratch_slots.into_iter().map(|ix| (None, ix)));
 
+        // `scroll_to_item` indexes direct children of this list. A group block
+        // would scroll the whole group, so headers, dividers, and rows are
+        // counted as their own children except while a group is being dragged.
+        let mut painted: usize = 0;
+        let mut painted_rows: Vec<(tty7_core::core::machine::TabId, usize)> = Vec::new();
+
         for (group_slot, group_ix) in blocks {
             let section = &sections[group_ix];
-            let (drag_slots, active_preview, anim_prefix) = match &group_slot {
-                Some((Surface::PinnedGroups, _)) => {
-                    (&pinned_group_slots, &pinned_preview, "pinned-group-slide")
-                }
-                _ => (&group_slots, &group_preview, "group-slide"),
+            let (drag_slots, bounds_seen, active_preview, anim_prefix) = match &group_slot {
+                Some((Surface::PinnedGroups, _)) => (
+                    &pinned_group_slots,
+                    &pinned_bounds_seen,
+                    &pinned_preview,
+                    "pinned-group-slide",
+                ),
+                _ => (
+                    &group_slots,
+                    &group_bounds_seen,
+                    &group_preview,
+                    "group-slide",
+                ),
             };
             let slot_ix = group_slot.as_ref().map(|(_, slot)| *slot);
             if show_pin_divider && !section.pinned && !divider_inserted {
                 divider_inserted = true;
+                painted += 1;
                 list = list.child(
                     div()
                         .mx(px(12.))
@@ -1016,6 +1038,10 @@ impl Tty7App {
                 }
                 None => (0..rows.len()).collect(),
             };
+            let row_ids: Vec<tty7_core::core::machine::TabId> = row_display
+                .iter()
+                .map(|&slot| self.tabs[visible_tabs[slot]].tree_id.get())
+                .collect();
             let tab_count = section.tabs.len();
             let mut rows: Vec<Option<ContextMenu<Stateful<Div>>>> =
                 rows.into_iter().map(Some).collect();
@@ -1359,55 +1385,134 @@ impl Tty7App {
                     .into_any_element()
             });
 
-            let block = v_flex()
-                .w_full()
-                .gap(px(ROW_GAP))
-                .when(
-                    active_preview
-                        .as_ref()
-                        .is_some_and(|p| Some(p.from) == slot_ix),
-                    |b| b.opacity(0.75),
-                )
-                .children(header)
-                .children(rows)
-                .when_some(group_slot.clone(), |block, (_, slot)| {
+            // While groups are sliding, keep one block so the drag measures a
+            // single rectangle. Otherwise each header and row is its own list
+            // child, which is what `scroll_to_item` can land on.
+            let dragging_group = active_preview.is_some() && slot_ix.is_some();
+            any_rows = true;
+            if dragging_group {
+                let block_index = painted;
+                painted += 1;
+                for id in &row_ids {
+                    painted_rows.push((*id, block_index));
+                }
+                let block = v_flex()
+                    .w_full()
+                    .gap(px(ROW_GAP))
+                    .when(
+                        active_preview
+                            .as_ref()
+                            .is_some_and(|p| Some(p.from) == slot_ix),
+                        |b| b.opacity(0.75),
+                    )
+                    .children(header)
+                    .children(rows)
+                    .when_some(group_slot.clone(), |block, (_, slot)| {
+                        let slots = drag_slots.clone();
+                        block.child(
+                            canvas(
+                                move |bounds, _window, _cx| {
+                                    if let Some(s) = slots.borrow_mut().get_mut(slot) {
+                                        *s = bounds;
+                                    }
+                                },
+                                |_, _, _, _| {},
+                            )
+                            .absolute()
+                            .inset_0(),
+                        )
+                    });
+                list = list.child(match (active_preview, slot_ix) {
+                    (Some(p), Some(slot)) if p.from == slot => {
+                        deferred(block.relative().top(p.held)).into_any_element()
+                    }
+                    (Some(p), Some(slot)) => {
+                        let offset = p.offsets[slot].as_f32();
+                        block
+                            .with_animation(
+                                (
+                                    SharedString::from(format!("{anim_prefix}-{}", p.generation)),
+                                    slot,
+                                ),
+                                Animation::new(std::time::Duration::from_millis(REORDER_SLIDE_MS))
+                                    .with_easing(ease_out_quint()),
+                                move |el, delta| el.top(px(offset * (1. - delta))),
+                            )
+                            .into_any_element()
+                    }
+                    _ => block.into_any_element(),
+                });
+            } else {
+                let mut pieces: Vec<(Option<tty7_core::core::machine::TabId>, AnyElement)> =
+                    Vec::new();
+                if let Some(header) = header {
+                    pieces.push((None, header));
+                }
+                let mut ids = row_ids.into_iter().map(Some).collect::<Vec<_>>();
+                while ids.len() < rows.len() {
+                    ids.push(None);
+                }
+                pieces.extend(ids.into_iter().zip(rows));
+                for (tab_id, el) in pieces {
+                    if let Some(id) = tab_id {
+                        painted_rows.push((id, painted));
+                    }
+                    painted += 1;
                     let slots = drag_slots.clone();
-                    block.child(
+                    let seen = bounds_seen.clone();
+                    let measured = slot_ix.map(|slot| {
                         canvas(
                             move |bounds, _window, _cx| {
-                                if let Some(s) = slots.borrow_mut().get_mut(slot) {
-                                    *s = bounds;
+                                if bounds.size.width.as_f32() == 0.
+                                    && bounds.size.height.as_f32() == 0.
+                                {
+                                    return;
+                                }
+                                let Ok(mut slots) = slots.try_borrow_mut() else {
+                                    return;
+                                };
+                                let Ok(mut seen) = seen.try_borrow_mut() else {
+                                    return;
+                                };
+                                let (Some(slot_bounds), Some(already)) =
+                                    (slots.get_mut(slot), seen.get_mut(slot))
+                                else {
+                                    return;
+                                };
+                                if !*already {
+                                    *slot_bounds = bounds;
+                                    *already = true;
+                                } else {
+                                    let x = slot_bounds.origin.x.min(bounds.origin.x);
+                                    let y = slot_bounds.origin.y.min(bounds.origin.y);
+                                    let right = (slot_bounds.origin.x + slot_bounds.size.width)
+                                        .max(bounds.origin.x + bounds.size.width);
+                                    let bottom = (slot_bounds.origin.y + slot_bounds.size.height)
+                                        .max(bounds.origin.y + bounds.size.height);
+                                    *slot_bounds = Bounds {
+                                        origin: point(x, y),
+                                        size: size(right - x, bottom - y),
+                                    };
                                 }
                             },
                             |_, _, _, _| {},
                         )
                         .absolute()
-                        .inset_0(),
-                    )
-                });
-
-            any_rows = true;
-            list = list.child(match (active_preview, slot_ix) {
-                (Some(p), Some(slot)) if p.from == slot => {
-                    deferred(block.relative().top(p.held)).into_any_element()
+                        .inset_0()
+                    });
+                    list = list.child(
+                        div()
+                            .w_full()
+                            .relative()
+                            .child(el)
+                            .children(measured)
+                            .into_any_element(),
+                    );
                 }
-                (Some(p), Some(slot)) => {
-                    let offset = p.offsets[slot].as_f32();
-                    block
-                        .with_animation(
-                            (
-                                SharedString::from(format!("{anim_prefix}-{}", p.generation)),
-                                slot,
-                            ),
-                            Animation::new(std::time::Duration::from_millis(REORDER_SLIDE_MS))
-                                .with_easing(ease_out_quint()),
-                            move |el, delta| el.top(px(offset * (1. - delta))),
-                        )
-                        .into_any_element()
-                }
-                _ => block.into_any_element(),
-            });
+            }
         }
+
+        self.drive_path_reveal_scroll(&painted_rows);
 
         if !any_rows && !query.is_empty() {
             list = list.child(
@@ -2014,7 +2119,7 @@ fn in_pane_ssh_hop(host_is_local: bool, kind: Option<RemoteKind>) -> bool {
 /// header. `known` is the cache's three-valued answer; a probe that never
 /// ran resolves to `None`, no decision, and the tab keeps whatever group it
 /// already has rather than bouncing through Scratch mid-probe.
-fn resolved_group(
+pub(crate) fn resolved_group(
     grouping: SidebarGrouping,
     known: Option<Option<PathBuf>>,
     cwd: &Path,
@@ -2024,6 +2129,33 @@ fn resolved_group(
         None if grouping == SidebarGrouping::RepoOrDirectory => Some(cwd.to_path_buf()),
         None => None,
     })
+}
+
+/// Cwd a path-open reveal should ask the repo cache about.
+///
+/// A shell that has not reported yet still answers with the directory the
+/// open asked for. An in-pane `ssh` hop is not that directory — the tab has
+/// left it — so the caller waits rather than unfolding the local folder.
+pub(crate) fn probed_group_cwd(
+    tab: &crate::ui::app::Tab,
+    stored: &Path,
+    cx: &gpui::App,
+) -> Option<(crate::ui::host_ops::HostId, PathBuf)> {
+    if let Some(leaf) = tab.pane.first_leaf() {
+        if let Some(view) = leaf.terminal() {
+            let view = view.read(cx);
+            if in_pane_ssh_hop(
+                view.host_id().is_local(),
+                view.remote_context().map(|r| r.kind),
+            ) {
+                return None;
+            }
+            if let Some(cwd) = view.git_status_cwd() {
+                return Some((view.host_id(), cwd.to_path_buf()));
+            }
+        }
+    }
+    Some((crate::ui::host_ops::HostId::LOCAL, stored.to_path_buf()))
 }
 
 #[derive(Debug, PartialEq)]
