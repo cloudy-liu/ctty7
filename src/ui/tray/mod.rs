@@ -3,6 +3,8 @@ mod icon;
 mod native;
 #[cfg(target_os = "linux")]
 mod sni;
+#[cfg(target_os = "windows")]
+mod taskbar;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use native::Backend;
@@ -74,6 +76,7 @@ pub(crate) struct AgentRow {
     pub leaf_id: u64,
     pub agent: crate::core::cli_agent::CLIAgent,
     pub status: AgentStatus,
+    pub unread: bool,
     pub detail: String,
 }
 
@@ -86,7 +89,9 @@ pub(crate) struct TraySnapshot {
 impl TraySnapshot {
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub(crate) fn attention(&self) -> bool {
-        self.agents.iter().any(|a| a.status == AgentStatus::Waiting)
+        self.agents.iter().any(|a| {
+            a.status == AgentStatus::Waiting || (a.status == AgentStatus::Done && a.unread)
+        })
     }
 
     pub(crate) fn tooltip(&self) -> String {
@@ -225,6 +230,7 @@ mod tests {
                 leaf_id: 42,
                 agent: crate::core::cli_agent::CLIAgent::Claude,
                 status,
+                unread: false,
                 detail: "tty7 @ main".into(),
             }],
             notify_mode: NotifyMode::Unfocused,
@@ -265,6 +271,17 @@ mod tests {
         assert!(snapshot_with_agent(AgentStatus::Waiting).attention());
         assert!(!snapshot_with_agent(AgentStatus::Working).attention());
         assert!(!snapshot_with_agent(AgentStatus::Done).attention());
+        let mut completed = snapshot_with_agent(AgentStatus::Done);
+        completed.agents[0].unread = true;
+        assert!(
+            completed.attention(),
+            "completed results remain visible until read"
+        );
+        completed.agents[0].unread = false;
+        assert!(
+            !completed.attention(),
+            "viewing the result clears the reminder"
+        );
         assert_eq!(
             snapshot_with_agent(AgentStatus::Waiting).tooltip(),
             format!(
@@ -418,6 +435,8 @@ pub(crate) fn init(cx: &mut App) {
 
     cx.spawn(async move |cx| {
         let mut backend: Option<Backend> = None;
+        #[cfg(target_os = "windows")]
+        let mut taskbar = None;
         let mut shown: Option<TraySnapshot> = None;
         const MAX_ATTEMPTS: u32 = 10;
         const RETRY_EVERY: u32 = 30;
@@ -427,6 +446,9 @@ pub(crate) fn init(cx: &mut App) {
             cx.background_executor().timer(POLL).await;
             let (enabled, snap) =
                 cx.update(|cx| (cx.global::<Config>().show_tray_icon, app_snapshot(cx)));
+            // Taskbar reminders remain available when the tray is disabled.
+            #[cfg(target_os = "windows")]
+            cx.update(|cx| taskbar::update(&mut taskbar, &snap, cx));
             if !enabled {
                 backend = None;
                 shown = None;

@@ -31,6 +31,8 @@ struct Options {
     agent_replay: bool,
     #[serde(default)]
     auto_names: bool,
+    #[serde(default)]
+    attention_badge: bool,
 }
 
 struct Fixture {
@@ -85,7 +87,12 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             let mut views: Vec<Entity<TerminalView>> = Vec::new();
             let mut owner_entity = None;
             let mut replay_stream = None;
-            let cases = if options.agent_replay {
+            let cases = if options.attention_badge {
+                vec![
+                    ("Completed Agent", Some(CLIAgent::Claude), None),
+                    ("Other terminal", None, None),
+                ]
+            } else if options.agent_replay {
                 vec![("AGY screen replay", Some(CLIAgent::Antigravity), None)]
             } else if options.auto_names {
                 vec![
@@ -170,11 +177,11 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                                 views.push(view);
                                 streams.push(stream);
                             }
-                            app.active = if options.agent_replay { 0 } else { 4 };
+                            app.active = if options.attention_badge { 1 } else if options.agent_replay { 0 } else { 4 };
                             app.focus_active(window, cx);
                             cx.notify();
                         });
-                        if options.agent_replay {
+                        if options.agent_replay || options.attention_badge {
                             replay_stream = Some(streams[0].try_clone().unwrap());
                         }
                         owner_entity = Some(owner.clone());
@@ -185,6 +192,10 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 .unwrap();
             cx.activate(true);
             let owner = owner_entity.unwrap();
+            if options.attention_badge {
+                let workspace = owner.read(cx).workspace;
+                crate::ui::windows::WindowRegistry::register(cx, workspace, handle.into(), owner.downgrade());
+            }
             cx.spawn(async move |cx| {
                 let deadline = std::time::Instant::now() + Duration::from_secs(20);
                 loop {
@@ -214,6 +225,32 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     let _ = &options.output;
                 }).unwrap();
                 eprintln!("NATIVE_SSH_TABS_READY");
+                if options.attention_badge {
+                    let mut stream = replay_stream.take().unwrap();
+                    DaemonMsg::AgentStatus(Some(AgentSessionState {
+                        status: AgentStatus::Done,
+                        rich: true,
+                        ..Default::default()
+                    })).encode(&mut stream).unwrap();
+                    cx.background_executor().timer(Duration::from_secs(3)).await;
+                    eprintln!("NATIVE_ATTENTION_BADGE_UNREAD");
+                    // The control file lets the screenshot operator acknowledge the
+                    // actual result without typing commands into the fixture UI.
+                    let acknowledge = options.output.with_extension("read");
+                    let deadline = std::time::Instant::now() + Duration::from_secs(options.hold_seconds.unwrap_or(120));
+                    while !acknowledge.exists() && std::time::Instant::now() < deadline {
+                        cx.background_executor().timer(Duration::from_millis(200)).await;
+                    }
+                    cx.update_window(handle.into(), |_, window, cx| {
+                        owner.update(cx, |app, cx| {
+                            app.active = 0;
+                            app.focus_active(window, cx);
+                        });
+                        window.activate_window();
+                        window.refresh();
+                    }).unwrap();
+                    eprintln!("NATIVE_ATTENTION_BADGE_READ");
+                }
                 if let Some(mut stream) = replay_stream {
                     // Exercise the normal daemon reader and UI status merge.
                     // This is a replay of the reported screen shape, not a model request.
