@@ -96,17 +96,26 @@ impl TabCode {
 
     fn active_display_path(&self, tree_host: HostId) -> Option<PathBuf> {
         let file = self.active_file()?;
+        let path = crate::ui::path_display::readable_path(&file.path, file.host.id());
         // Tree roots belong to the workspace host, while SFTP buffers can
         // belong to another machine. Unrelated files keep their full path.
         if file.host.id() == tree_host
-            && let Some(root) = crate::ui::file_tree::containing_root(&self.roots, &file.path)
+            && let Some((_, relative)) = self
+                .roots
+                .iter()
+                .filter_map(|root| {
+                    let root = crate::ui::path_display::readable_path(root, tree_host);
+                    let relative = path.strip_prefix(&root).ok()?;
+                    Some((root.components().count(), relative.to_path_buf()))
+                })
+                .max_by_key(|(depth, _)| *depth)
         {
             // The root is the boundary, not a breadcrumb. Cursor's document
             // title starts with the path inside the project; a file directly
             // under the root is therefore just its filename.
-            return Some(file.path.strip_prefix(root).unwrap().to_path_buf());
+            return Some(relative);
         }
-        Some(file.path.clone())
+        Some(path.into_owned())
     }
 }
 
@@ -1336,7 +1345,13 @@ impl Tty7App {
                     .join(" › ");
                 format!("{directory} › ")
             });
-        let full_path = active.map(|f| SharedString::from(f.path.display().to_string()));
+        let full_path = active.map(|f| {
+            SharedString::from(
+                crate::ui::path_display::readable_path(&f.path, f.host.id())
+                    .display()
+                    .to_string(),
+            )
+        });
         let dirty = active.is_some_and(|f| f.dirty);
         // `TITLE_BAR_LEAD` is the room macOS's traffic lights need. Only a
         // header that starts at the left edge of the window has them to clear,
@@ -1393,7 +1408,6 @@ impl Tty7App {
                                     div()
                                         .id("editor-document-directories")
                                         .debug_selector(|| "editor-document-directories".into())
-                                        .flex_1()
                                         .min_w_0()
                                         .overflow_hidden()
                                         .whitespace_nowrap()
@@ -1732,6 +1746,52 @@ mod tests {
     }
 
     #[gpui::test]
+    fn document_header_shows_project_paths_after_opening_local_files(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path();
+        let docs = root.join("docs");
+        std::fs::create_dir(&docs).unwrap();
+        for (relative, contents) in [
+            ("README.md", "# Readme\n"),
+            ("docs/阅读说明.md", "# Guide\n"),
+            ("docs/example.rs", "fn main() {}\n"),
+        ] {
+            let path = root.join(relative);
+            std::fs::write(&path, contents).unwrap();
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.tab_code_mut_or_init().unwrap().roots = vec![root.to_path_buf()];
+                app.editor_open_on_host(
+                    tty7_core::host::local::LocalHost::new(),
+                    &path,
+                    window,
+                    cx,
+                );
+            });
+            wait_for_markdown(&mut vcx, |vcx| {
+                app.read_with(vcx, |app, _| {
+                    app.tab_code()
+                        .unwrap()
+                        .active_file()
+                        .is_some_and(|file| file.path.file_name() == path.file_name())
+                })
+            });
+            app.read_with(&vcx, |app, _| {
+                let code = app.tab_code().unwrap();
+                assert_eq!(
+                    code.active_file().unwrap().path,
+                    std::fs::canonicalize(&path).unwrap()
+                );
+                assert_eq!(
+                    code.active_display_path(HostId::LOCAL),
+                    Some(PathBuf::from(relative)),
+                    "canonicalized local files must keep project-relative breadcrumbs"
+                );
+            });
+        }
+    }
+
+    #[gpui::test]
     fn document_header_places_the_file_icon_before_its_name(cx: &mut TestAppContext) {
         let (app, mut vcx) = markdown_window(cx);
         app.update_in(&mut vcx, |app, window, cx| {
@@ -1746,33 +1806,49 @@ mod tests {
             app.tab_code_mut().unwrap().roots = vec!["/work/project".into()];
         });
 
-        for (path, has_directories) in [
-            ("/work/project/docs/guide.md", true),
-            ("/work/project/CONTEXT.md", false),
+        for (width, layout) in [
+            (1600., crate::core::config::DocumentLayout::Dock),
+            (1600., crate::core::config::DocumentLayout::Fill),
+            (760., crate::core::config::DocumentLayout::Dock),
+            (560., crate::core::config::DocumentLayout::Fill),
         ] {
-            app.update_in(&mut vcx, |app, _, cx| {
-                let code = app.tab_code_mut().unwrap();
-                let active = code.active;
-                code.files[active].path = path.into();
-                cx.notify();
-            });
-            vcx.run_until_parked();
-            vcx.update(|window, cx| {
-                let _ = window.draw(cx);
-            });
+            vcx.simulate_resize(gpui::size(px(width), px(900.)));
+            app.update_in(&mut vcx, |app, _, cx| app.set_document_layout(layout, cx));
+            for (path, has_directories) in [
+                ("/work/project/docs/guide.md", true),
+                ("/work/project/docs/阅读说明.md", true),
+                ("/work/project/docs/main.rs", true),
+                ("/work/project/CONTEXT.md", false),
+            ] {
+                app.update_in(&mut vcx, |app, _, cx| {
+                    let code = app.tab_code_mut().unwrap();
+                    let active = code.active;
+                    code.files[active].path = path.into();
+                    code.files[active].preview = language_for_path(Path::new(path)) == "markdown";
+                    cx.notify();
+                });
+                vcx.run_until_parked();
+                vcx.update(|window, cx| {
+                    let _ = window.draw(cx);
+                });
 
-            let path = vcx.debug_bounds("editor-document-path").unwrap();
-            let icon = vcx.debug_bounds("editor-document-icon").unwrap();
-            let name = vcx.debug_bounds("editor-document-name").unwrap();
-            assert!(icon.left() < name.left(), "icon must precede filename");
-            assert!(icon.left() >= path.left() && icon.right() <= path.right());
-            assert!(name.left() < path.right(), "filename must remain visible");
+                let path = vcx.debug_bounds("editor-document-path").unwrap();
+                let icon = vcx.debug_bounds("editor-document-icon").unwrap();
+                let name = vcx.debug_bounds("editor-document-name").unwrap();
+                assert!(icon.left() < name.left(), "icon must precede filename");
+                assert!(icon.left() >= path.left() && icon.right() <= path.right());
+                assert!(name.left() < path.right(), "filename must remain visible");
 
-            let directories = vcx.debug_bounds("editor-document-directories");
-            assert_eq!(directories.is_some(), has_directories);
-            if let Some(directories) = directories {
-                assert!(directories.left() < icon.left());
-                assert!(directories.right() <= icon.left());
+                let directories = vcx.debug_bounds("editor-document-directories");
+                assert_eq!(directories.is_some(), has_directories);
+                if let Some(directories) = directories {
+                    assert!(directories.left() < icon.left());
+                    assert!(directories.right() <= icon.left());
+                    assert!(
+                        icon.left() - directories.left() < px(100.),
+                        "a short directory must not push the filename to the right: {directories:?} {icon:?}"
+                    );
+                }
             }
         }
     }
