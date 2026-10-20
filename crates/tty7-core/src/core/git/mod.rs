@@ -35,9 +35,20 @@ pub struct RepoSnapshot {
     pub counts: Option<(u32, u32)>,
 }
 
-pub fn probe(host: &dyn Host, cwd: &Path) -> Option<RepoSnapshot> {
-    let paths = git(
-        host,
+/// The result of asking a directory which repository it belongs to.
+///
+/// A failed probe is deliberately distinct from a directory that is not a
+/// repository. The former says nothing about the directory and must not clear
+/// a tab's remembered sidebar group.
+#[derive(Clone, PartialEq, Eq, Debug)]
+pub enum RepoProbe {
+    Repo(RepoSnapshot),
+    NotARepo,
+    Failed,
+}
+
+pub fn probe_repo(host: &dyn Host, cwd: &Path) -> RepoProbe {
+    let paths = match host.git(
         cwd,
         &[
             "rev-parse",
@@ -46,17 +57,46 @@ pub fn probe(host: &dyn Host, cwd: &Path) -> Option<RepoSnapshot> {
             "--git-dir",
             "--git-common-dir",
         ],
-    )?;
+    ) {
+        Ok(out) if out.success() => match String::from_utf8(out.stdout) {
+            Ok(paths) => paths,
+            Err(_) => return RepoProbe::Failed,
+        },
+        Ok(out) if out.status == Some(128) => return RepoProbe::NotARepo,
+        Ok(_) => return RepoProbe::Failed,
+        Err(_)
+            if host
+                .stat(cwd)
+                .is_err_and(|error| error.kind() == io::ErrorKind::NotFound) =>
+        {
+            return RepoProbe::NotARepo;
+        }
+        Err(_) => return RepoProbe::Failed,
+    };
+
     let mut lines = paths.lines().map(|l| l.trim_end_matches(['\n', '\r']));
-    let root = PathBuf::from(lines.next()?);
+    let Some(root) = lines.next().filter(|root| !root.is_empty()) else {
+        return RepoProbe::Failed;
+    };
+    let root = PathBuf::from(root);
     let home = repo_home(&root, lines.next(), lines.next());
-    let branch = branch_name(host, cwd)?;
-    Some(RepoSnapshot {
+    let Some(branch) = branch_name(host, cwd) else {
+        return RepoProbe::Failed;
+    };
+
+    RepoProbe::Repo(RepoSnapshot {
         home,
         root,
         branch,
         counts: diff_numstat(host, cwd),
     })
+}
+
+pub fn probe(host: &dyn Host, cwd: &Path) -> Option<RepoSnapshot> {
+    match probe_repo(host, cwd) {
+        RepoProbe::Repo(snapshot) => Some(snapshot),
+        RepoProbe::NotARepo | RepoProbe::Failed => None,
+    }
 }
 
 pub(crate) fn repo_home(root: &Path, git_dir: Option<&str>, common_dir: Option<&str>) -> PathBuf {
@@ -642,11 +682,18 @@ mod tests {
         let dir = std::env::temp_dir().join("tty7-git-status-not-a-repo-xyz");
         let _ = std::fs::create_dir_all(&dir);
         assert_eq!(probe(&*h(), &dir), None);
+        assert_eq!(probe_repo(&*h(), &dir), RepoProbe::NotARepo);
     }
 
     #[test]
     fn missing_path_is_none() {
-        assert_eq!(probe(&*h(), Path::new("/no/such/tty7/path/here")), None);
+        let missing = if cfg!(windows) {
+            Path::new(r"C:\no\such\tty7\path\here")
+        } else {
+            Path::new("/no/such/tty7/path/here")
+        };
+        assert_eq!(probe(&*h(), missing), None);
+        assert_eq!(probe_repo(&*h(), missing), RepoProbe::NotARepo);
     }
 
     #[test]

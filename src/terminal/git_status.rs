@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-pub use crate::core::git::{GitStatus, RepoSnapshot, probe};
+pub use crate::core::git::{GitStatus, RepoProbe, RepoSnapshot, probe_repo};
 use crate::ui::host_ops::{ByHost, HostId, InFlight};
 
 #[derive(Default)]
@@ -66,20 +66,33 @@ impl GitStatusCache {
         cwd: &Path,
         min_interval: Duration,
     ) -> bool {
-        if self.probes.is_pending(&(host, cwd.to_path_buf())) {
+        if !self.probe_due(host, cwd, min_interval) {
             return false;
         }
         let key = self.throttle_key(host, cwd).to_path_buf();
-        if self
-            .last_probe
-            .get(host, key.as_path())
-            .is_some_and(|at| at.elapsed() < min_interval)
-        {
-            return false;
-        }
         self.last_probe.insert(host, key, Instant::now());
         self.probes.begin((host, cwd.to_path_buf()));
         true
+    }
+
+    /// Whether a throttled probe would start without changing the cache.
+    ///
+    /// The terminal polls frequently. Keeping this check read-only prevents a
+    /// throttled retry from notifying every observer on every poll tick.
+    pub fn probe_due(&self, host: HostId, cwd: &Path, min_interval: Duration) -> bool {
+        if self.probes.is_pending(&(host, cwd.to_path_buf())) {
+            return false;
+        }
+        !self
+            .last_probe
+            .get(host, self.throttle_key(host, cwd))
+            .is_some_and(|at| at.elapsed() < min_interval)
+    }
+
+    /// Whether an unanswered or negative result should be retried.
+    pub fn retry_due(&self, host: HostId, cwd: &Path, min_interval: Duration) -> bool {
+        !matches!(self.roots.get(host, cwd), Some(Some(_)))
+            && self.probe_due(host, cwd, min_interval)
     }
 
     fn throttle_key<'a>(&'a self, host: HostId, cwd: &'a Path) -> &'a Path {
@@ -177,6 +190,16 @@ impl GitStatusCache {
                 self.roots.insert(host, cwd.to_path_buf(), None);
             }
         }
+        rerun
+    }
+
+    /// Finish a probe that failed before it could answer the repository
+    /// question. Keep the previous mapping so a transient git or host failure
+    /// cannot move a tab into Scratch.
+    pub fn fail_probe(&mut self, host: HostId, cwd: &Path) -> bool {
+        let rerun = !self.probes.finish(&(host, cwd.to_path_buf()));
+        let key = self.throttle_key(host, cwd).to_path_buf();
+        self.last_probe.insert(host, key, Instant::now());
         rerun
     }
 }
@@ -386,6 +409,65 @@ mod tests {
         );
         assert_eq!(cache.known_repo_for(L, plain), Some(None));
         assert_eq!(cache.known_repo_for(L, unseen), None);
+    }
+
+    #[test]
+    fn a_failed_probe_keeps_the_previous_repository_mapping() {
+        let mut cache = GitStatusCache::default();
+        let cwd = Path::new("/repo/src");
+        cache.finish_probe(L, cwd, Some(snap("/repo", "main", Some((1, 0)))));
+
+        assert!(cache.begin_probe(L, cwd));
+        assert!(!cache.fail_probe(L, cwd));
+        assert_eq!(
+            cache.known_repo_for(L, cwd),
+            Some(Some(PathBuf::from("/repo")))
+        );
+        assert_eq!(cache.status_for(L, cwd).unwrap().branch, "main");
+    }
+
+    #[test]
+    fn a_failed_probe_stays_unanswered_and_retries_after_the_throttle() {
+        let mut cache = GitStatusCache::default();
+        let cwd = Path::new("/repo/src");
+        let gap = Duration::from_secs(10);
+
+        assert!(cache.begin_probe(L, cwd));
+        assert!(!cache.fail_probe(L, cwd));
+        assert_eq!(cache.known_repo_for(L, cwd), None);
+        assert!(!cache.retry_due(L, cwd, gap));
+
+        cache
+            .last_probe
+            .insert(L, cwd.to_path_buf(), Instant::now() - gap);
+        assert!(cache.retry_due(L, cwd, gap));
+        assert!(cache.begin_probe_throttled(L, cwd, gap));
+        assert!(!cache.retry_due(L, cwd, Duration::ZERO));
+    }
+
+    #[test]
+    fn a_negative_probe_can_recover_without_a_cwd_change() {
+        let mut cache = GitStatusCache::default();
+        let cwd = Path::new("/plain");
+        let gap = Duration::from_secs(10);
+
+        assert!(cache.begin_probe(L, cwd));
+        assert!(!cache.finish_probe(L, cwd, None));
+        assert_eq!(cache.known_repo_for(L, cwd), Some(None));
+        assert!(!cache.retry_due(L, cwd, gap));
+
+        cache
+            .last_probe
+            .insert(L, cwd.to_path_buf(), Instant::now() - gap);
+        assert!(cache.retry_due(L, cwd, gap));
+        assert!(cache.begin_probe_throttled(L, cwd, gap));
+        assert!(!cache.retry_due(L, cwd, Duration::ZERO));
+
+        cache.finish_probe(L, cwd, Some(snap("/repo", "main", Some((0, 0)))));
+        assert_eq!(
+            cache.known_repo_for(L, cwd),
+            Some(Some(PathBuf::from("/repo")))
+        );
     }
 
     #[test]
