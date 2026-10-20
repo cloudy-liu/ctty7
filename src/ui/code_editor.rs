@@ -97,8 +97,8 @@ impl TabCode {
     fn active_display_path(&self, tree_host: HostId) -> Option<PathBuf> {
         let file = self.active_file()?;
         let path = crate::ui::path_display::readable_path(&file.path, file.host.id());
-        // Tree roots belong to the workspace host, while SFTP buffers can
-        // belong to another machine. Unrelated files keep their full path.
+        // Start at the matching project name, without its absolute ancestors.
+        // Roots on another host cannot label this buffer.
         if file.host.id() == tree_host
             && let Some((_, relative)) = self
                 .roots
@@ -106,16 +106,14 @@ impl TabCode {
                 .filter_map(|root| {
                     let root = crate::ui::path_display::readable_path(root, tree_host);
                     let relative = path.strip_prefix(&root).ok()?;
-                    Some((root.components().count(), relative.to_path_buf()))
+                    let project = root.file_name().map(PathBuf::from).unwrap_or_default();
+                    Some((root.components().count(), project.join(relative)))
                 })
                 .max_by_key(|(depth, _)| *depth)
         {
-            // The root is the boundary, not a breadcrumb. Cursor's document
-            // title starts with the path inside the project; a file directly
-            // under the root is therefore just its filename.
             return Some(relative);
         }
-        Some(path.into_owned())
+        Some(path.file_name().map(PathBuf::from).unwrap_or_default())
     }
 }
 
@@ -1411,7 +1409,7 @@ impl Tty7App {
                                         .min_w_0()
                                         .overflow_hidden()
                                         .whitespace_nowrap()
-                                        .text_ellipsis_start()
+                                        .text_ellipsis()
                                         .text_color(cx.theme().muted_foreground)
                                         .child(directory),
                                 )
@@ -1433,7 +1431,9 @@ impl Tty7App {
                                     div()
                                         .id("editor-document-name")
                                         .debug_selector(|| "editor-document-name".into())
-                                        .flex_none()
+                                        .min_w_0()
+                                        .overflow_hidden()
+                                        .text_ellipsis()
                                         .child(name.clone()),
                                 )
                             })
@@ -1696,7 +1696,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn document_paths_use_the_matching_project_and_keep_unrelated_paths(cx: &mut TestAppContext) {
+    fn document_paths_start_at_the_matching_project_without_absolute_prefixes(
+        cx: &mut TestAppContext,
+    ) {
         let (app, mut vcx) = markdown_window(cx);
         app.update_in(&mut vcx, |app, window, cx| {
             app.editor_install_file(
@@ -1711,36 +1713,36 @@ mod tests {
             code.roots = vec!["/work/first".into(), "/work/second".into()];
             assert_eq!(
                 code.active_display_path(HostId::LOCAL),
-                Some(PathBuf::from("docs/guide.md"))
+                Some(PathBuf::from("second/docs/guide.md"))
             );
             code.roots.push("/work/second/docs".into());
             assert_eq!(
                 code.active_display_path(HostId::LOCAL),
-                Some(PathBuf::from("guide.md")),
-                "the path starts at the deepest matching project root"
+                Some(PathBuf::from("docs/guide.md")),
+                "the path includes the deepest matching project root"
             );
             let active = code.active;
             code.files[active].path = "/work/second/CONTEXT.md".into();
             assert_eq!(
                 code.active_display_path(HostId::LOCAL),
-                Some(PathBuf::from("CONTEXT.md")),
-                "a file at the project root shows its filename without a root breadcrumb"
+                Some(PathBuf::from("second/CONTEXT.md")),
+                "a file at the project root still shows the project name"
             );
             code.files[active].path = "/work/second/docs/guide.md".into();
             assert_eq!(
                 code.active_display_path(HostId(99)),
-                Some(PathBuf::from("/work/second/docs/guide.md")),
-                "roots on another host must not shorten this buffer's path"
+                Some(PathBuf::from("guide.md")),
+                "roots on another host must not label this buffer's path"
             );
             code.roots = vec!["/work/elsewhere".into()];
             assert_eq!(
                 code.active_display_path(HostId::LOCAL),
-                Some(PathBuf::from("/work/second/docs/guide.md"))
+                Some(PathBuf::from("guide.md"))
             );
             code.roots.clear();
             assert_eq!(
                 code.active_display_path(HostId::LOCAL),
-                Some(PathBuf::from("/work/second/docs/guide.md"))
+                Some(PathBuf::from("guide.md"))
             );
         });
     }
@@ -1784,8 +1786,8 @@ mod tests {
                 );
                 assert_eq!(
                     code.active_display_path(HostId::LOCAL),
-                    Some(PathBuf::from(relative)),
-                    "canonicalized local files must keep project-relative breadcrumbs"
+                    Some(PathBuf::from(root.file_name().unwrap()).join(relative)),
+                    "canonicalized local files must start their breadcrumbs at the project name"
                 );
             });
         }
@@ -1818,7 +1820,7 @@ mod tests {
                 ("/work/project/docs/guide.md", true),
                 ("/work/project/docs/阅读说明.md", true),
                 ("/work/project/docs/main.rs", true),
-                ("/work/project/CONTEXT.md", false),
+                ("/work/project/CONTEXT.md", true),
             ] {
                 app.update_in(&mut vcx, |app, _, cx| {
                     let code = app.tab_code_mut().unwrap();
@@ -1842,10 +1844,13 @@ mod tests {
                 let directories = vcx.debug_bounds("editor-document-directories");
                 assert_eq!(directories.is_some(), has_directories);
                 if let Some(directories) = directories {
-                    assert!(directories.left() < icon.left());
+                    assert!(
+                        directories.left() < icon.left(),
+                        "project breadcrumb must remain visible at {width}px in {layout:?}: {directories:?} {icon:?}"
+                    );
                     assert!(directories.right() <= icon.left());
                     assert!(
-                        icon.left() - directories.left() < px(100.),
+                        icon.left() - directories.left() < px(200.),
                         "a short directory must not push the filename to the right: {directories:?} {icon:?}"
                     );
                 }
