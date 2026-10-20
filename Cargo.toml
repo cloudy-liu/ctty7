@@ -163,6 +163,8 @@ libc = "0.2"
 # PATH comes back mangled. 0.61 is already in the tree (tray-icon pulls it), so
 # this pins no new code.
 [target.'cfg(windows)'.dependencies]
+# GPUI implements this existing dependency's safe native-window handle trait.
+raw-window-handle = "0.6"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
@@ -209,6 +211,7 @@ windows = { version = "0.58", features = [
     "Win32_System_Variant",
     "Win32_UI_Shell",
     "Win32_UI_Shell_PropertiesSystem",
+    "Win32_UI_WindowsAndMessaging",
 ] }
 
 # Embeds `assets/favicon.ico` into the `.exe` so Windows shows the tty7 logo in

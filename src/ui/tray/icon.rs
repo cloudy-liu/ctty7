@@ -17,7 +17,7 @@ const SIZE: u32 = 36;
 #[cfg(not(target_os = "macos"))]
 const SIZE: u32 = 32;
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 const AMBER: (u8, u8, u8) = (0xF5, 0x9E, 0x0B);
 
 #[cfg(target_os = "macos")]
@@ -181,7 +181,7 @@ fn recolor(pixmap: &mut tiny_skia::Pixmap, rgb: (u8, u8, u8)) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn badge(pixmap: &mut tiny_skia::Pixmap) {
     let s = SIZE as f32;
     let (cx, cy) = (s * 0.78, s * 0.22);
@@ -219,6 +219,42 @@ fn badge(pixmap: &mut tiny_skia::Pixmap) {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn paint_attention(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, radius: f32) {
+    for (radius, color) in [(radius, 0x34), (radius * 0.22, 0xFF)] {
+        let mut path = tiny_skia::PathBuilder::new();
+        path.push_circle(x, y, radius);
+        let mut paint = tiny_skia::Paint {
+            anti_alias: true,
+            ..Default::default()
+        };
+        paint.set_color_rgba8(color, color, color, 0xFF);
+        if let Some(path) = path.finish() {
+            pixmap.fill_path(
+                &path,
+                &paint,
+                tiny_skia::FillRule::Winding,
+                tiny_skia::Transform::identity(),
+                None,
+            );
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn badge(pixmap: &mut tiny_skia::Pixmap) {
+    let s = SIZE as f32;
+    paint_attention(pixmap, s * 0.78, s * 0.22, s * 0.20);
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn attention_mark(size: u32) -> Option<RgbaImage> {
+    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
+    let s = size as f32;
+    paint_attention(&mut pixmap, s * 0.5, s * 0.5, s * 0.48);
+    Some(to_rgba(&pixmap))
+}
+
 #[cfg(target_os = "linux")]
 pub(super) fn render_argb(attention: bool) -> Option<(Vec<u8>, u32)> {
     let img = render(attention)?;
@@ -233,6 +269,16 @@ pub(super) fn render_argb(attention: bool) -> Option<(Vec<u8>, u32)> {
 mod tests {
     use super::*;
     use crate::core::cli_agent::{AgentStatus, CLIAgent};
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_attention_mark_is_a_dark_circle_with_a_white_dot() {
+        let image = attention_mark(32).unwrap();
+        let pixel = |x: usize, y: usize| &image.data[(y * 32 + x) * 4..(y * 32 + x + 1) * 4];
+        assert_eq!(pixel(16, 16), &[255, 255, 255, 255]);
+        assert_eq!(pixel(16, 6), &[52, 52, 52, 255]);
+        assert_eq!(pixel(0, 0), &[0, 0, 0, 0]);
+    }
 
     #[test]
     fn recolor_keeps_alpha_and_flattens_color() {
