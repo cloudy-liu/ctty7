@@ -1,3 +1,5 @@
+#[cfg(windows)]
+use raw_window_handle::HasWindowHandle;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -123,6 +125,10 @@ enum EditorNavigation {
 }
 
 pub(crate) struct EditorPanelState {
+    #[cfg(windows)]
+    pub(crate) html: Option<Entity<super::html_preview::HtmlPreview>>,
+    #[cfg(windows)]
+    html_loading: bool,
     /// Only the latest open request may install a file or move focus. Its
     /// navigation target travels with the request and is dropped on failure.
     open_seq: u64,
@@ -160,6 +166,10 @@ impl EditorPanelState {
         })
         .detach();
         Self {
+            #[cfg(windows)]
+            html: None,
+            #[cfg(windows)]
+            html_loading: false,
             open_seq: 0,
             watch: None,
             watch_host: None,
@@ -225,6 +235,10 @@ pub(crate) fn language_for_path(path: &Path) -> &'static str {
         "cmake" => "cmake",
         _ => "text",
     }
+}
+
+fn can_preview_html(file: &OpenFile) -> bool {
+    cfg!(windows) && file.host.id().is_local() && language_for_path(&file.path) == "html"
 }
 
 /// How many frames a jump-to-line may wait for the editor to be laid out.
@@ -751,6 +765,10 @@ impl Tty7App {
                 )
             })
         });
+        let preview = reading.is_some();
+        #[cfg(windows)]
+        let preview =
+            preview || (language == "html" && host.id().is_local() && self.editor.html.is_some());
         let tab = self
             .tabs
             .get_mut(self.active)
@@ -771,7 +789,7 @@ impl Tty7App {
                 save_then_close: false,
                 reload_seq: 0,
                 conflict: false,
-                preview: reading.is_some(),
+                preview,
                 wrap: false,
                 reading,
                 source_highlighter_ready: std::cell::Cell::new(language != "markdown"),
@@ -836,6 +854,13 @@ impl Tty7App {
 
     fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(f) = self.tab_code().and_then(|c| c.active_file()) {
+            #[cfg(windows)]
+            if f.preview && can_preview_html(f) {
+                if let Some(html) = &self.editor.html {
+                    html.update(cx, |html, cx| html.focus(window, cx));
+                }
+                return;
+            }
             if f.preview
                 && let Some(reading) = &f.reading
             {
@@ -848,6 +873,42 @@ impl Tty7App {
     }
 
     pub(crate) fn editor_toggle_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(windows)]
+        if let Some(file) = self
+            .tab_code()
+            .and_then(|code| code.active_file())
+            .filter(|file| can_preview_html(file))
+        {
+            let preview = !file.preview;
+            if preview {
+                if file.dirty {
+                    window.push_notification(t(L10nKey::EditorHtmlSaveFirst), cx);
+                    return;
+                }
+                let path = file.path.clone();
+                let result = if let Some(html) = &self.editor.html {
+                    html.update(cx, |html, cx| html.navigate(&path, cx))
+                } else {
+                    self.editor_begin_html_preview(path, window, cx);
+                    return;
+                };
+                if let Err(error) = result {
+                    window.push_notification(
+                        t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
+                        cx,
+                    );
+                    return;
+                }
+            } else {
+                self.editor_release_html();
+            }
+            if let Some(code) = self.tab_code_mut() {
+                code.files[code.active].preview = preview;
+            }
+            self.focus_editor(window, cx);
+            cx.notify();
+            return;
+        }
         if let Some(code) = self.tab_code_mut() {
             let ix = code.active;
             if let Some(file) = code.files.get_mut(ix).filter(|f| f.reading.is_some()) {
@@ -858,6 +919,175 @@ impl Tty7App {
         cx.notify();
     }
 
+    #[cfg(windows)]
+    fn editor_begin_html_preview(
+        &mut self,
+        path: PathBuf,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.editor.html_loading {
+            return;
+        }
+        let parent = match window.window_handle() {
+            Ok(handle) => handle.as_raw(),
+            Err(error) => {
+                window.push_notification(
+                    t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
+                    cx,
+                );
+                return;
+            }
+        };
+        self.editor.html_loading = true;
+        let tab = self.active;
+        let open_seq = self.editor.open_seq;
+        let original_focus = window.focused(cx);
+        cx.spawn_in(window, async move |this, cx| {
+            let result = super::html_preview::HtmlPreview::build(&path, parent);
+            let _ = this.update_in(cx, |this, window, cx| {
+                this.editor.html_loading = false;
+                let requested = this.active == tab
+                    && this.editor.open_seq == open_seq
+                    && this.document_front() == Some(super::app::OverlayTop::Code)
+                    && this
+                        .tab_code()
+                        .and_then(|code| code.active_file())
+                        .is_some_and(|file| {
+                            file.path == path && can_preview_html(file) && !file.dirty
+                        });
+                if requested {
+                    match result {
+                        Ok(pending) => {
+                            let html =
+                                super::html_preview::HtmlPreview::attach(pending, window, cx);
+                            this.editor.html = Some(cx.new(|_| html));
+                            if let Some(code) = this.tab_code_mut() {
+                                code.files[code.active].preview = true;
+                            }
+                            if window.focused(cx) == original_focus {
+                                this.focus_editor(window, cx);
+                            }
+                        }
+                        Err(error) => window.push_notification(
+                            t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
+                            cx,
+                        ),
+                    }
+                }
+                cx.notify();
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
+    pub(crate) fn editor_open_html_browser(&self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(file) = self
+            .tab_code()
+            .and_then(|code| code.active_file())
+            .filter(|file| can_preview_html(file))
+        else {
+            return;
+        };
+        if file.dirty {
+            window.push_notification(t(L10nKey::EditorHtmlSaveFirst), cx);
+        } else if let Ok(url) = url::Url::from_file_path(&file.path) {
+            cx.open_url(url.as_str());
+        }
+    }
+
+    fn editor_refresh_html(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        #[cfg(windows)]
+        if let Some(html) = &self.editor.html {
+            if self
+                .tab_code()
+                .and_then(|code| code.active_file())
+                .is_some_and(|file| file.dirty)
+            {
+                window.push_notification(t(L10nKey::EditorHtmlSaveFirst), cx);
+            } else if let Err(error) = html.read(cx).reload(cx) {
+                window.push_notification(
+                    t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
+                    cx,
+                );
+            }
+        }
+        #[cfg(not(windows))]
+        let _ = (window, cx);
+    }
+
+    #[cfg(windows)]
+    fn editor_release_html(&mut self) {
+        self.editor.html = None;
+        for tab in &mut self.tabs {
+            if let Some(code) = &mut tab.code {
+                for file in &mut code.files {
+                    if can_preview_html(file) {
+                        file.preview = false;
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn editor_sync_html_preview(
+        &mut self,
+        unobstructed: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.editor.html.is_none() {
+            return;
+        }
+        let path = (self.document_front() == Some(super::app::OverlayTop::Code))
+            .then(|| self.tab_code().and_then(|code| code.active_file()))
+            .flatten()
+            .filter(|file| file.preview && can_preview_html(file))
+            .map(|file| file.path.clone());
+        let Some(path) = path else {
+            // Leaving HTML preview releases the browser instead of retaining
+            // an invisible renderer for every file or terminal tab.
+            self.editor_release_html();
+            return;
+        };
+        let html = self.editor.html.as_ref().unwrap().clone();
+        if let Err(error) = html.update(cx, |html, cx| html.navigate(&path, cx)) {
+            self.editor_release_html();
+            window.push_notification(
+                t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
+                cx,
+            );
+            return;
+        }
+        let focused = window.focused(cx);
+        let normal_focus = focused.as_ref().is_none_or(|focus| {
+            *focus == html.read(cx).focus_handle(cx)
+                || *focus == self.home_focus
+                || self.file_tree.focus_handle.contains_focused(window, cx)
+                || self
+                    .file_search
+                    .focus_handle(cx)
+                    .contains_focused(window, cx)
+                || self
+                    .sidebar_search
+                    .focus_handle(cx)
+                    .contains_focused(window, cx)
+                || self.tabs.get(self.active).is_some_and(|tab| {
+                    tab.pane
+                        .leaves()
+                        .iter()
+                        .any(|pane| pane.contains_focused(window, cx))
+                })
+        });
+        // Popovers move GPUI focus to their own handle. Native child windows
+        // otherwise sit above them, so hide the browser until focus returns.
+        html.update(cx, |html, cx| {
+            html.set_visible(unobstructed && normal_focus, window, cx)
+        });
+    }
+
     pub(crate) fn editor_has_focus(&self, window: &Window, cx: &Context<Self>) -> bool {
         self.code_panel_visible()
             && self
@@ -865,6 +1095,12 @@ impl Tty7App {
                 .and_then(|c| c.active_file())
                 .is_some_and(|f| {
                     if f.preview {
+                        #[cfg(windows)]
+                        if can_preview_html(f) {
+                            return self.editor.html.as_ref().is_some_and(|html| {
+                                html.read(cx).focus_handle(cx).contains_focused(window, cx)
+                            });
+                        }
                         f.reading.as_ref().is_some_and(|reading| {
                             reading
                                 .read(cx)
@@ -1221,6 +1457,13 @@ impl Tty7App {
         }
         let body = match self.tab_code().and_then(|c| c.active_file()) {
             None => self.render_editor_empty(cx).into_any_element(),
+            #[cfg(windows)]
+            Some(f) if f.preview && can_preview_html(f) => self
+                .editor
+                .html
+                .as_ref()
+                .map(|html| html.clone().into_any_element())
+                .unwrap_or_else(|| div().into_any_element()),
             Some(f) if f.preview => {
                 let reading = f.reading.as_ref().expect("Markdown preview state").clone();
                 let revision = f.edit_seq;
@@ -1497,6 +1740,11 @@ impl Tty7App {
         });
         let wrap: Option<bool> = active.filter(|f| !f.preview).map(|f| f.wrap);
         let is_markdown = active.is_some_and(|f| language_for_path(&f.path) == "markdown");
+        let is_html = active.is_some_and(can_preview_html);
+        #[cfg(windows)]
+        let html_loading = is_html && self.editor.html_loading;
+        #[cfg(not(windows))]
+        let html_loading = false;
         let preview = active.is_some_and(|f| f.preview);
 
         h_flex()
@@ -1513,16 +1761,27 @@ impl Tty7App {
             .text_xs()
             .text_color(muted)
             .child(div().flex_1().min_w_0().truncate().children(language))
-            .when(is_markdown, |this| {
+            .when(is_markdown || is_html, |this| {
                 this.child(
                     crate::ui::tab_strip::chrome_tile_sized(
-                        Button::new("status-md-preview")
-                            .debug_selector(|| "status-md-preview".into())
-                            .icon(if preview {
-                                Icon::default().path("icons/pencil.svg")
+                        Button::new(if is_html {
+                            "status-html-preview"
+                        } else {
+                            "status-md-preview"
+                        })
+                        .debug_selector(move || {
+                            if is_html {
+                                "status-html-preview".into()
                             } else {
-                                Icon::new(IconName::Eye)
-                            }),
+                                "status-md-preview".into()
+                            }
+                        })
+                        .loading(html_loading)
+                        .icon(if preview {
+                            Icon::default().path("icons/pencil.svg")
+                        } else {
+                            Icon::new(IconName::Eye)
+                        }),
                         crate::ui::tab_strip::MIN_TARGET,
                         14.,
                         false,
@@ -1536,6 +1795,35 @@ impl Tty7App {
                     .on_click(
                         cx.listener(|this, _, window, cx| this.editor_toggle_preview(window, cx)),
                     ),
+                )
+            })
+            .when(is_html, |this| {
+                this.child(
+                    Button::new("status-html-browser")
+                        .icon(IconName::Globe)
+                        .ghost()
+                        .xsmall()
+                        .w(px(crate::ui::tab_strip::MIN_TARGET))
+                        .h(px(crate::ui::tab_strip::MIN_TARGET))
+                        .tooltip(t(L10nKey::PanelOpenInBrowser))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.editor_open_html_browser(window, cx)
+                        })),
+                )
+            })
+            .when(is_html && preview, |this| {
+                this.child(
+                    Button::new("status-html-refresh")
+                        .debug_selector(|| "status-html-refresh".into())
+                        .icon(Icon::default().path("icons/refresh.svg"))
+                        .ghost()
+                        .xsmall()
+                        .w(px(crate::ui::tab_strip::MIN_TARGET))
+                        .h(px(crate::ui::tab_strip::MIN_TARGET))
+                        .tooltip(t(L10nKey::Reload))
+                        .on_click(
+                            cx.listener(|this, _, window, cx| this.editor_refresh_html(window, cx)),
+                        ),
                 )
             })
             .when_some(wrap, |this, wrap| {
@@ -1693,6 +1981,90 @@ mod tests {
             cx.notify();
         });
         (app, vcx)
+    }
+
+    #[cfg(windows)]
+    #[gpui::test]
+    fn html_preview_starts_in_source_and_rejects_unsaved_changes(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("report.html");
+        let saved = "<h1>Saved</h1>";
+        std::fs::write(&path, saved).unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                path.clone(),
+                saved.into(),
+                None,
+                window,
+                cx,
+            );
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(can_preview_html(file));
+            assert!(!file.preview);
+            assert!(file.reading.is_none());
+            assert!(
+                app.editor.html.is_none(),
+                "opening HTML must not create a browser"
+            );
+            let code = app.tab_code_mut().unwrap();
+            let file = &mut code.files[code.active];
+            file.input.update(cx, |input, cx| {
+                input.set_value("<h1>Unsaved</h1>", window, cx)
+            });
+            file.dirty = true;
+            app.editor_toggle_preview(window, cx);
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(!file.preview);
+            assert!(file.dirty);
+            assert_eq!(file.input.read(cx).text().to_string(), "<h1>Unsaved</h1>");
+            assert!(app.editor.html.is_none());
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
+        });
+    }
+
+    #[cfg(windows)]
+    #[gpui::test]
+    fn html_preview_release_resets_stale_flags_and_keeps_markdown(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            for (path, content) in [
+                ("C:/report.html", "<h1>Report</h1>"),
+                ("C:/index.HTM", "<p>Index</p>"),
+                ("C:/guide.md", "# Guide"),
+            ] {
+                app.editor_install_file(
+                    tty7_core::host::local::LocalHost::new(),
+                    path.into(),
+                    content.into(),
+                    None,
+                    window,
+                    cx,
+                );
+            }
+            for file in &mut app.tab_code_mut().unwrap().files {
+                file.preview = true;
+            }
+            app.editor_release_html();
+            let files = &app.tab_code().unwrap().files;
+            assert_eq!(
+                files.iter().filter(|file| can_preview_html(file)).count(),
+                2
+            );
+            assert!(
+                files
+                    .iter()
+                    .filter(|file| can_preview_html(file))
+                    .all(|file| !file.preview)
+            );
+            let markdown = files
+                .iter()
+                .find(|file| file.path.extension().unwrap() == "md")
+                .unwrap();
+            assert!(markdown.preview, "Markdown owns a separate native preview");
+            assert!(markdown.reading.is_some());
+        });
     }
 
     #[gpui::test]

@@ -784,6 +784,8 @@ l10n_keys! {
     EditorLnCol,
     EditorEdit,
     EditorPreview,
+    EditorHtmlSaveFirst,
+    EditorHtmlFailed,
     EditorWrapOn,
     EditorWrapOff,
     EditorFileTooLarge,

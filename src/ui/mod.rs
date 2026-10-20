@@ -17,6 +17,8 @@ pub mod home;
 pub mod host_ops;
 #[allow(dead_code)]
 pub mod host_registry;
+#[cfg(windows)]
+pub mod html_preview;
 pub mod i18n;
 pub mod keymap;
 pub mod local_link;
