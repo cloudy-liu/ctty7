@@ -14239,6 +14239,57 @@ mod native_history_gpui_tests {
     }
 
     #[gpui::test]
+    fn codex_escape_uses_win32_after_shift_enter(cx: &mut TestAppContext) {
+        use crate::core::cli_agent::CLIAgent;
+
+        let (window, mut daemon) = harness(cx);
+        cx.update(|cx| crate::ui::keymap::init(cx));
+        daemon
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        DaemonMsg::Agent(Some(CLIAgent::Codex))
+            .encode(&mut daemon)
+            .unwrap();
+        DaemonMsg::Output(b"\x1b[?9001h".to_vec())
+            .encode(&mut daemon)
+            .unwrap();
+        let mut ready = false;
+        for _ in 0..200 {
+            cx.run_until_parked();
+            ready = window
+                .update(cx, |view, _, _| {
+                    view.agent() == Some(CLIAgent::Codex) && view.key_flags().win32_input()
+                })
+                .unwrap();
+            if ready {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        assert!(ready, "Codex and the ConPTY handshake must reach the view");
+        window
+            .update(cx, |view, window, cx| {
+                assert!(!view.input_active(), "Codex owns input");
+                window.activate_window();
+                view.focus_handle.focus(window, cx);
+            })
+            .unwrap();
+
+        let mut vcx = gpui::VisualTestContext::from_window(window.into(), cx);
+        vcx.simulate_keystrokes("shift-enter");
+        assert_eq!(
+            next_input(&mut daemon),
+            b"\x1b[13;28;13;1;16;1_\x1b[13;28;13;0;16;1_"
+        );
+        // ConPTY buffers a bare ESC after its first Win32 key record.
+        vcx.simulate_keystrokes("escape");
+        assert_eq!(
+            next_input(&mut daemon),
+            b"\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_"
+        );
+    }
+
+    #[gpui::test]
     fn herdr_enter_chords_follow_host_keyboard_protocol(cx: &mut TestAppContext) {
         use crate::core::cli_agent::CLIAgent;
         use crate::core::foreground_app::ForegroundApp;
