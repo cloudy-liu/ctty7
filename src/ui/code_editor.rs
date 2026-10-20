@@ -1751,7 +1751,13 @@ mod tests {
     fn document_header_shows_project_paths_after_opening_local_files(cx: &mut TestAppContext) {
         let (app, mut vcx) = markdown_window(cx);
         let directory = tempfile::tempdir().unwrap();
-        let root = directory.path();
+        // CI temp directories can use symlinks, junctions or short names.
+        // Resolve those aliases just as opening the file does, but keep the
+        // Windows project root in ordinary drive spelling to test the
+        // namespace-prefix mismatch rather than normalizing it away.
+        let root = std::fs::canonicalize(directory.path()).unwrap();
+        #[cfg(windows)]
+        let root = PathBuf::from(root.to_str().unwrap().strip_prefix(r"\\?\").unwrap());
         let docs = root.join("docs");
         std::fs::create_dir(&docs).unwrap();
         for (relative, contents) in [
