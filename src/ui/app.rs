@@ -7245,6 +7245,17 @@ impl Render for Tty7App {
         self.touch_active_tab();
         self.declare_displayed_panes(cx);
         self.scm_sync_watchers(window, cx);
+        #[cfg(windows)]
+        if self.editor.html.is_some() {
+            let unobstructed = self.settings.is_none()
+                && self.palette.is_none()
+                && self.switcher.is_none()
+                && self.connect.is_none()
+                && !window.has_active_dialog(cx)
+                && !window.has_active_sheet(cx)
+                && !cx.has_active_drag();
+            self.editor_sync_html_preview(unobstructed, window, cx);
+        }
         if cx.has_active_drag() {
             crate::ui::reorder::clear_pending(&self.reorder);
             crate::ui::pane_drag::clear_landing(&self.pane_drag);

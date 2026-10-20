@@ -1069,6 +1069,10 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::EditorLnCol => "Ln {line}, Col {column}",
         L10nKey::EditorEdit => "Edit",
         L10nKey::EditorPreview => "Preview",
+        L10nKey::EditorHtmlSaveFirst => "Save this file before previewing it in the browser.",
+        L10nKey::EditorHtmlFailed => {
+            "Could not open HTML preview. Check that Microsoft Edge WebView2 Runtime is installed. {error}"
+        }
         L10nKey::EditorWrapOn => "Wrap: on",
         L10nKey::EditorWrapOff => "Wrap: off",
         L10nKey::EditorFileTooLarge => "\"{path}\" is too large for the editor ({size} MB)",
