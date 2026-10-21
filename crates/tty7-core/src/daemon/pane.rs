@@ -3089,25 +3089,31 @@ pub struct CodexCandidate {
     pub session: Option<String>,
 }
 
-/// Codex's shared app-server inherits its first client's TTY7_PANE. Match
-/// the session first, then its cwd, before using that inherited pane as a tie
-/// breaker. A `/new` session prefers a pane that already had a session.
+/// Codex's shared app-server inherits its first client's TTY7_PANE, so that
+/// value cannot break ties. Match a unique session or new-session candidate.
+/// A `/new` session prefers a pane that already had a session.
 pub fn codex_report_target(
     panes: &[CodexCandidate],
-    named: u64,
-    session: Option<&str>,
-    cwd: Option<&Path>,
-    cleared: bool,
+    event: &crate::core::cli_agent::AgentEvent,
 ) -> Option<u64> {
     let codex = || panes.iter().filter(|p| p.runs_codex);
-    if let Some(session) = session
-        && let Some(owner) = codex().find(|p| p.session.as_deref() == Some(session))
-    {
-        return Some(owner.pane);
+    if let Some(session) = event.session_id.as_deref() {
+        let mut owners = codex().filter(|p| p.session.as_deref() == Some(session));
+        if let Some(owner) = owners.next() {
+            return owners.next().is_none().then_some(owner.pane);
+        }
     }
+    if event.kind != crate::core::cli_agent::AgentEventKind::SessionStart {
+        // Later hooks for an unresolved session cannot establish its owner.
+        return None;
+    }
+    let cleared = event.source.as_deref() == Some("clear");
     let here: Vec<&CodexCandidate> = codex()
         .filter(|p| {
-            cwd.zip(p.cwd.as_deref())
+            event
+                .cwd
+                .as_deref()
+                .zip(p.cwd.as_deref())
                 .is_some_and(|(cwd, c)| same_dir(c, cwd))
         })
         .collect();
@@ -3124,8 +3130,7 @@ pub fn codex_report_target(
     let pool = if likely.is_empty() { pool } else { likely };
     match pool.as_slice() {
         [only] => Some(only.pane),
-        [] => None,
-        several => several.iter().find(|p| p.pane == named).map(|p| p.pane),
+        _ => None,
     }
 }
 
@@ -8889,39 +8894,48 @@ mod tests {
             pane(4, true, "/work/c", Some("s-c")),
             pane(5, true, "/work/c", None),
         ];
-        let target = |named: u64, session: Option<&str>, cwd: &str| {
-            codex_report_target(&panes, named, session, Some(Path::new(cwd)), false)
+        let event = |session: Option<&str>, cwd: &str, cleared: bool| {
+            crate::core::cli_agent::parse_agent_event_body(
+                serde_json::json!({"agent":"codex", "event":"session-start",
+                    "session_id":session, "cwd":cwd,
+                    "source":if cleared { "clear" } else { "startup" }})
+                .to_string()
+                .as_bytes(),
+            )
+            .unwrap()
+        };
+        let target = |session: Option<&str>, cwd: &str| {
+            codex_report_target(&panes, &event(session, cwd, false))
         };
 
-        // The app-server was started in pane 1, so every hook names it.
-        assert_eq!(target(1, Some("s-a"), "/work/a"), Some(1));
+        assert_eq!(target(Some("s-a"), "/work/a"), Some(1));
         assert_eq!(
-            target(1, Some("s-c"), "/work/elsewhere"),
+            target(Some("s-c"), "/work/elsewhere"),
             Some(4),
             "a reported session stays with its pane"
         );
         assert_eq!(
-            target(1, Some("s-new"), "/work/b"),
+            target(Some("s-new"), "/work/b"),
             Some(2),
             "a new session goes to the one Codex pane in its directory"
         );
         assert_eq!(
-            target(1, Some("s-new"), "/work/c"),
+            target(Some("s-new"), "/work/c"),
             Some(5),
             "of two there, the one yet to report a session"
         );
         assert_eq!(
-            target(1, Some("s-next"), "/work/a"),
+            target(Some("s-next"), "/work/a"),
             Some(1),
             "a new session in a pane that had one before (/new) is still that pane's"
         );
         assert_eq!(
-            codex_report_target(&panes, 1, Some("s-c2"), Some(Path::new("/work/c")), true),
+            codex_report_target(&panes, &event(Some("s-c2"), "/work/c", true)),
             Some(4),
             "but a session /new started goes to the one that had a session"
         );
         assert_eq!(
-            target(1, Some("s-new"), "/work/none"),
+            target(Some("s-new"), "/work/none"),
             None,
             "a directory no pane runs Codex in leaves every fresh pane in the running"
         );
@@ -8930,13 +8944,7 @@ mod tests {
             pane(2, true, "/home", None),
         ];
         assert_eq!(
-            codex_report_target(
-                &elsewhere,
-                1,
-                Some("s-b"),
-                Some(Path::new("/work/b")),
-                false
-            ),
+            codex_report_target(&elsewhere, &event(Some("s-b"), "/work/b", false),),
             Some(2),
             "codex -C: the one Codex pane yet to report, not the app-server's"
         );
@@ -8945,11 +8953,71 @@ mod tests {
             pane(6, true, "/work/d", None),
             pane(7, true, "/work/d", None),
         ];
-        let twin = |named| {
-            codex_report_target(&twins, named, Some("s"), Some(Path::new("/work/d")), false)
-        };
-        assert_eq!(twin(7), Some(7), "a tie goes to the pane the hook named");
-        assert_eq!(twin(1), None, "and is no one's otherwise");
+        assert_eq!(
+            codex_report_target(&twins, &event(Some("s"), "/work/d", false)),
+            None,
+            "an inherited pane cannot resolve a tie"
+        );
+    }
+
+    #[test]
+    fn ambiguous_codex_reports_do_not_use_the_inherited_pane() {
+        let panes = [1, 2].map(|pane| CodexCandidate {
+            pane,
+            runs_codex: true,
+            cwd: Some(PathBuf::from("/work/shared")),
+            session: Some(format!("session-{pane}")),
+        });
+        for cleared in [false, true] {
+            let event = crate::core::cli_agent::parse_agent_event_body(
+                serde_json::json!({"agent":"codex", "event":"session-start",
+                    "session_id":"new-session", "cwd":"/work/shared",
+                    "source":if cleared { "clear" } else { "startup" }})
+                .to_string()
+                .as_bytes(),
+            )
+            .unwrap();
+            assert_eq!(
+                codex_report_target(&panes, &event),
+                None,
+                "shared app-server metadata cannot identify an ambiguous owner"
+            );
+        }
+    }
+
+    #[test]
+    fn later_codex_hooks_require_a_unique_known_session() {
+        let mut panes = [
+            CodexCandidate {
+                pane: 1,
+                runs_codex: true,
+                cwd: Some(PathBuf::from("/work/shared")),
+                session: Some("known-session".into()),
+            },
+            CodexCandidate {
+                pane: 2,
+                runs_codex: true,
+                cwd: Some(PathBuf::from("/work/shared")),
+                session: None,
+            },
+        ];
+        let mut event = crate::core::cli_agent::parse_agent_event_body(
+            br#"{"agent":"codex","event":"prompt-submit","session_id":"new-session","cwd":"/work/shared"}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            codex_report_target(&panes, &event),
+            None,
+            "an unresolved /new prompt must not be assigned to a fresh pane"
+        );
+        event.session_id = Some("known-session".into());
+        assert_eq!(codex_report_target(&panes, &event), Some(1));
+        panes[1].session = event.session_id.clone();
+        assert_eq!(
+            codex_report_target(&panes, &event),
+            None,
+            "a resumed session running in two panes has no unique owner"
+        );
     }
 
     #[test]
@@ -8988,13 +9056,8 @@ mod tests {
             },
         ];
         // The shared app-server still names pane 1 before the first prompt.
-        let target = codex_report_target(
-            &candidates,
-            1,
-            Some("new-session"),
-            Some(&second_dir),
-            false,
-        );
+        let event = crate::core::cli_agent::parse_agent_event_body(start.as_bytes()).unwrap();
+        let target = codex_report_target(&candidates, &event);
         assert_eq!(target, Some(2));
         let owner = match target {
             Some(1) => &mut first,
