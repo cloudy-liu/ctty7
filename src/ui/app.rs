@@ -7527,7 +7527,7 @@ impl Render for Tty7App {
         self.touch_active_tab();
         self.declare_displayed_panes(cx);
         self.scm_sync_watchers(window, cx);
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         if self.editor_needs_html_preview_sync() {
             let unobstructed = self.settings.is_none()
                 && self.palette.is_none()

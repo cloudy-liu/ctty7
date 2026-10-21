@@ -1,5 +1,109 @@
 # HTML preview validation
 
+## Cross-platform acceptance
+
+The document panel enables local HTML/HTM preview on Windows with WebView2 and
+on macOS with WKWebView. The existing default-open, source-navigation,
+dirty-buffer, mode-preservation and source-fallback tests run on both platforms.
+The column-only navigation regression was observed failing before the fix and
+passing afterwards. Test paths use the current platform's temporary directory.
+
+CI builds and tests both `aarch64-apple-darwin` on macos-14 and
+`x86_64-apple-darwin` on macos-15-intel, alongside Windows and Linux. Each Mac
+also runs the real document panel via:
+
+```sh
+cargo build --locked --features markdown-visual-tests --bin tty7-app
+python3 scripts/html-native-preview.py target/debug/tty7-app native-html
+```
+
+On Windows use `target/debug/tty7-app.exe`. The runner uses an isolated config
+and copies the existing fixture into a directory containing Chinese characters
+and spaces, with an uppercase `.HTML` extension. It opens the document through
+the production editor entry point and uses actual WebView evaluation callbacks
+to check relative JavaScript, SVG decoding, CSS grid, page dimensions, a DOM
+button click and refresh. These callbacks exist only with
+`markdown-visual-tests`; production builds have no test script interface.
+
+The runner also switches to `next.htm` and back and checks that the same browser
+instance serves both files. Resources live in a parent directory, exercising
+`../assets/` as well as Unicode paths. It then opens a fixture-owned temporary
+HTML file, deletes that file and refreshes, requiring asynchronous navigation
+failure to restore source mode with the original buffer intact. WebView2
+navigation-completed/process-failed events and a WKWebView navigation-delegate
+observer feed the same document-panel recovery. Failures retain their request
+identity, and stale requests or different active documents are ignored.
+
+The macOS artifact includes a desktop screenshot taken with `screencapture`.
+GPUI's GPU-only capture cannot prove a native child view is visible. Inspect
+the screenshot separately from the DOM results; successful evaluation or a
+clean process exit does not establish visible rendering or native mouse input.
+The artifact also records the browser user agent, architecture, DPR, viewport
+and one cold resource-readiness sample. This sample includes document opening
+and polling overhead and does not measure first visible paint or establish a
+performance target.
+
+On 2026-10-21 the Windows development run passed resources, CSS grid, script
+interaction, refresh, both file switches, instance reuse and deleted-file
+recovery. At a 489 × 829 CSS-pixel viewport and DPR 1.75 with Edge/WebView2 155,
+one debug sample recorded 3,454.58 ms to polled resource readiness, 336.29 ms
+for refresh and 378.80 / 395.56 ms for the two file switches. These are single
+observations, including polling overhead, not percentiles or release benchmarks.
+
+The same run used Windows 11 build 22000 and a Ryzen 7 5800H with 16 logical
+processors. Three process-tree samples per state, using the existing
+`scripts/bench/html-preview-memory.ps1`, gave these medians. The GUI and its
+browser descendants are included; the shared session daemon is excluded.
+
+| State | WebView2 processes | Private resident MiB | Private committed MiB | Idle CPU, one core % |
+| --- | ---: | ---: | ---: | ---: |
+| Active preview after refresh and switching | 6 | 133.12 | 329.25 | 0 |
+| Source restored after navigation failure | 0 | 19.80 | 108.21 | 0 |
+
+The source samples observed 5, then 0, then 0 browser processes as shutdown
+completed. This establishes short-run process cleanup on this Windows sample,
+not long-term leak behavior or macOS resource reclamation. There was no matched
+pre-opening baseline or release-profile comparison in this run.
+
+Final local `cargo test --workspace --locked` passed 3,131 tests with 12 ignored.
+All six focused HTML regressions pass, including the two observed red/green
+cases for column-only navigation and pending unsaved edits. `cargo check`,
+the native visual-feature build, formatting, Host boundary and four pinned
+agent-manifest Python tests also pass. Standards review found no violations;
+Spec review found no remaining definite implementation blocker and retains
+the native-device validation gap below.
+
+Complete the following real-device checks before release, recording Windows,
+Apple Silicon and Intel separately:
+
+- Click and type with native input; move focus between the page, source,
+  file tree and terminal, then verify ordinary terminal typing.
+- Resize the window and document divider; switch dock/fill layouts and DPI.
+- Open application menus, settings and dialogs; verify occlusion and restoration.
+- Save source edits, preview again, refresh and open the original file externally.
+- Switch repeatedly between HTML/HTM files; measure one reused browser instance,
+  cold opening, switching and refresh, including browser load-finished events.
+- Measure browser subprocess resident/private memory and idle CPU before preview,
+  during repeated navigation, after leaving preview and after closing the window.
+- Exercise initialization/runtime/navigation failures and confirm notifications,
+  source recovery and buffer preservation.
+- Start actual packaged applications and confirm local resources and runtime
+  dependencies. Build-only checks do not establish packaged-runtime support.
+
+This development machine runs Windows. macOS native results must come from
+the architecture-specific CI artifacts or actual Macs. Missing-runtime machines,
+the full native input/occlusion/DPI matrix, comparative resource benchmarks and
+release-package execution remain separately recorded validation work. The
+historical numbers below must not be presented as measurements of this change.
+
+Linux CI retains source editing and the existing terminal/Markdown checks.
+`cargo tree --locked --target x86_64-unknown-linux-gnu -i lb-wry` should report
+no selected package. Linux X11, XWayland and native Wayland embedding are not
+implemented; [the support boundaries](../specs/html-preview.md) describe their
+different conditional paths.
+
+## Historical Windows baseline
+
 The Windows preview loads the original saved `file://` URL through WebView2.
 Chrome is the browser reference. The application uses one lazy browser view per
 window and releases it when the user leaves HTML preview.
@@ -159,9 +263,9 @@ denied; external opening uses the original saved URL and the OS browser setting.
 
 ## Scope and limits
 
-This version supports saved local Windows `.html`/`.htm` files. Unsaved changes
+The historical Windows baseline supported saved local Windows `.html`/`.htm` files. Unsaved changes
 must be saved before preview or refresh. Remote Host files stay in the source
-editor. macOS and Linux browser embedding are not enabled. WebView2 Runtime is
+editor. macOS and Linux browser embedding were not enabled in that baseline. WebView2 Runtime is
 required, and initialization errors return a notification with source editing
 available. A genuinely missing-runtime machine was not available for testing.
 

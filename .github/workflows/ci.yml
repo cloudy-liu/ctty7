@@ -74,6 +74,8 @@ jobs:
         include:
           - runner: macos-14
             target: aarch64-apple-darwin
+          - runner: macos-15-intel
+            target: x86_64-apple-darwin
           - runner: windows-latest
             target: x86_64-pc-windows-msvc
           - runner: ubuntu-latest
@@ -170,11 +172,24 @@ jobs:
           fi
           python3 scripts/markdown-native-visual.py "$binary" native-markdown-macos
 
+      - name: Validate native macOS HTML preview
+        if: runner.os == 'macOS'
+        timeout-minutes: 5
+        run: python3 scripts/html-native-preview.py target/${{ matrix.target }}/debug/tty7-app native-html-${{ matrix.target }}
+
+      - name: Upload native HTML evidence
+        if: always() && runner.os == 'macOS'
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-html-${{ matrix.target }}
+          path: native-html-*/
+          if-no-files-found: error
+
       - name: Upload native Markdown visual evidence
         if: always() && runner.os != 'Windows'
         uses: actions/upload-artifact@v4
         with:
-          name: native-markdown-${{ runner.os }}
+          name: native-markdown-${{ matrix.target }}
           path: native-markdown-*/
           if-no-files-found: error
 

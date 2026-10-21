@@ -1031,7 +1031,14 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::EditorPreview => "预览",
         L10nKey::EditorHtmlSaveFirst => "请先保存文件，再使用浏览器预览。",
         L10nKey::EditorHtmlFailed => {
-            "无法打开 HTML 预览。请确认已安装 Microsoft Edge WebView2 Runtime。{error}"
+            #[cfg(windows)]
+            {
+                "无法打开 HTML 预览。请确认已安装 Microsoft Edge WebView2 Runtime。{error}"
+            }
+            #[cfg(not(windows))]
+            {
+                "无法打开 HTML 预览，你可以继续编辑源码。{error}"
+            }
         }
         L10nKey::EditorWrapOn => "自动换行：开",
         L10nKey::EditorWrapOff => "自动换行：关",

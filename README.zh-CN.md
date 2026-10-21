@@ -42,7 +42,7 @@ ctty7 完整保留这些，把重心放在日常使用真正需要的地方：Wi
 
 **一眼看清哪个 Agent 需要你。** 侧栏行用紧凑的 `idle`、`run`、`input`、`done` 标签、状态符号、分支名和实时 `+N −M` 工作区变更统计标出状态。命令面板可以把当前选区或仓库 diff 发送给正在运行的 Agent，`tty7 wait` 可以让脚本等待 Agent 状态变化。桌面通知、托盘提醒和内置 Agent 声音可以分别设置。已知对话在重启和 daemon 替换后仍能恢复：Claude Code 和 Codex 续上原会话；身份无法识别时，恢复流程留下可用的 shell，而不是弹出会话选择器。Agent 识别沿 Windows 进程树进行，提示符助手和 MCP 子进程不会被误认成前台 Agent；头像跟随主题。[Agent 状态](docs/agents/status.mdx) · [会话恢复](docs/agents/sessions.mdx) · [Agent 编排](docs/agents/orchestration.mdx)
 
-**在同一个窗口里阅读和编辑。** Markdown 以 GitHub 风格预览打开，支持 Mermaid 图表、缩放与平移、复制按钮、front matter 表格和可安装的 v2 主题，与源码编辑共用同一缓冲区。Windows 上已保存的本地 HTML、HTM 文件通过 WebView2 Runtime 默认进入浏览器预览，底部状态栏可以切换源码、刷新页面或在外部浏览器打开。源码配色跟随深浅模式，浅色 GitHub Light、深色 Atom One Dark，字体、字号独立设置。文件树默认显示点文件，使用 Symbols 图标并支持复制名称；文档可以填满和还原，diff 可以切换并排与统一布局。[Markdown 主题](docs/customization/markdown-themes.mdx) · [HTML 预览](docs/specs/html-preview.md) · [Diff](docs/git/diffs.mdx)
+**在同一个窗口里阅读和编辑。** Markdown 以 GitHub 风格预览打开，支持 Mermaid 图表、缩放与平移、复制按钮、front matter 表格和可安装的 v2 主题，与源码编辑共用同一缓冲区。已保存的本地 HTML、HTM 文件在 Windows 上通过 WebView2 Runtime、在 macOS 上通过系统 WKWebView 默认进入浏览器预览，底部状态栏可以切换源码、刷新页面或在外部浏览器打开。源码配色跟随深浅模式，浅色 GitHub Light、深色 Atom One Dark，字体、字号独立设置。文件树默认显示点文件，使用 Symbols 图标并支持复制名称；文档可以填满和还原，diff 可以切换并排与统一布局。[Markdown 主题](docs/customization/markdown-themes.mdx) · [HTML 预览](docs/specs/html-preview.md) · [Diff](docs/git/diffs.mdx)
 
 ![ctty7 中的 GitHub Light 源码编辑器](docs/specs/images/editor-github-light-native.png)
 

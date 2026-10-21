@@ -17,7 +17,7 @@ pub mod home;
 pub mod host_ops;
 #[allow(dead_code)]
 pub mod host_registry;
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 pub mod html_preview;
 pub mod i18n;
 pub mod keymap;

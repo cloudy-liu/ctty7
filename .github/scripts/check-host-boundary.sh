@@ -46,6 +46,11 @@ ALLOW=$(
 # The host boundary itself: every routed filesystem call lands here by design.
 src/ui/host_ops.rs|*
 
+# Opt-in native HTML acceptance reads local runner options and writes local
+# evidence. The document itself still opens through the production Host entry.
+src/ui/code_editor/native_html.rs|std::fs::read(
+src/ui/code_editor/native_html.rs|std::fs::write(
+
 # Themes and presets are app-owned files under the local config dir
 # (`themes_dir()`), never a workspace path — a remote workspace does not carry
 # the user's color schemes with it.

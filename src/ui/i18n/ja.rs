@@ -1134,7 +1134,14 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
             "ブラウザーでプレビューする前にファイルを保存してください。"
         }
         L10nKey::EditorHtmlFailed => {
-            "HTML プレビューを開けません。Microsoft Edge WebView2 Runtime がインストールされていることを確認してください。{error}"
+            #[cfg(windows)]
+            {
+                "HTML プレビューを開けません。Microsoft Edge WebView2 Runtime がインストールされていることを確認してください。{error}"
+            }
+            #[cfg(not(windows))]
+            {
+                "HTML プレビューを開けません。ソースの編集を続けられます。{error}"
+            }
         }
         L10nKey::EditorWrapOn => "折り返し: オン",
         L10nKey::EditorWrapOff => "折り返し: オフ",
