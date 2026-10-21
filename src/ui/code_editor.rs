@@ -1043,10 +1043,42 @@ impl Tty7App {
         else {
             return;
         };
-        if file.dirty {
+        self.open_html_in_browser(&file.path, window, cx);
+    }
+
+    pub(crate) fn open_html_in_browser(
+        &self,
+        path: &Path,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.can_spawn_locally(cx) || language_for_path(path) != "html" {
+            return;
+        }
+        // A tree row need not be the active editor, or even open in this tab.
+        // Match the local host as well as the path before protecting its edits.
+        let dirty = self
+            .tabs
+            .iter()
+            .filter_map(|tab| tab.code.as_ref())
+            .any(|code| {
+                code.files
+                    .iter()
+                    .any(|file| file.host.id().is_local() && file.path == path && file.dirty)
+            });
+        if dirty {
             window.push_notification(t(L10nKey::EditorHtmlSaveFirst), cx);
-        } else if let Ok(url) = url::Url::from_file_path(&file.path) {
-            cx.open_url(url.as_str());
+        } else {
+            // Windows' ShellExecute treats escaped file URLs as literal paths,
+            // so Unicode and spaces must reach it as the original native path.
+            #[cfg(windows)]
+            if crate::ui::host_registry::HostRegistry::local(cx).is_absolute(path) {
+                cx.open_url(&path.to_string_lossy());
+            }
+            #[cfg(not(windows))]
+            if let Ok(url) = url::Url::from_file_path(path) {
+                cx.open_url(url.as_str());
+            }
         }
     }
 
@@ -2065,6 +2097,68 @@ mod tests {
             cx.notify();
         });
         (app, vcx)
+    }
+
+    #[gpui::test]
+    fn html_browser_opens_the_requested_file_instead_of_the_active_editor(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let active = dir.path().join("A.html");
+        let target = dir.path().join("B 页面 with spaces.HTML");
+        std::fs::write(&active, "<h1>A</h1>").unwrap();
+        std::fs::write(&target, "<h1>B</h1>").unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                active.clone(),
+                "<h1>A</h1>".into(),
+                None,
+                window,
+                cx,
+            );
+            app.tab_code_mut().unwrap().files[0].dirty = true;
+            app.open_html_in_browser(&target, window, cx);
+            assert_eq!(app.tab_code().unwrap().active_file().unwrap().path, active);
+            assert_eq!(app.tab_code().unwrap().files.len(), 1);
+        });
+        let opened = cx.opened_url().expect("the target opens externally");
+        #[cfg(windows)]
+        assert_eq!(opened, target.to_string_lossy());
+        #[cfg(not(windows))]
+        assert_eq!(
+            url::Url::parse(&opened).unwrap().to_file_path().unwrap(),
+            target
+        );
+    }
+
+    #[gpui::test]
+    fn html_browser_protects_unsaved_target_in_another_tab(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("unsaved.htm");
+        std::fs::write(&target, "<h1>Saved</h1>").unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                target.clone(),
+                "<h1>Saved</h1>".into(),
+                None,
+                window,
+                cx,
+            );
+            let code = app.tab_code_mut().unwrap();
+            let file = &mut code.files[code.active];
+            file.input.update(cx, |input, cx| {
+                input.set_value("<h1>Unsaved</h1>", window, cx);
+            });
+            file.dirty = true;
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = app.tabs.len() - 1;
+            app.open_html_in_browser(&target, window, cx);
+        });
+        assert!(cx.opened_url().is_none(), "unsaved targets must not open");
+        assert_eq!(std::fs::read_to_string(&target).unwrap(), "<h1>Saved</h1>");
     }
 
     #[cfg(any(windows, target_os = "macos"))]
