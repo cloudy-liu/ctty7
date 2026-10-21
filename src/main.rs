@@ -8,6 +8,8 @@ mod agent_attention_visual;
 mod core;
 mod daemon;
 #[cfg(feature = "markdown-visual-tests")]
+mod document_visual;
+#[cfg(feature = "markdown-visual-tests")]
 mod markdown_visual;
 #[cfg(feature = "markdown-visual-tests")]
 mod ssh_tab_visual;
@@ -529,6 +531,12 @@ fn main() {
     }
 
     apply_config_dir_arg(&args);
+
+    #[cfg(feature = "markdown-visual-tests")]
+    if let Some(index) = args.iter().position(|arg| arg == "--document-visual") {
+        document_visual::run(args.get(index + 1).expect("document fixture options path"));
+        return;
+    }
 
     #[cfg(all(feature = "markdown-visual-tests", any(windows, target_os = "macos")))]
     if let Some(index) = args.iter().position(|arg| arg == "--html-preview-visual") {
