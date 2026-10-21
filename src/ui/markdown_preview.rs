@@ -512,6 +512,29 @@ fn align_dark_github_foreground(
         .insert("github.rust.type".into(), neutral);
 }
 
+fn align_one_light_code_background(
+    entry: &Entry,
+    dark: bool,
+    preset_id: &str,
+    background: Hsla,
+    style: &mut TextViewStyle,
+) {
+    let background = if !dark
+        && entry.source.is_none()
+        && entry.theme.id == markdown_theme::DEFAULT_ID
+        && preset_id == "one_light"
+    {
+        background
+    } else {
+        color(entry.theme.palette(dark).code_background)
+    };
+
+    style.code_block.background = Some(background.into());
+    Arc::make_mut(&mut style.highlight_theme)
+        .style
+        .editor_background = Some(background);
+}
+
 #[derive(Clone)]
 struct ReadingScrollHandle {
     list: gpui::ListState,
@@ -1238,6 +1261,13 @@ impl Render for MarkdownPreview {
             color(palette.foreground)
         };
         align_dark_github_foreground(&entry, dark, reading_foreground, &mut self.style);
+        align_one_light_code_background(
+            &entry,
+            dark,
+            &crate::ui::theme::effective_preset_id(cx),
+            cx.theme().popover,
+            &mut self.style,
+        );
         // The bundled theme shares the application's reading background.
         // Custom themes retain their explicit background and paper colors.
         let reading_background: gpui::Background = if entry.theme.id == markdown_theme::DEFAULT_ID {
@@ -1943,6 +1973,34 @@ mod tests {
         assert_eq!(
             before.highlight_theme.style.editor_foreground,
             after.highlight_theme.style.editor_foreground
+        );
+    }
+
+    #[test]
+    fn github_code_background_is_inset_only_for_one_light() {
+        let entry = Entry {
+            theme: markdown_theme::builtin(),
+            source: None,
+            revision: 0,
+        };
+        let background: Hsla = gpui::rgb(0xefeff0).into();
+        let mut style = reading_style(&entry, false, 1., "Mono".into());
+        let github_background = style.code_block.background.clone();
+        let github_highlight_background = style.highlight_theme.style.editor_background;
+
+        align_one_light_code_background(&entry, false, "one_light", background, &mut style);
+
+        assert_eq!(style.code_block.background, Some(background.into()));
+        assert_eq!(
+            style.highlight_theme.style.editor_background,
+            Some(background)
+        );
+
+        align_one_light_code_background(&entry, false, "light", background, &mut style);
+        assert_eq!(style.code_block.background, github_background);
+        assert_eq!(
+            style.highlight_theme.style.editor_background,
+            github_highlight_background
         );
     }
 
