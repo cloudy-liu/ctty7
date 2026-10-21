@@ -36,8 +36,7 @@ impl HtmlPreview {
             crate::core::config::config_dir_path().map(|dir| dir.join("html-preview")),
         );
         let started = Rc::new(Cell::new(Instant::now()));
-        let webview = wry::WebViewBuilder::new_with_web_context(&mut context)
-            .with_url(url.as_str())
+        let builder = wry::WebViewBuilder::new_with_web_context(&mut context)
             .with_visible(false)
             .with_focused(false)
             .with_devtools(cfg!(debug_assertions))
@@ -52,10 +51,14 @@ impl HtmlPreview {
                         eprintln!("HTML_PREVIEW_LOAD_MS={ms:.2}");
                     }
                 }
-            })
-            // The handle comes from the current GPUI window and is used only
-            // synchronously on its UI thread. No native handle crosses threads.
-            .build_as_child(&unsafe { WindowHandle::borrow_raw(parent) })?;
+            });
+        #[cfg(windows)]
+        let builder = builder.with_url(url.as_str());
+        // The handle comes from the current GPUI window and is used only
+        // synchronously on its UI thread. No native handle crosses threads.
+        let webview = builder.build_as_child(&unsafe { WindowHandle::borrow_raw(parent) })?;
+        #[cfg(target_os = "macos")]
+        load_file_url(&webview, &url)?;
         Ok(PendingHtmlPreview {
             path: path.to_path_buf(),
             webview,
@@ -87,7 +90,10 @@ impl HtmlPreview {
         let url = url::Url::from_file_path(path)
             .map_err(|_| anyhow::anyhow!("HTML preview requires an absolute local file path"))?;
         self.started.set(Instant::now());
+        #[cfg(windows)]
         self.view.read(cx).raw().load_url(url.as_str())?;
+        #[cfg(target_os = "macos")]
+        load_file_url(self.view.read(cx).raw(), &url)?;
         self.path = path.to_path_buf();
         Ok(())
     }
@@ -96,6 +102,22 @@ impl HtmlPreview {
         self.started.set(Instant::now());
         self.view.read(cx).raw().reload()?;
         Ok(())
+    }
+
+    #[cfg(feature = "markdown-visual-tests")]
+    pub(crate) fn inspect(
+        &self,
+        script: &str,
+        cx: &App,
+    ) -> anyhow::Result<smol::channel::Receiver<String>> {
+        let (tx, rx) = smol::channel::bounded(1);
+        self.view
+            .read(cx)
+            .raw()
+            .evaluate_script_with_callback(script, move |json| {
+                let _ = tx.try_send(json);
+            })?;
+        Ok(rx)
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut App) {
@@ -120,6 +142,28 @@ impl HtmlPreview {
             }
         });
     }
+}
+
+#[cfg(target_os = "macos")]
+fn load_file_url(webview: &wry::WebView, url: &url::Url) -> anyhow::Result<()> {
+    use objc2_foundation::{NSString, NSURL};
+    use wry::WebViewExtMacOS as _;
+
+    let file = NSURL::URLWithString(&NSString::from_str(url.as_str()))
+        .ok_or_else(|| anyhow::anyhow!("Invalid HTML file URL"))?;
+    // A saved page can reference ../ resources anywhere on its local volume.
+    // WebKit still applies its normal local-file origin restrictions. This
+    // grants read access only; there is no application script bridge.
+    let root = NSURL::fileURLWithPath_isDirectory(&NSString::from_str("/"), true);
+    // WRY creates this WKWebView on the main thread. Both URLs are file URLs
+    // and remain alive for the synchronous call, which retains them as needed.
+    unsafe {
+        webview
+            .webview()
+            .loadFileURL_allowingReadAccessToURL(&file, &root)
+    }
+    .ok_or_else(|| anyhow::anyhow!("WKWebView could not start loading the HTML file"))?;
+    Ok(())
 }
 
 impl Focusable for HtmlPreview {

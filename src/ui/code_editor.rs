@@ -1,4 +1,4 @@
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 use raw_window_handle::HasWindowHandle;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -22,6 +22,9 @@ use crate::ui::host_ops::{HostId, HostOps, MTime, SharedHost, WatchSub};
 use crate::ui::i18n::{L10nKey, t, t_fmt};
 
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+
+#[cfg(all(feature = "markdown-visual-tests", any(windows, target_os = "macos")))]
+pub(crate) mod native_html;
 
 const RELOAD_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(200);
 
@@ -125,9 +128,9 @@ enum EditorNavigation {
 }
 
 pub(crate) struct EditorPanelState {
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub(crate) html: Option<Entity<super::html_preview::HtmlPreview>>,
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     html_loading: bool,
     /// Only the latest open request may install a file or move focus. Its
     /// navigation target travels with the request and is dropped on failure.
@@ -166,9 +169,9 @@ impl EditorPanelState {
         })
         .detach();
         Self {
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             html: None,
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             html_loading: false,
             open_seq: 0,
             watch: None,
@@ -238,7 +241,9 @@ pub(crate) fn language_for_path(path: &Path) -> &'static str {
 }
 
 fn can_preview_html(file: &OpenFile) -> bool {
-    cfg!(windows) && file.host.id().is_local() && language_for_path(&file.path) == "html"
+    cfg!(any(windows, target_os = "macos"))
+        && file.host.id().is_local()
+        && language_for_path(&file.path) == "html"
 }
 
 /// How many frames a jump-to-line may wait for the editor to be laid out.
@@ -494,10 +499,11 @@ impl Tty7App {
         self.editor_open_with_navigation(
             host,
             path,
-            line.map(|line| EditorNavigation::Source {
-                line,
-                column: column.unwrap_or(1),
-            }),
+            line.or(column.map(|_| 1))
+                .map(|line| EditorNavigation::Source {
+                    line,
+                    column: column.unwrap_or(1),
+                }),
             window,
             cx,
         );
@@ -766,7 +772,7 @@ impl Tty7App {
             })
         });
         let preview = reading.is_some();
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         let preview = preview || (language == "html" && host.id().is_local());
         let tab = self
             .tabs
@@ -853,7 +859,7 @@ impl Tty7App {
 
     fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
         if let Some(f) = self.tab_code().and_then(|c| c.active_file()) {
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             if f.preview && can_preview_html(f) {
                 if let Some(html) = &self.editor.html {
                     html.update(cx, |html, cx| html.focus(window, cx));
@@ -872,7 +878,7 @@ impl Tty7App {
     }
 
     pub(crate) fn editor_toggle_preview(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         if let Some(file) = self
             .tab_code()
             .and_then(|code| code.active_file())
@@ -914,7 +920,7 @@ impl Tty7App {
         cx.notify();
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     fn editor_begin_html_preview(
         &mut self,
         path: PathBuf,
@@ -1005,7 +1011,7 @@ impl Tty7App {
     }
 
     fn editor_refresh_html(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         if let Some(html) = &self.editor.html {
             if self
                 .tab_code()
@@ -1014,22 +1020,25 @@ impl Tty7App {
             {
                 window.push_notification(t(L10nKey::EditorHtmlSaveFirst), cx);
             } else if let Err(error) = html.read(cx).reload(cx) {
+                self.editor_fallback_html_source();
+                self.focus_editor(window, cx);
                 window.push_notification(
                     t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
                     cx,
                 );
+                cx.notify();
             }
         }
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         let _ = (window, cx);
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     fn editor_release_html(&mut self) {
         self.editor.html = None;
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     fn editor_fallback_html_source(&mut self) {
         self.editor_release_html();
         if let Some(code) = self.tab_code_mut()
@@ -1042,7 +1051,7 @@ impl Tty7App {
         }
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub(crate) fn editor_needs_html_preview_sync(&self) -> bool {
         self.editor.html.is_some()
             || self
@@ -1051,13 +1060,24 @@ impl Tty7App {
                 .is_some_and(|file| file.preview && can_preview_html(file))
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     pub(crate) fn editor_sync_html_preview(
         &mut self,
         unobstructed: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self
+            .tab_code()
+            .and_then(|code| code.active_file())
+            .is_some_and(|file| file.preview && can_preview_html(file) && file.dirty)
+        {
+            self.editor_fallback_html_source();
+            self.focus_editor(window, cx);
+            window.push_notification(t(L10nKey::EditorHtmlSaveFirst), cx);
+            cx.notify();
+            return;
+        }
         let path = (self.document_front() == Some(super::app::OverlayTop::Code))
             .then(|| self.tab_code().and_then(|code| code.active_file()))
             .flatten()
@@ -1119,7 +1139,7 @@ impl Tty7App {
                 .and_then(|c| c.active_file())
                 .is_some_and(|f| {
                     if f.preview {
-                        #[cfg(windows)]
+                        #[cfg(any(windows, target_os = "macos"))]
                         if can_preview_html(f) {
                             return self.editor.html.as_ref().is_some_and(|html| {
                                 html.read(cx).focus_handle(cx).contains_focused(window, cx)
@@ -1481,7 +1501,7 @@ impl Tty7App {
         }
         let body = match self.tab_code().and_then(|c| c.active_file()) {
             None => self.render_editor_empty(cx).into_any_element(),
-            #[cfg(windows)]
+            #[cfg(any(windows, target_os = "macos"))]
             Some(f) if f.preview && can_preview_html(f) => self
                 .editor
                 .html
@@ -1765,9 +1785,9 @@ impl Tty7App {
         let wrap: Option<bool> = active.filter(|f| !f.preview).map(|f| f.wrap);
         let is_markdown = active.is_some_and(|f| language_for_path(&f.path) == "markdown");
         let is_html = active.is_some_and(can_preview_html);
-        #[cfg(windows)]
+        #[cfg(any(windows, target_os = "macos"))]
         let html_loading = is_html && self.editor.html_loading;
-        #[cfg(not(windows))]
+        #[cfg(not(any(windows, target_os = "macos")))]
         let html_loading = false;
         let preview = active.is_some_and(|f| f.preview);
 
@@ -2007,7 +2027,65 @@ mod tests {
         (app, vcx)
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
+    #[gpui::test]
+    fn html_preview_pending_open_preserves_new_unsaved_edits(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("pending.html");
+        std::fs::write(&path, "<h1>Saved</h1>").unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                path.clone(),
+                "<h1>Saved</h1>".into(),
+                None,
+                window,
+                cx,
+            );
+            let code = app.tab_code_mut().unwrap();
+            let file = &mut code.files[code.active];
+            file.input.update(cx, |input, cx| {
+                input.set_value("<h1>Unsaved</h1>", window, cx)
+            });
+            file.dirty = true;
+            // A pending preview must protect edits even while a dialog hides it.
+            app.editor_sync_html_preview(false, window, cx);
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(
+                !file.preview,
+                "pending preview must return to the edited source"
+            );
+            assert!(file.dirty);
+            assert_eq!(file.input.read(cx).text().to_string(), "<h1>Unsaved</h1>");
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), "<h1>Saved</h1>");
+        });
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
+    #[gpui::test]
+    fn html_preview_column_only_link_opens_source(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("报告 with spaces.HtMl");
+        std::fs::write(&path, "<h1>Saved</h1>").unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                path.clone(),
+                "<h1>Saved</h1>".into(),
+                None,
+                window,
+                cx,
+            );
+            app.open_file_in_editor_at(&path, None, Some(5), window, cx);
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(!file.preview, "an explicit column must open source");
+            assert_eq!(file.input.read(cx).cursor_position(), Position::new(0, 4));
+        });
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
     #[gpui::test]
     fn html_preview_is_default_and_source_edits_require_saving(cx: &mut TestAppContext) {
         let (app, mut vcx) = markdown_window(cx);
@@ -2052,14 +2130,15 @@ mod tests {
         });
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     #[gpui::test]
     fn html_preview_default_keeps_explicit_source_navigation_and_mode_switching(
         cx: &mut TestAppContext,
     ) {
         let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
         app.update_in(&mut vcx, |app, window, cx| {
-            let path = PathBuf::from("C:/index.HTM");
+            let path = dir.path().join("index.HTM");
             app.editor_install_file(
                 tty7_core::host::local::LocalHost::new(),
                 path.clone(),
@@ -2088,26 +2167,32 @@ mod tests {
         });
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     #[gpui::test]
     fn html_preview_release_preserves_each_files_selected_mode(cx: &mut TestAppContext) {
         let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
         app.update_in(&mut vcx, |app, window, cx| {
             for (path, content) in [
-                ("C:/report.html", "<h1>Report</h1>"),
-                ("C:/index.HTM", "<p>Index</p>"),
-                ("C:/guide.md", "# Guide"),
+                ("report.html", "<h1>Report</h1>"),
+                ("index.HTM", "<p>Index</p>"),
+                ("guide.md", "# Guide"),
             ] {
                 app.editor_install_file(
                     tty7_core::host::local::LocalHost::new(),
-                    path.into(),
+                    dir.path().join(path),
                     content.into(),
                     None,
                     window,
                     cx,
                 );
             }
-            assert!(app.editor_activate_open(HostId::LOCAL, Path::new("C:/index.HTM"), window, cx));
+            assert!(app.editor_activate_open(
+                HostId::LOCAL,
+                &dir.path().join("index.HTM"),
+                window,
+                cx
+            ));
             app.editor_toggle_preview(window, cx);
             app.editor_release_html();
             let files = &app.tab_code().unwrap().files;
@@ -2117,11 +2202,11 @@ mod tests {
             );
             let report = files
                 .iter()
-                .find(|file| file.path == Path::new("C:/report.html"))
+                .find(|file| file.path == dir.path().join("report.html"))
                 .unwrap();
             let index = files
                 .iter()
-                .find(|file| file.path == Path::new("C:/index.HTM"))
+                .find(|file| file.path == dir.path().join("index.HTM"))
                 .unwrap();
             assert!(
                 report.preview,
@@ -2140,15 +2225,16 @@ mod tests {
         });
     }
 
-    #[cfg(windows)]
+    #[cfg(any(windows, target_os = "macos"))]
     #[gpui::test]
     fn html_preview_failure_only_resets_the_active_file(cx: &mut TestAppContext) {
         let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
         app.update_in(&mut vcx, |app, window, cx| {
-            for path in ["C:/first.html", "C:/second.html"] {
+            for path in ["first.html", "second.html"] {
                 app.editor_install_file(
                     tty7_core::host::local::LocalHost::new(),
-                    path.into(),
+                    dir.path().join(path),
                     "<h1>Saved</h1>".into(),
                     None,
                     window,
@@ -2160,7 +2246,7 @@ mod tests {
             assert!(!app.editor_needs_html_preview_sync());
             assert!(app.editor_activate_open(
                 HostId::LOCAL,
-                Path::new("C:/first.html"),
+                &dir.path().join("first.html"),
                 window,
                 cx
             ));

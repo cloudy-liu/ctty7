@@ -152,6 +152,13 @@ resvg = { version = "0.47", default-features = false }
 [target.'cfg(any(target_os = "macos", target_os = "windows"))'.dependencies]
 tray-icon = "0.24"
 
+# Native HTML preview uses WebView2 on Windows and system WKWebView on macOS.
+# Keep WRY off Linux: this GPUI integration does not use GTK/WebKitGTK.
+gpui-wry = { git = "https://github.com/cloudy-liu/gpui-component", rev = "9572b7fab9c0fcf73e34c6118f8a9f10f083f928" }
+wry = { package = "lb-wry", version = "0.53.3" }
+# GPUI implements this existing dependency's safe native-window handle trait.
+raw-window-handle = "0.6"
+
 # The pty-size ioctl in `terminal::generator` is the only libc user left in the
 # GUI (the daemon's own libc calls went to tty7-core), and it is Unix-only — so
 # the dep is Unix-only too.
@@ -163,10 +170,6 @@ libc = "0.2"
 # PATH comes back mangled. 0.61 is already in the tree (tray-icon pulls it), so
 # this pins no new code.
 [target.'cfg(windows)'.dependencies]
-gpui-wry = { git = "https://github.com/cloudy-liu/gpui-component", rev = "9572b7fab9c0fcf73e34c6118f8a9f10f083f928" }
-wry = { package = "lb-wry", version = "0.53.3" }
-# GPUI implements this existing dependency's safe native-window handle trait.
-raw-window-handle = "0.6"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",

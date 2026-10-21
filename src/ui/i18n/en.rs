@@ -1071,7 +1071,14 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::EditorPreview => "Preview",
         L10nKey::EditorHtmlSaveFirst => "Save this file before previewing it in the browser.",
         L10nKey::EditorHtmlFailed => {
-            "Could not open HTML preview. Check that Microsoft Edge WebView2 Runtime is installed. {error}"
+            #[cfg(windows)]
+            {
+                "Could not open HTML preview. Check that Microsoft Edge WebView2 Runtime is installed. {error}"
+            }
+            #[cfg(not(windows))]
+            {
+                "Could not open HTML preview. You can continue editing the source. {error}"
+            }
         }
         L10nKey::EditorWrapOn => "Wrap: on",
         L10nKey::EditorWrapOff => "Wrap: off",

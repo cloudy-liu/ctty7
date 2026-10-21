@@ -1,5 +1,70 @@
 # HTML preview validation
 
+## Cross-platform acceptance
+
+The document panel enables local HTML/HTM preview on Windows with WebView2 and
+on macOS with WKWebView. The existing default-open, source-navigation,
+dirty-buffer, mode-preservation and source-fallback tests run on both platforms.
+The column-only navigation regression was observed failing before the fix and
+passing afterwards. Test paths use the current platform's temporary directory.
+
+CI builds and tests both `aarch64-apple-darwin` on macos-14 and
+`x86_64-apple-darwin` on macos-15-intel, alongside Windows and Linux. Each Mac
+also runs the real document panel via:
+
+```sh
+cargo build --locked --features markdown-visual-tests --bin tty7-app
+python3 scripts/html-native-preview.py target/debug/tty7-app native-html
+```
+
+On Windows use `target/debug/tty7-app.exe`. The runner uses an isolated config
+and copies the existing fixture into a directory containing Chinese characters
+and spaces, with an uppercase `.HTML` extension. It opens the document through
+the production editor entry point and uses actual WebView evaluation callbacks
+to check relative JavaScript, SVG decoding, CSS grid, page dimensions, a DOM
+button click and refresh. These callbacks exist only with
+`markdown-visual-tests`; production builds have no test script interface.
+
+The macOS artifact includes a desktop screenshot taken with `screencapture`.
+GPUI's GPU-only capture cannot prove a native child view is visible. Inspect
+the screenshot separately from the DOM results; successful evaluation or a
+clean process exit does not establish visible rendering or native mouse input.
+The artifact also records the browser user agent, architecture, DPR, viewport
+and one cold resource-readiness sample. This sample includes document opening
+and polling overhead and does not measure first visible paint or establish a
+performance target.
+
+Complete the following real-device checks before release, recording Windows,
+Apple Silicon and Intel separately:
+
+- Click and type with native input; move focus between the page, source,
+  file tree and terminal, then verify ordinary terminal typing.
+- Resize the window and document divider; switch dock/fill layouts and DPI.
+- Open application menus, settings and dialogs; verify occlusion and restoration.
+- Save source edits, preview again, refresh and open the original file externally.
+- Switch repeatedly between HTML/HTM files; measure one reused browser instance,
+  cold opening, switching and refresh, including browser load-finished events.
+- Measure browser subprocess resident/private memory and idle CPU before preview,
+  during repeated navigation, after leaving preview and after closing the window.
+- Exercise initialization/runtime/navigation failures and confirm notifications,
+  source recovery and buffer preservation.
+- Start actual packaged applications and confirm local resources and runtime
+  dependencies. Build-only checks do not establish packaged-runtime support.
+
+This development machine runs Windows. macOS native results must come from
+the architecture-specific CI artifacts or actual Macs. Missing-runtime machines,
+the full native input/occlusion/DPI matrix, comparative resource benchmarks and
+release-package execution remain separately recorded validation work. The
+historical numbers below must not be presented as measurements of this change.
+
+Linux CI retains source editing and the existing terminal/Markdown checks.
+`cargo tree --locked --target x86_64-unknown-linux-gnu -i lb-wry` should report
+no selected package. Linux X11, XWayland and native Wayland embedding are not
+implemented; [the support boundaries](../specs/html-preview.md) describe their
+different conditional paths.
+
+## Historical Windows baseline
+
 The Windows preview loads the original saved `file://` URL through WebView2.
 Chrome is the browser reference. The application uses one lazy browser view per
 window and releases it when the user leaves HTML preview.
@@ -159,9 +224,9 @@ denied; external opening uses the original saved URL and the OS browser setting.
 
 ## Scope and limits
 
-This version supports saved local Windows `.html`/`.htm` files. Unsaved changes
+The historical Windows baseline supported saved local Windows `.html`/`.htm` files. Unsaved changes
 must be saved before preview or refresh. Remote Host files stay in the source
-editor. macOS and Linux browser embedding are not enabled. WebView2 Runtime is
+editor. macOS and Linux browser embedding were not enabled in that baseline. WebView2 Runtime is
 required, and initialization errors return a notification with source editing
 available. A genuinely missing-runtime machine was not available for testing.
 

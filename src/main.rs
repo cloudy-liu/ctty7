@@ -528,6 +528,12 @@ fn main() {
 
     apply_config_dir_arg(&args);
 
+    #[cfg(all(feature = "markdown-visual-tests", any(windows, target_os = "macos")))]
+    if let Some(index) = args.iter().position(|arg| arg == "--html-preview-visual") {
+        ui::code_editor::native_html::run(args.get(index + 1).expect("HTML fixture options path"));
+        return;
+    }
+
     #[cfg(feature = "markdown-visual-tests")]
     if let Some(index) = args.iter().position(|arg| arg == "--diff-profile") {
         ui::diff_overlay::profile::run(args.get(index + 1).expect("diff profile options path"));
