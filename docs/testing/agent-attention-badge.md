@@ -62,6 +62,18 @@ after its hold period and does not write real workspace/session settings.
 
 ## Verification and limits
 
+- The original native capture switched from another tab to the completed pane,
+  producing a pane focus callback. It did not cover returning to an already
+  selected pane when rendering does not produce that callback. PR #173's
+  original implementation and its merged version both relied on that callback
+  to clear unread state; this was a coverage gap, not a dropped merge change.
+- An activation regression now suppresses pane rendering while retaining the
+  focused handle. It fails without the activation observer and passes with it:
+  returning reads the focused result and leaves another pane's result unread.
+  A separate regression checks that manual "Mark as Unread" survives the menu's
+  immediate refocus and clears on the next visit, both with and without the
+  menu-refocus callback. These are automated view
+  tests; the screenshots above remain the original native acceptance evidence.
 - The new lifecycle regression failed before the focus correction: a selected
   pane in an inactive window incorrectly reported its result as already read.
   It passes after checking both window activation and pane focus, including
