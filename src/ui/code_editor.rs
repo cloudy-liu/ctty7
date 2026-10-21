@@ -2166,6 +2166,8 @@ mod tests {
             ));
             assert!(app.tab_code().unwrap().active_file().unwrap().preview);
             assert!(app.editor_needs_html_preview_sync());
+            // The native browser is exercised separately from this test window.
+            app.editor_toggle_preview(window, cx);
         });
     }
 
