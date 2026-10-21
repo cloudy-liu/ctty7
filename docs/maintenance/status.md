@@ -1,18 +1,21 @@
 # Project status
 
-Checked on 2026-10-18 against GitHub and the local checkout.
+Checked on 2026-10-21 against GitHub and the local checkout.
 This is a dated snapshot; query GitHub again before merging or preparing a release.
 
 ## Open work
 
-The v0.6.0 release is published and Latest. PRs #154 through #161 and release
-preparation #163 and #164 are merged. The release adds pinned, collapsible
-sidebar groups and full-file diff context, with faster diff rendering,
-Markdown table fixes, document breadcrumbs, and SSH tab names. See the
-[release notes](../releases/v0.6.0.md) for the remaining verification limits.
+The v0.7.0 baseline includes Windows HTML preview, unread Agent indicators,
+sidebar reliability, and document-path fixes from PRs #165, #166, and #169
+through #174. The v0.7.1 preparation in PR #176 restores omitted default HTML
+preview and terminal block-fill changes. See its
+[release notes](../releases/v0.7.1.md) and the
+[preserved-change audit](../testing/local-change-audit-v0.7.1.md).
 
-There are no open product issues at this check. Release documentation records
-the verified publication separately from the frozen release tag.
+Issue #175 remains open for macOS HTML preview, platform boundaries, and
+further performance work. PR #176 addresses its Windows default-opening
+requirement without completing the broader spec. Query GitHub for current
+publication and CI status; this document is a dated source snapshot.
 The component fork `cloudy-liu/gpui-component` now has a `ctty7` stable
 integration branch. The application pins its exact commit; see
 [gpui-component maintenance](gpui-component.md).
@@ -57,8 +60,8 @@ these are verification gaps, not additional open GitHub tickets.
 
 ## Source and release state
 
-- Published tag `v0.6.0` points to `edf1339d`, including GPUI integration #160, sidebar groups #161, and release preparation #163 and #164. [v0.6.0](https://github.com/cloudy-liu/ctty7/releases/tag/v0.6.0) is Latest; [English notes](../releases/v0.6.0.md) record the release changes and verification limits.
-- [v0.5.0...v0.6.0](https://github.com/cloudy-liu/ctty7/compare/v0.5.0...v0.6.0) is the current release comparison. This status refresh does not repeat asset or native acceptance checks from release publication.
+- Published tag `v0.7.0` points to `f8adef01`. [English notes](../releases/v0.7.0.md) record its changes and verification limits. It includes manual HTML preview but omitted the locally validated default-opening changes recovered in PR #176.
+- Published tag `v0.6.0` points to `edf1339d`, including GPUI integration #160, sidebar groups #161, and release preparation #163 and #164. [English notes](../releases/v0.6.0.md) record its changes and verification limits.
 - Published tag `v0.3.0` points to `3fc65a9d`, including PRs #128 through #132, #138, and release preparation #139. All nine [source CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/38155517374) and all ten [Release jobs](https://github.com/cloudy-liu/ctty7/actions/runs/38155524755) passed. See [verification](../testing/release-v0.3.0.md).
 - [v0.3.0](https://github.com/cloudy-liu/ctty7/releases/tag/v0.3.0) remains available with 12 program assets plus `checksums.txt`; downloaded bytes, package layouts, versions, embedded notification audio, and public URLs were verified at publication.
 - [v0.2.2...v0.3.0](https://github.com/cloudy-liu/ctty7/compare/v0.2.2...v0.3.0) includes agent sounds, Copy Name, paste, identity, status, diagram, and daemon fixes. [English notes](../releases/v0.3.0.md) record remaining manual acceptance limits.
