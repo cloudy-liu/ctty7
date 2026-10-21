@@ -170,18 +170,24 @@ fn snapshot_cell(
     }
 
     let inverse = flags.contains(Flags::INVERSE);
-    let (mut fgc, _) = resolve(cell.fg, palette, colors.fg_rgb, colors.bg_rgb);
+    let (mut fgc, fg_default) = resolve(cell.fg, palette, colors.fg_rgb, colors.bg_rgb);
     let (mut bgc, bg_default) = resolve(cell.bg, palette, colors.fg_rgb, colors.bg_rgb);
     if let Some(adapter) = &colors.adaptive {
         if !bg_default {
             bgc = unpack_rgb(adapter.background(pack_rgb(bgc)));
         }
         if !flags.contains(Flags::HIDDEN) {
-            fgc = unpack_rgb(adapter.foreground(
-                pack_rgb(fgc),
-                pack_rgb(bgc),
-                flags.contains(Flags::DIM),
-            ));
+            // TUIs use explicitly colored block elements as background fills.
+            // Apply the same mapping as SGR backgrounds so half-block padding
+            // stays continuous with the input box instead of becoming bright
+            // text. Default-foreground blocks still use readable text ink.
+            fgc = unpack_rgb(
+                if !fg_default && ('\u{2580}'..='\u{259f}').contains(&cell.c) {
+                    adapter.background(pack_rgb(fgc))
+                } else {
+                    adapter.foreground(pack_rgb(fgc), pack_rgb(bgc), flags.contains(Flags::DIM))
+                },
+            );
         }
     }
     let (fgc, bgc, draw_bg) = if inverse {
@@ -3088,6 +3094,113 @@ mod tests {
             fg_rgb: fg,
             bg_rgb: bg,
         }
+    }
+
+    #[gpui::test]
+    fn cursor_prompt_half_blocks_match_the_input_fill(cx: &mut gpui::TestAppContext) {
+        crate::core::config::pin_test_config_dir();
+        let mut term = alacritty_terminal::Term::new(
+            alacritty_terminal::term::Config::default(),
+            &crate::terminal::size::TermSize::new(80, 24),
+            alacritty_terminal::event::VoidListener,
+        );
+        let mut parser: alacritty_terminal::vte::ansi::Processor =
+            alacritty_terminal::vte::ansi::Processor::new();
+        // Cursor Agent v2026.10.14 uses foreground half blocks to extend the
+        // prompt's background into the rows above and below the input text.
+        parser.advance(
+            &mut term,
+            "\x1b[0;38;2;47;50;57;49m▄\r\n\
+             \x1b[0;39;48;2;47;50;57m \r\n\
+             \x1b[0;38;2;47;50;57;49m▀"
+                .as_bytes(),
+        );
+        assert_eq!(
+            term.grid()[AlacPoint::new(AlacLine(0), AlacColumn(0))].fg,
+            term.grid()[AlacPoint::new(AlacLine(1), AlacColumn(0))].bg,
+            "the parser must preserve the matching source colors"
+        );
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(Config::default());
+            let palette = super::super::palette::build();
+            for id in ["one_dark_pro", "light", "one_dark_pro"] {
+                cx.global_mut::<Config>().theme_preset = id.into();
+                crate::ui::theme::apply_theme(None, cx);
+                let colors = PaintColors::resolve(cx.theme(), cx);
+                let rendered: Vec<_> = (0..3)
+                    .map(|row| {
+                        let point = AlacPoint::new(AlacLine(row), AlacColumn(0));
+                        snapshot_cell(&term.grid()[point], point, &palette, &colors, None)
+                    })
+                    .collect();
+                for edge in [&rendered[0], &rendered[2]] {
+                    assert_eq!(
+                        edge.fg, rendered[1].bg,
+                        "{id}: prompt half block must match the input fill, not brighten into a stripe"
+                    );
+                }
+            }
+        });
+    }
+
+    #[gpui::test]
+    fn block_fills_follow_theme_and_literal_mode_while_text_stays_readable(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        crate::core::config::pin_test_config_dir();
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(Config::default());
+            let palette = super::super::palette::build();
+            let point = AlacPoint::new(AlacLine(0), AlacColumn(0));
+            for id in ["one_dark_pro", "light"] {
+                for enabled in [false, true] {
+                    cx.global_mut::<Config>().theme_preset = id.into();
+                    cx.global_mut::<Config>().theme_legible_palette = enabled;
+                    crate::ui::theme::apply_theme(None, cx);
+                    let colors = PaintColors::resolve(cx.theme(), cx);
+                    for source in [
+                        AnsiColor::Spec(unpack_rgb(0x2f3239)),
+                        AnsiColor::Spec(unpack_rgb(0xf2f2f2)),
+                        AnsiColor::Indexed(236),
+                        AnsiColor::Named(NamedColor::Red),
+                    ] {
+                        let fill = Cell {
+                            bg: source,
+                            ..Cell::default()
+                        };
+                        let fill = snapshot_cell(&fill, point, &palette, &colors, None);
+                        for c in '\u{2580}'..='\u{259f}' {
+                            let block = Cell {
+                                c,
+                                fg: source,
+                                ..Cell::default()
+                            };
+                            let rendered = snapshot_cell(&block, point, &palette, &colors, None);
+                            assert_eq!(rendered.fg, fill.bg, "{id}, correction={enabled}, {c}");
+                        }
+                    }
+                    if enabled {
+                        for c in ['A', '─', '█'] {
+                            let text = Cell {
+                                c,
+                                ..Cell::default()
+                            };
+                            let rendered = snapshot_cell(&text, point, &palette, &colors, None);
+                            assert!(painted_contrast(&rendered) >= 4.45);
+                        }
+                        let text = Cell {
+                            c: 'A',
+                            fg: AnsiColor::Spec(unpack_rgb(0x2f3239)),
+                            ..Cell::default()
+                        };
+                        let rendered = snapshot_cell(&text, point, &palette, &colors, None);
+                        assert!(painted_contrast(&rendered) >= 4.45);
+                    }
+                }
+            }
+        });
     }
 
     #[gpui::test]

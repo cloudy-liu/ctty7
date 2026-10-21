@@ -767,8 +767,7 @@ impl Tty7App {
         });
         let preview = reading.is_some();
         #[cfg(windows)]
-        let preview =
-            preview || (language == "html" && host.id().is_local() && self.editor.html.is_some());
+        let preview = preview || (language == "html" && host.id().is_local());
         let tab = self
             .tabs
             .get_mut(self.active)
@@ -886,13 +885,9 @@ impl Tty7App {
                     return;
                 }
                 let path = file.path.clone();
-                let result = if let Some(html) = &self.editor.html {
-                    html.update(cx, |html, cx| html.navigate(&path, cx))
-                } else {
-                    self.editor_begin_html_preview(path, window, cx);
-                    return;
-                };
-                if let Err(error) = result {
+                if let Some(html) = &self.editor.html
+                    && let Err(error) = html.update(cx, |html, cx| html.navigate(&path, cx))
+                {
                     window.push_notification(
                         t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
                         cx,
@@ -932,10 +927,13 @@ impl Tty7App {
         let parent = match window.window_handle() {
             Ok(handle) => handle.as_raw(),
             Err(error) => {
+                self.editor_fallback_html_source();
+                self.focus_editor(window, cx);
                 window.push_notification(
                     t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
                     cx,
                 );
+                cx.notify();
                 return;
             }
         };
@@ -954,7 +952,10 @@ impl Tty7App {
                         .tab_code()
                         .and_then(|code| code.active_file())
                         .is_some_and(|file| {
-                            file.path == path && can_preview_html(file) && !file.dirty
+                            file.path == path
+                                && file.preview
+                                && can_preview_html(file)
+                                && !file.dirty
                         });
                 if requested {
                     match result {
@@ -969,10 +970,16 @@ impl Tty7App {
                                 this.focus_editor(window, cx);
                             }
                         }
-                        Err(error) => window.push_notification(
-                            t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
-                            cx,
-                        ),
+                        Err(error) => {
+                            this.editor_fallback_html_source();
+                            if window.focused(cx) == original_focus {
+                                this.focus_editor(window, cx);
+                            }
+                            window.push_notification(
+                                t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
+                                cx,
+                            );
+                        }
                     }
                 }
                 cx.notify();
@@ -1020,15 +1027,28 @@ impl Tty7App {
     #[cfg(windows)]
     fn editor_release_html(&mut self) {
         self.editor.html = None;
-        for tab in &mut self.tabs {
-            if let Some(code) = &mut tab.code {
-                for file in &mut code.files {
-                    if can_preview_html(file) {
-                        file.preview = false;
-                    }
-                }
-            }
+    }
+
+    #[cfg(windows)]
+    fn editor_fallback_html_source(&mut self) {
+        self.editor_release_html();
+        if let Some(code) = self.tab_code_mut()
+            && let Some(file) = code
+                .files
+                .get_mut(code.active)
+                .filter(|f| can_preview_html(f))
+        {
+            file.preview = false;
         }
+    }
+
+    #[cfg(windows)]
+    pub(crate) fn editor_needs_html_preview_sync(&self) -> bool {
+        self.editor.html.is_some()
+            || self
+                .tab_code()
+                .and_then(|code| code.active_file())
+                .is_some_and(|file| file.preview && can_preview_html(file))
     }
 
     #[cfg(windows)]
@@ -1038,14 +1058,17 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.editor.html.is_none() {
-            return;
-        }
         let path = (self.document_front() == Some(super::app::OverlayTop::Code))
             .then(|| self.tab_code().and_then(|code| code.active_file()))
             .flatten()
             .filter(|file| file.preview && can_preview_html(file))
             .map(|file| file.path.clone());
+        if self.editor.html.is_none() {
+            if unobstructed && let Some(path) = path {
+                self.editor_begin_html_preview(path, window, cx);
+            }
+            return;
+        }
         let Some(path) = path else {
             // Leaving HTML preview releases the browser instead of retaining
             // an invisible renderer for every file or terminal tab.
@@ -1054,7 +1077,8 @@ impl Tty7App {
         };
         let html = self.editor.html.as_ref().unwrap().clone();
         if let Err(error) = html.update(cx, |html, cx| html.navigate(&path, cx)) {
-            self.editor_release_html();
+            self.editor_fallback_html_source();
+            self.focus_editor(window, cx);
             window.push_notification(
                 t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
                 cx,
@@ -1985,7 +2009,7 @@ mod tests {
 
     #[cfg(windows)]
     #[gpui::test]
-    fn html_preview_starts_in_source_and_rejects_unsaved_changes(cx: &mut TestAppContext) {
+    fn html_preview_is_default_and_source_edits_require_saving(cx: &mut TestAppContext) {
         let (app, mut vcx) = markdown_window(cx);
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("report.html");
@@ -2002,12 +2026,16 @@ mod tests {
             );
             let file = app.tab_code().unwrap().active_file().unwrap();
             assert!(can_preview_html(file));
-            assert!(!file.preview);
+            assert!(file.preview);
             assert!(file.reading.is_none());
+            assert!(app.editor_needs_html_preview_sync());
             assert!(
                 app.editor.html.is_none(),
-                "opening HTML must not create a browser"
+                "the browser is created when preview is rendered"
             );
+            app.editor_toggle_preview(window, cx);
+            assert!(!app.tab_code().unwrap().active_file().unwrap().preview);
+            assert!(!app.editor_needs_html_preview_sync());
             let code = app.tab_code_mut().unwrap();
             let file = &mut code.files[code.active];
             file.input.update(cx, |input, cx| {
@@ -2026,7 +2054,43 @@ mod tests {
 
     #[cfg(windows)]
     #[gpui::test]
-    fn html_preview_release_resets_stale_flags_and_keeps_markdown(cx: &mut TestAppContext) {
+    fn html_preview_default_keeps_explicit_source_navigation_and_mode_switching(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            let path = PathBuf::from("C:/index.HTM");
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                path.clone(),
+                "<h1>Index</h1>".into(),
+                None,
+                window,
+                cx,
+            );
+            assert!(app.tab_code().unwrap().active_file().unwrap().preview);
+            assert!(app.editor_needs_html_preview_sync());
+            app.apply_editor_navigation(
+                HostId::LOCAL,
+                &path,
+                Some(EditorNavigation::Source { line: 1, column: 1 }),
+                window,
+                cx,
+            );
+            assert!(!app.tab_code().unwrap().active_file().unwrap().preview);
+            assert!(!app.editor_needs_html_preview_sync());
+            assert!(app.editor_activate_open(HostId::LOCAL, &path, window, cx));
+            assert!(!app.tab_code().unwrap().active_file().unwrap().preview);
+            app.editor_toggle_preview(window, cx);
+            assert!(app.tab_code().unwrap().active_file().unwrap().preview);
+            app.editor_toggle_preview(window, cx);
+            assert!(!app.tab_code().unwrap().active_file().unwrap().preview);
+        });
+    }
+
+    #[cfg(windows)]
+    #[gpui::test]
+    fn html_preview_release_preserves_each_files_selected_mode(cx: &mut TestAppContext) {
         let (app, mut vcx) = markdown_window(cx);
         app.update_in(&mut vcx, |app, window, cx| {
             for (path, content) in [
@@ -2043,20 +2107,29 @@ mod tests {
                     cx,
                 );
             }
-            for file in &mut app.tab_code_mut().unwrap().files {
-                file.preview = true;
-            }
+            assert!(app.editor_activate_open(HostId::LOCAL, Path::new("C:/index.HTM"), window, cx));
+            app.editor_toggle_preview(window, cx);
             app.editor_release_html();
             let files = &app.tab_code().unwrap().files;
             assert_eq!(
                 files.iter().filter(|file| can_preview_html(file)).count(),
                 2
             );
+            let report = files
+                .iter()
+                .find(|file| file.path == Path::new("C:/report.html"))
+                .unwrap();
+            let index = files
+                .iter()
+                .find(|file| file.path == Path::new("C:/index.HTM"))
+                .unwrap();
             assert!(
-                files
-                    .iter()
-                    .filter(|file| can_preview_html(file))
-                    .all(|file| !file.preview)
+                report.preview,
+                "releasing the browser must preserve inactive preview mode"
+            );
+            assert!(
+                !index.preview,
+                "explicit source selection belongs to this file only"
             );
             let markdown = files
                 .iter()
@@ -2064,6 +2137,37 @@ mod tests {
                 .unwrap();
             assert!(markdown.preview, "Markdown owns a separate native preview");
             assert!(markdown.reading.is_some());
+        });
+    }
+
+    #[cfg(windows)]
+    #[gpui::test]
+    fn html_preview_failure_only_resets_the_active_file(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            for path in ["C:/first.html", "C:/second.html"] {
+                app.editor_install_file(
+                    tty7_core::host::local::LocalHost::new(),
+                    path.into(),
+                    "<h1>Saved</h1>".into(),
+                    None,
+                    window,
+                    cx,
+                );
+            }
+            app.editor_fallback_html_source();
+            assert!(!app.tab_code().unwrap().active_file().unwrap().preview);
+            assert!(!app.editor_needs_html_preview_sync());
+            assert!(app.editor_activate_open(
+                HostId::LOCAL,
+                Path::new("C:/first.html"),
+                window,
+                cx
+            ));
+            assert!(app.tab_code().unwrap().active_file().unwrap().preview);
+            assert!(app.editor_needs_html_preview_sync());
+            // The native browser is exercised separately from this test window.
+            app.editor_toggle_preview(window, cx);
         });
     }
 

@@ -2,10 +2,11 @@
 
 ## User-visible contract
 
-Local Windows `.html` and `.htm` files can switch between the existing source
-editor and an embedded browser preview. Preserve the original document URL,
-CSS, JavaScript, relative resources and page colors. Compare against Chrome at
-the same viewport, zoom and resource-loading conditions.
+Local Windows `.html` and `.htm` files open in embedded browser preview by
+default and can switch to the existing source editor. Explicit line navigation
+opens source, and reactivating an open file keeps its selected mode. Preserve
+the original document URL, CSS, JavaScript, relative resources and page colors.
+Compare against Chrome at the same viewport, zoom and resource-loading conditions.
 
 The first version previews saved files, offers refresh and external browser
 opening, and leaves unsaved edits intact. An unsaved buffer must ask the user
