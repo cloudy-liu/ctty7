@@ -130,6 +130,9 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 .unwrap();
             cx.activate(true);
             let app = owner.unwrap();
+            // The production tray loop quits when it sees no registered
+            // windows and the tray is disabled, even if a native window exists.
+            WindowRegistry::register(cx, app.read(cx).workspace, handle.into(), app.downgrade());
             cx.spawn(async move |cx| {
                 // Production open requests cancel older requests. Await each
                 // installation before opening the next fixture document.

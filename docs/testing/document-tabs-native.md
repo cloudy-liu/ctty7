@@ -28,7 +28,7 @@ Example options, saved as an absolute JSON file outside the checkout:
 ```
 
 ```powershell
-Start-Process -WindowStyle Hidden -FilePath D:/gh-prj/ctty7-tabs-after.exe -ArgumentList '--config-dir', 'D:/gh-prj/document-preview-config', '--document-visual', 'D:/gh-prj/document-preview-options.json' -RedirectStandardError D:/gh-prj/document-preview.log
+Start-Process -WindowStyle Normal -FilePath D:/gh-prj/ctty7-tabs-after.exe -ArgumentList '--config-dir', 'D:/gh-prj/document-preview-config', '--document-visual', 'D:/gh-prj/document-preview-options.json' -RedirectStandardError D:/gh-prj/document-preview.log
 ```
 
 Remove any previous readiness output before launching. Wait for `NATIVE_DOCUMENT_READY_FOR_CAPTURE` in stderr and `"ready": true` in the output JSON, then capture the fixture's native window. The JSON records the actual viewport, OS scaling, opened documents, selected file and mode. Its `capture` field states whether the requested GPU image was saved or a native screenshot is needed. The fixture holds for the requested duration, capped at 600 seconds, then exits.
@@ -37,7 +37,7 @@ For Markdown source use `active: 0, preview: false`; for ordinary source use `ac
 
 ## Baseline reproduction
 
-Create an isolated worktree at `e06271fb` and apply only the native evidence fixture commit with `git cherry-pick <fixture-commit>`. That commit adds the fixture, its CLI dispatch, sample documents and these instructions. It does not change production document UI. Build there and copy the executable outside `target` before another build can overwrite it. Run baseline and final binaries sequentially against the same fixture root and separate scratch configuration directories.
+Create an isolated worktree at `e06271fb` and apply the native evidence fixture and window-registration fix with `git cherry-pick 89176e54 8de7b3f5`. These commits add the fixture, its CLI dispatch, sample documents, these instructions and registration that keeps the fixture window open when the tray is disabled. They do not change production document UI. Build there and copy the executable outside `target` before another build can overwrite it. Run baseline and final binaries sequentially against the same fixture root and separate scratch configuration directories. The fixture is intentionally visible for native inspection and capture, so launch it with `-WindowStyle Normal`.
 
 Keep the captured PNGs in the repository and embed them directly in the PR's Evidence section with repository image URLs. A local file link alone does not give reviewers a visible comparison.
 
