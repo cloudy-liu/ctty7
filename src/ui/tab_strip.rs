@@ -1507,8 +1507,9 @@ impl Tty7App {
                     .disabled(!done)
                     .on_click({
                         let app = app.clone();
-                        move |_, _window, cx| {
-                            let _ = app.update(cx, |this, cx| this.mark_tab_unread(index, cx));
+                        move |_, window, cx| {
+                            let _ =
+                                app.update(cx, |this, cx| this.mark_tab_unread(index, window, cx));
                         }
                     }),
             );

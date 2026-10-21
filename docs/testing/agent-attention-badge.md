@@ -62,6 +62,18 @@ after its hold period and does not write real workspace/session settings.
 
 ## Verification and limits
 
+- The original native capture switched from another tab to the completed pane,
+  producing a pane focus callback. It did not cover returning to an already
+  selected pane when rendering does not produce that callback. PR #173's
+  original implementation and its merged version both relied on that callback
+  to clear unread state; this was a coverage gap, not a dropped merge change.
+- An activation regression now suppresses pane rendering while retaining the
+  focused handle. It fails without the activation observer and passes with it:
+  returning reads the focused result and leaves another pane's result unread.
+  A separate regression checks that manual "Mark as Unread" survives the menu's
+  immediate refocus and clears on the next visit, both with and without the
+  menu-refocus callback. These are automated view
+  tests; the screenshots above remain the original native acceptance evidence.
 - The new lifecycle regression failed before the focus correction: a selected
   pane in an inactive window incorrectly reported its result as already read.
   It passes after checking both window activation and pane focus, including
@@ -81,3 +93,74 @@ after its hold period and does not write real workspace/session settings.
 - Native visual acceptance covers this Windows 11 environment. Other taskbar
   versions, Explorer restart recovery, and macOS/Linux visuals were not
   exercised interactively. macOS has no new Dock badge implementation.
+
+## LCU follow-up on 2026-10-21
+
+The follow-up runs the fixed native binary with two isolated windows. LCU
+operates the actual minimize button, window activation, sidebar/top tabs,
+split panes and context menus. A feature-gated fixture sends deterministic
+Agent reports through production terminal streams and records the real window
+activation, pane focus, unread state and aggregate attention. It does not set
+focus or unread state through its control file. No live Agent, shell or SSH
+session is used.
+
+LCU found another gap that the earlier simulated menu test missed: the real
+tab context menu did not return focus after "Mark as Unread". Its pending
+refocus guard then consumed the reader's next click. The shared action now
+returns focus explicitly, protects that immediate refocus, and leaves an
+already-focused action without a pending guard. Its application regression
+also checks that marking an inactive tab does not steal focus.
+
+All 26 native state assertions passed after this correction. The
+[recorded results](agent-attention-activation-results.ndjson) contain only
+fixture state, with no user session content.
+
+| Native scenario | Observed result |
+| --- | --- |
+| Foreground completion in the focused pane | No unread reminder |
+| Selected pane completes while minimized | Unread until restored, then cleared |
+| Another application/window is active | Source result stays unread until its window is visited |
+| Completion in an unrelated tab | Unread until that result is selected |
+| Two unread results | Reading one retains the other; reading the last clears attention |
+| Two split panes | Focusing one reads only that pane; the other retains attention |
+| Sidebar and top-tab context menus | Manual unread survives menu dismissal with real pane focus restored |
+| Return after manual unread | First return clears it, including minimize/restore |
+| Waiting for input | Viewing keeps input attention; resuming work clears it |
+| New work before an old result is read | Obsolete completion reminder clears |
+| Repeated Done report | Does not re-badge an already-read result |
+| Tray icon disabled | Taskbar reminder still appears and clears |
+
+The following are lossless crops of full-screen captures made through the
+Windows Screenshot Tool during the LCU run. They show the actual taskbar icon,
+not a rendered mockup. Windows controls icon order and overlay placement.
+
+| Configuration | Unread result | After viewing |
+| --- | --- | --- |
+| Tray enabled | ![Unread taskbar](images/agent-attention-activation/unread-taskbar.png) | ![Read taskbar](images/agent-attention-activation/read-taskbar.png) |
+| Tray disabled | ![Unread taskbar with tray disabled](images/agent-attention-activation/tray-disabled-unread-taskbar.png) | ![Read taskbar with tray disabled](images/agent-attention-activation/tray-disabled-read-taskbar.png) |
+
+Reproduce the interactive fixture after building with
+`--features markdown-visual-tests`. Create a UTF-8 JSON file without a BOM:
+
+```json
+{
+  "control": "C:/temp/ctty7-attention/control.json",
+  "state": "C:/temp/ctty7-attention/state.json",
+  "split": false,
+  "top": false,
+  "tray_disabled": false
+}
+```
+
+Launch `tty7-app --config-dir C:/temp/ctty7-attention/config
+--agent-attention-visual C:/temp/ctty7-attention/options.json`. Change the
+control file to send Agent reports, for example
+`{"sequence":2,"reports":[[1,0,"done"]]}`. Indices identify the window and pane,
+both starting at zero; panes 0 and 1 are Agents and pane 2 is the unrelated
+terminal. Increment `sequence` for each batch. Use the UI to select panes,
+switch windows and minimize/restore. `state.json` is an observation only.
+
+The system tray overflow icon itself was not visually re-captured in this
+follow-up; its aggregate attention state was checked. Explorer restart,
+other Windows versions and macOS/Linux native interaction remain unverified.
+The original screenshots earlier in this document describe the earlier run.

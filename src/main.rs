@@ -3,6 +3,8 @@
     windows_subsystem = "windows"
 )]
 
+#[cfg(feature = "markdown-visual-tests")]
+mod agent_attention_visual;
 mod core;
 mod daemon;
 #[cfg(feature = "markdown-visual-tests")]
@@ -531,6 +533,15 @@ fn main() {
     #[cfg(all(feature = "markdown-visual-tests", any(windows, target_os = "macos")))]
     if let Some(index) = args.iter().position(|arg| arg == "--html-preview-visual") {
         ui::code_editor::native_html::run(args.get(index + 1).expect("HTML fixture options path"));
+        return;
+    }
+
+    #[cfg(feature = "markdown-visual-tests")]
+    if let Some(index) = args
+        .iter()
+        .position(|arg| arg == "--agent-attention-visual")
+    {
+        agent_attention_visual::run(args.get(index + 1).expect("attention fixture options path"));
         return;
     }
 

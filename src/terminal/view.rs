@@ -1199,6 +1199,18 @@ impl TerminalView {
         .detach();
 
         let focus_subs = vec![
+            cx.observe_window_activation(window, |view, window, cx| {
+                // Restoring a window need not produce a pane focus callback.
+                if window.is_window_active()
+                    && view.focus_handle.is_focused(window)
+                    && view.agent_result_unread
+                {
+                    view.agent_result_unread = false;
+                    // Activation is a new visit, not the menu returning focus.
+                    view.keep_unread_on_focus = false;
+                    cx.notify();
+                }
+            }),
             cx.on_focus_in(&focus_handle, window, |view, _window, cx| {
                 view.cursor_visible = true;
                 if view.keep_unread_on_focus {
@@ -14773,6 +14785,104 @@ mod agent_notification_tests {
             .unwrap();
         cx.run_until_parked();
         assert!(!cx.update(|cx| view.read(cx).agent_result_unread()));
+    }
+
+    #[gpui::test]
+    fn a_completed_result_is_read_on_activation_without_a_pane_focus_callback(
+        cx: &mut TestAppContext,
+    ) {
+        let (window, view, mut daemon) = harness(cx);
+        let (other, mut other_daemon) = window
+            .update(cx, |_, window, cx| quiet_test_pane(92, window, cx))
+            .unwrap();
+        window
+            .update(cx, |_, window, cx| {
+                view.read(cx).focus_handle.clone().focus(window, cx);
+                window.activate_window();
+            })
+            .unwrap();
+        cx.run_until_parked();
+        // Suppress pane rendering, so no focus-tree callback can acknowledge
+        // the result. Window activation and the retained focus handle suffice.
+        cx.skip_drawing();
+        let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+        visual.deactivate_window();
+        report(AgentStatus::Working, &mut daemon, window, &view, cx);
+        report(AgentStatus::Done, &mut daemon, window, &view, cx);
+        report(AgentStatus::Working, &mut other_daemon, window, &other, cx);
+        report(AgentStatus::Done, &mut other_daemon, window, &other, cx);
+        assert!(cx.update(|cx| view.read(cx).agent_result_unread()));
+        assert!(cx.update(|cx| other.read(cx).agent_result_unread()));
+        window
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        window
+            .update(cx, |_, window, cx| {
+                assert!(window.is_window_active());
+                assert!(view.read(cx).focus_handle.is_focused(window));
+            })
+            .unwrap();
+        cx.run_until_parked();
+        assert!(
+            !cx.update(|cx| view.read(cx).agent_result_unread()),
+            "restoring the completed pane must clear its unread reminder"
+        );
+        assert!(
+            cx.update(|cx| other.read(cx).agent_result_unread()),
+            "returning to another pane must preserve this unread result"
+        );
+    }
+
+    #[gpui::test]
+    fn a_manually_unread_result_survives_menu_refocus_until_the_next_visit(
+        cx: &mut TestAppContext,
+    ) {
+        let (window, view, mut daemon) = harness(cx);
+        window
+            .update(cx, |_, window, _| window.activate_window())
+            .unwrap();
+        cx.run_until_parked();
+        report(AgentStatus::Working, &mut daemon, window, &view, cx);
+        report(AgentStatus::Done, &mut daemon, window, &view, cx);
+        assert!(!cx.update(|cx| view.read(cx).agent_result_unread()));
+
+        for missing_focus_callback in [false, true] {
+            // The tab menu temporarily owns focus before returning it to the pane.
+            let menu_focus = window
+                .update(cx, |_, window, cx| {
+                    let focus = cx.focus_handle();
+                    focus.focus(window, cx);
+                    focus
+                })
+                .unwrap();
+            cx.run_until_parked();
+            if missing_focus_callback {
+                // A missing menu-refocus callback must not preserve its one-shot
+                // unread guard across a later explicit window activation.
+                cx.skip_drawing();
+            }
+            window
+                .update(cx, |_, window, cx| {
+                    view.update(cx, |pane, cx| {
+                        pane.mark_agent_result_unread(true);
+                        pane.focus_handle.focus(window, cx);
+                        cx.notify();
+                    });
+                })
+                .unwrap();
+            cx.run_until_parked();
+            assert!(cx.update(|cx| view.read(cx).agent_result_unread()));
+            drop(menu_focus);
+
+            let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+            visual.deactivate_window();
+            window
+                .update(cx, |_, window, _| window.activate_window())
+                .unwrap();
+            cx.run_until_parked();
+            assert!(!cx.update(|cx| view.read(cx).agent_result_unread()));
+        }
     }
 
     #[gpui::test]
