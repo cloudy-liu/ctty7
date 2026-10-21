@@ -19,8 +19,9 @@ Controls were clicked through Computer Use; these are application captures.
 
 Manual checks cover the file-title unfold button, toolbar fold/unfold, unified
 and split layout, previous/next change navigation, docked/full workspace views
-and gap expansion. The first replacement retains its screen position while
-expanding and folding in the docked viewer.
+and gap expansion. File-level expansion keeps the other cards in the list and
+does not change the current file focus. The first replacement retains its
+screen position while expanding and folding in the docked viewer.
 
 ## Automated coverage
 

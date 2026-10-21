@@ -50,6 +50,7 @@ const DIFF_MARKER_WIDTH: f32 = 12.;
 const DIFF_DIVIDER_WIDTH: f32 = 1.;
 const DIFF_LINE_END_PADDING: f32 = 4.;
 const DIFF_ROW_HEIGHT: f32 = 19.;
+const DIFF_HUNK_CONTROL_WIDTH: f32 = 42.;
 
 /// Reserve the complete hunk height, but build and lay out only clipped-in rows.
 /// The outer file list still owns scrolling, including selection autoscroll.
@@ -135,13 +136,12 @@ pub(crate) struct DiffOverlayState {
     /// `None` until the first snapshot arrives: the epoch is keyed by the
     /// repository root, and only a snapshot knows where that is.
     pub(crate) epoch: Option<u64>,
-    pub(crate) file_view: Option<DiffFileView>,
+    pub(crate) file_views: HashMap<String, DiffFileView>,
     pub(crate) geometry: Rc<RefCell<HashMap<String, DiffGeometry>>>,
     pub(crate) anchor: Rc<RefCell<Option<DiffAnchor>>>,
 }
 
 pub(crate) struct DiffFileView {
-    path: String,
     whole: bool,
     revealed: Vec<Range<u32>>,
     full: Option<Arc<FileDiff>>,
@@ -251,6 +251,8 @@ struct DiffPalette {
     background: Hsla,
     foreground: Hsla,
     header: Hsla,
+    hunk_background: Hsla,
+    hunk_controls: Hsla,
     muted: Hsla,
     border: Hsla,
     hunk: Hsla,
@@ -275,10 +277,13 @@ fn diff_palette(cx: &gpui::App) -> DiffPalette {
         .diff_deleted
         .as_ref()
         .expect("bundled GitHub deletions");
+    let dark = cx.theme().mode.is_dark();
     DiffPalette {
         background: color(p.background),
         foreground: color(p.foreground),
         header: color(p.code_background),
+        hunk_background: gpui::rgb(if dark { 0x1b_3040 } else { 0xdd_f4ff }).into(),
+        hunk_controls: gpui::rgb(if dark { 0x2a_5a_7a } else { 0xb6_e3ff }).into(),
         muted: color(p.muted),
         border: color(p.border),
         hunk: color(p.syntax.diff_hunk.expect("bundled GitHub hunk color")),
@@ -325,9 +330,10 @@ impl Tty7App {
             return;
         };
         o.remember_diff_position(&path);
-        if !o.file_view.as_ref().is_some_and(|v| v.path == path) {
-            o.file_view = Some(DiffFileView {
-                path: path.clone(),
+        let view = o
+            .file_views
+            .entry(path.clone())
+            .or_insert_with(|| DiffFileView {
                 whole: false,
                 revealed: Vec::new(),
                 full: None,
@@ -336,8 +342,6 @@ impl Tty7App {
                 failed: false,
                 token: Rc::new(()),
             });
-        }
-        let view = o.file_view.as_mut().unwrap();
         if view.loading {
             return;
         }
@@ -348,7 +352,6 @@ impl Tty7App {
             view.whole = !view.whole || view.failed;
             view.revealed.clear();
         }
-        o.focus = Some(path.clone());
         o.expanded.insert(path.clone(), true);
         if view.full.is_some() {
             view.update_shown();
@@ -373,17 +376,14 @@ impl Tty7App {
                     let Some(o) = tab.diff_overlay.as_mut() else {
                         continue;
                     };
-                    if !o
-                        .file_view
-                        .as_ref()
-                        .is_some_and(|v| Rc::ptr_eq(&v.token, &token))
-                    {
+                    let Some(view) = o.file_views.get(&path) else {
+                        continue;
+                    };
+                    if !Rc::ptr_eq(&view.token, &token) {
                         continue;
                     }
-                    if o.focus.as_deref() == Some(path.as_str()) {
-                        o.remember_diff_position(&path);
-                    }
-                    let view = o.file_view.as_mut().unwrap();
+                    o.remember_diff_position(&path);
+                    let view = o.file_views.get_mut(&path).unwrap();
                     view.loading = false;
                     view.failed = full.is_none();
                     view.full = full.clone();
@@ -446,12 +446,13 @@ impl Tty7App {
             .tabs
             .get(self.active)
             .and_then(|t| t.diff_overlay.as_ref())
-            .and_then(|o| o.file_view.as_ref())
-            .filter(|v| v.path == path);
+            .and_then(|o| o.file_views.get(path));
         let whole = view.is_some_and(|v| v.whole && !v.failed);
         let loading = view.is_some_and(|v| v.loading);
+        let selector = format!("diff-context-button:{path}");
         let path = path.to_string();
         div()
+            .debug_selector(move || selector.clone())
             .occlude()
             .flex_shrink_0()
             .child(
@@ -527,12 +528,13 @@ impl Tty7App {
         above: bool,
         cx: &mut Context<Self>,
     ) -> AnyElement {
+        let selector = format!("diff-more:{path}:{}:{}", range.start, range.end);
         let path = path.to_string();
-        Button::new(SharedString::from(format!(
+        let button = Button::new(SharedString::from(format!(
             "diff-more:{path}:{}:{}",
             range.start, range.end
         )))
-        .small()
+        .xsmall()
         .ghost()
         .icon(if above {
             IconName::ArrowUp
@@ -547,8 +549,11 @@ impl Tty7App {
         .on_click(cx.listener(move |this, _, _, cx| {
             cx.stop_propagation();
             this.change_diff_context(path.clone(), Some(range.clone()), cx);
-        }))
-        .into_any_element()
+        }));
+        div()
+            .debug_selector(move || selector.clone())
+            .child(button)
+            .into_any_element()
     }
 
     pub(crate) fn toggle_diff_overlay(
@@ -604,7 +609,7 @@ impl Tty7App {
                 return;
             }
             Some(o) => {
-                o.file_view = None;
+                o.file_views.clear();
                 o.focus = focus;
                 *o.anchor.borrow_mut() = None;
                 let handle = o.focus_handle.clone();
@@ -635,7 +640,7 @@ impl Tty7App {
             preview_loading: None,
             scroll: gpui::ScrollHandle::new(),
             epoch: None,
-            file_view: None,
+            file_views: HashMap::new(),
             geometry: Rc::default(),
             anchor: Rc::default(),
         });
@@ -699,7 +704,7 @@ impl Tty7App {
             return;
         };
         overlay.loading = true;
-        overlay.file_view = None;
+        overlay.file_views.clear();
         *overlay.anchor.borrow_mut() = None;
         overlay.epoch = epoch;
         self.spawn_diff_probe_for(host, cwd, source, cx);
@@ -793,7 +798,7 @@ impl Tty7App {
             // A new snapshot restarts any untracked preview: the file may
             // have changed with the tree, and the re-read costs one file.
             overlay.preview = None;
-            overlay.file_view = None;
+            overlay.file_views.clear();
             *overlay.anchor.borrow_mut() = None;
             landed = true;
         }
@@ -1098,7 +1103,6 @@ impl Tty7App {
                                             .and_then(|t| t.diff_overlay.as_mut())
                                         {
                                             overlay.focus = None;
-                                            overlay.file_view = None;
                                             *overlay.anchor.borrow_mut() = None;
                                             cx.notify();
                                         }
@@ -1176,7 +1180,7 @@ impl Tty7App {
             .child(self.diff_view_button(cx))
             .when_some(focused_name(overlay).filter(|path| {
                 matches!(&overlay.load, DiffLoad::Ready(s) if s.files.iter().any(|f| f.path == *path && !f.binary))
-                    && !overlay.file_view.as_ref().filter(|v| v.path == *path)
+                    && !overlay.file_views.get(path)
                         .and_then(|v| v.full.as_ref()).is_some_and(|f| f.binary)
             }), |bar, path| bar
                 .child(self.diff_context_button(&path, cx))
@@ -1349,8 +1353,7 @@ impl Tty7App {
                 .tabs
                 .get(self.active)
                 .and_then(|t| t.diff_overlay.as_ref())
-                .and_then(|o| o.file_view.as_ref())
-                .filter(|v| v.path == file.path && focused == Some(idx))
+                .and_then(|o| o.file_views.get(&file.path))
                 .and_then(|v| v.shown.as_deref())
                 .unwrap_or(file);
             let is_expanded = if focused == Some(idx) {
@@ -1359,18 +1362,6 @@ impl Tty7App {
                 file_expanded(file, expanded, oversized)
             };
             list = list.child(self.diff_file_card(idx, file, is_expanded, mode, window, cx));
-        }
-        if self
-            .tabs
-            .get(self.active)
-            .and_then(|t| t.diff_overlay.as_ref())
-            .is_some_and(|o| {
-                o.file_view
-                    .as_ref()
-                    .is_some_and(|v| v.failed && o.focus.as_deref() == Some(v.path.as_str()))
-            })
-        {
-            list = list.child(self.diff_message(t(L10nKey::DiffReadFailed), cx));
         }
         if focused.is_none() && snap.files.len() > shown {
             let rest = snap.files.len() - shown;
@@ -1455,6 +1446,12 @@ impl Tty7App {
         };
 
         let has_body = expanded && (!file.hunks.is_empty() || file.truncated.is_some());
+        let context_failed = self
+            .tabs
+            .get(self.active)
+            .and_then(|tab| tab.diff_overlay.as_ref())
+            .and_then(|overlay| overlay.file_views.get(&file.path))
+            .is_some_and(|view| view.failed);
 
         let header_corners = rounding::stack_corners(
             0,
@@ -1626,7 +1623,52 @@ impl Tty7App {
             hunk_style.font_size = gpui::rems(0.75).into();
             let hunk_height =
                 hunk_style.line_height_in_pixels(window.rem_size()) + window.rem_size() * 0.25;
-            let body_height = hunk_height * hunks.len() as f32
+            let view = self
+                .tabs
+                .get(self.active)
+                .and_then(|t| t.diff_overlay.as_ref())
+                .and_then(|o| o.file_views.get(&file.path));
+            let whole = view.is_some_and(|v| v.whole && v.shown.is_some());
+            let mut previous_end = 0;
+            let gaps: Vec<_> = file
+                .hunks
+                .iter()
+                .map(|h| {
+                    let first = h.lines.iter().find_map(|l| l.new_no).unwrap_or(0);
+                    let gap = (!whole && first > previous_end + 1).then(|| {
+                        (
+                            first.saturating_sub(20).max(previous_end + 1)..first,
+                            previous_end + 1..(previous_end + 21).min(first),
+                        )
+                    });
+                    previous_end = h
+                        .lines
+                        .iter()
+                        .filter_map(|l| l.new_no)
+                        .last()
+                        .unwrap_or(previous_end);
+                    gap
+                })
+                .collect();
+            let hunk_control_width = if gaps.iter().any(Option::is_some) {
+                DIFF_HUNK_CONTROL_WIDTH
+            } else {
+                0.
+            };
+            let hunk_heights: Vec<_> = gaps
+                .iter()
+                .map(|gap| {
+                    if gap.is_some() {
+                        hunk_height * 2.
+                    } else {
+                        hunk_height
+                    }
+                })
+                .collect();
+            let hunk_total = hunk_heights
+                .iter()
+                .fold(px(0.), |total, height| total + *height);
+            let body_height = hunk_total
                 + px(
                     hunks.iter().map(|(_, rows)| rows.len()).sum::<usize>() as f32
                         * DIFF_ROW_HEIGHT,
@@ -1634,8 +1676,8 @@ impl Tty7App {
                 + px(12.);
             let mut positions = Vec::new();
             let mut y = 0.;
-            for (_, rows) in &hunks {
-                y += hunk_height.as_f32();
+            for (hunk_index, (_, rows)) in hunks.iter().enumerate() {
+                y += hunk_heights[hunk_index].as_f32();
                 match rows.as_ref() {
                     HunkRows::Split(rows) => {
                         for row in rows {
@@ -1660,41 +1702,6 @@ impl Tty7App {
                 }
             }
             let positions = Arc::new(positions);
-            let view = self
-                .tabs
-                .get(self.active)
-                .and_then(|t| t.diff_overlay.as_ref())
-                .and_then(|o| o.file_view.as_ref())
-                .filter(|v| v.path == file.path);
-            let whole = view.is_some_and(|v| v.whole && v.shown.is_some());
-            let last_line = view.and_then(|v| v.full.as_ref()).and_then(|f| {
-                f.hunks
-                    .iter()
-                    .flat_map(|h| &h.lines)
-                    .filter_map(|l| l.new_no)
-                    .last()
-            });
-            let mut previous_end = 0;
-            let gaps: Vec<_> = file
-                .hunks
-                .iter()
-                .map(|h| {
-                    let first = h.lines.iter().find_map(|l| l.new_no).unwrap_or(0);
-                    let gap = (!whole && first > previous_end + 1).then(|| {
-                        (
-                            first.saturating_sub(20).max(previous_end + 1)..first,
-                            previous_end + 1..(previous_end + 21).min(first),
-                        )
-                    });
-                    previous_end = h
-                        .lines
-                        .iter()
-                        .filter_map(|l| l.new_no)
-                        .last()
-                        .unwrap_or(previous_end);
-                    gap
-                })
-                .collect();
             let context_path = file.path.clone();
             let geometry = self
                 .tabs
@@ -1776,7 +1783,7 @@ impl Tty7App {
                             };
                             let mut width = 0_f32;
                             for (header, rows) in &hunks {
-                                width = width.max(measure(header) + 16.);
+                                width = width.max(measure(header) + 16. + hunk_control_width);
                                 match rows.as_ref() {
                                     HunkRows::Split(rows) => {
                                         let side = side.expect("split column");
@@ -1802,35 +1809,49 @@ impl Tty7App {
                                 }
                             }
                             for (h, (header, rows)) in hunks.iter().enumerate() {
-                                body =
-                                    body.child(
-                                        h_flex()
-                                            .w_full()
-                                            .h(hunk_height)
-                                            .flex_shrink_0()
-                                            .px_2()
-                                            .py_0p5()
-                                            .bg(palette.header)
-                                            .text_xs()
-                                            .font_family(app.font_family.clone())
-                                            .text_color(palette.hunk)
-                                            .whitespace_nowrap()
-                                            .child(div().flex_1().child(header.clone()))
-                                            .when_some(gaps[h].clone(), |bar, (above, below)| {
-                                                bar.child(app.diff_more_button(
-                                                    &context_path,
-                                                    above,
-                                                    true,
-                                                    cx,
-                                                ))
-                                                .child(app.diff_more_button(
-                                                    &context_path,
-                                                    below,
-                                                    false,
-                                                    cx,
-                                                ))
-                                            }),
-                                    );
+                                let mut hunk_header = h_flex()
+                                    .w_full()
+                                    .h(hunk_heights[h])
+                                    .flex_shrink_0()
+                                    .bg(palette.hunk_background)
+                                    .text_xs()
+                                    .font_family(app.font_family.clone())
+                                    .text_color(palette.hunk)
+                                    .whitespace_nowrap();
+                                if column == 0 && hunk_control_width > 0. {
+                                    let mut gutter = v_flex()
+                                        .w(px(DIFF_HUNK_CONTROL_WIDTH))
+                                        .h_full()
+                                        .flex_shrink_0()
+                                        .items_center()
+                                        .justify_center();
+                                    if let Some((above, below)) = gaps[h].clone() {
+                                        gutter = gutter
+                                            .bg(palette.hunk_controls)
+                                            .child(app.diff_more_button(
+                                                &context_path,
+                                                above,
+                                                true,
+                                                cx,
+                                            ))
+                                            .child(app.diff_more_button(
+                                                &context_path,
+                                                below,
+                                                false,
+                                                cx,
+                                            ));
+                                    }
+                                    hunk_header = hunk_header.child(gutter);
+                                }
+                                hunk_header = hunk_header.child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .px_2()
+                                        .py_0p5()
+                                        .child(header.clone()),
+                                );
+                                body = body.child(hunk_header);
                                 let row_offset = row_index;
                                 match rows.as_ref() {
                                     HunkRows::Split(rows) => {
@@ -2008,19 +2029,6 @@ impl Tty7App {
             .h(body_height)
             .flex_shrink_0();
             card = card.child(columns);
-            if !whole
-                && !matches!(file.status, FileStatus::Added | FileStatus::Deleted)
-                && last_line.is_none_or(|last| last > previous_end)
-            {
-                card = card.child(h_flex().justify_center().bg(palette.header).child(
-                    self.diff_more_button(
-                        &file.path,
-                        previous_end + 1..previous_end.saturating_add(21),
-                        false,
-                        cx,
-                    ),
-                ));
-            }
             if let Some(reason) = file.truncated {
                 let note = match reason {
                     Truncation::PerFile => t_fmt(
@@ -2047,6 +2055,17 @@ impl Tty7App {
                         .child(note),
                 );
             }
+        }
+        if context_failed {
+            card = card.child(
+                div()
+                    .debug_selector(|| format!("diff-context-error:{idx}"))
+                    .px_2p5()
+                    .py_1p5()
+                    .text_xs()
+                    .text_color(palette.muted)
+                    .child(t(L10nKey::DiffReadFailed)),
+            );
         }
         card
     }
@@ -3646,6 +3665,112 @@ mod github_theme_gpui_tests {
     }
 
     #[gpui::test]
+    fn expanding_file_context_keeps_the_full_diff_list(cx: &mut TestAppContext) {
+        let (app, mut initial_window) = test_window::harness(cx);
+        initial_window.update(|window, _| window.remove_window());
+
+        let first = git_diff::synthesize_added(
+            "first.rs",
+            b"fn first() {}\n",
+            &git_diff::DiffBudget::SINGLE_FILE,
+        );
+        let second = git_diff::synthesize_added(
+            "second.rs",
+            b"fn second() {}\n",
+            &git_diff::DiffBudget::SINGLE_FILE,
+        );
+        let mut full_second = git_diff::synthesize_added(
+            "second.rs",
+            (1..=40)
+                .map(|n| format!("fn second_{n}() {{}}\n"))
+                .collect::<String>()
+                .as_bytes(),
+            &git_diff::DiffBudget::SINGLE_FILE,
+        );
+        full_second.status = FileStatus::Modified;
+        let full_second = Arc::new(full_second);
+        let snapshot = Arc::new(DiffSnapshot {
+            files: vec![first.clone(), second.clone()],
+            source: DiffSource::Staged,
+            ..Default::default()
+        });
+
+        let (_, vcx) = cx.add_window_view(|_, _| ContextDiff(app.clone()));
+        vcx.simulate_resize(size(px(1000.), px(600.)));
+        app.update_in(vcx, |app, _window, cx| {
+            cx.global_mut::<Config>().diff_view = DiffViewMode::Split;
+            app.tabs = vec![crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty)];
+            app.active = 0;
+            app.tabs[0].diff_overlay = Some(DiffOverlayState {
+                host_id: crate::ui::host_ops::HostId::LOCAL,
+                cwd: PathBuf::from("/fixture"),
+                source: DiffSource::Staged,
+                focus_handle: cx.focus_handle(),
+                load: DiffLoad::Ready(snapshot),
+                loading: false,
+                expanded: HashMap::from([("first.rs".into(), true), ("second.rs".into(), true)]),
+                focus: None,
+                preview: None,
+                preview_loading: None,
+                scroll: gpui::ScrollHandle::new(),
+                epoch: None,
+                file_views: HashMap::from([
+                    (
+                        "first.rs".into(),
+                        DiffFileView {
+                            whole: false,
+                            revealed: vec![4..8],
+                            full: Some(Arc::new(first.clone())),
+                            shown: Some(Arc::new(first)),
+                            loading: false,
+                            failed: false,
+                            token: Rc::new(()),
+                        },
+                    ),
+                    (
+                        "second.rs".into(),
+                        DiffFileView {
+                            whole: false,
+                            revealed: vec![],
+                            full: Some(full_second.clone()),
+                            shown: Some(Arc::new(second)),
+                            loading: false,
+                            failed: false,
+                            token: Rc::new(()),
+                        },
+                    ),
+                ]),
+                geometry: Rc::default(),
+                anchor: Rc::default(),
+            });
+            cx.notify();
+        });
+        vcx.run_until_parked();
+
+        assert!(vcx.debug_bounds("diff-card-0").is_some());
+        assert!(vcx.debug_bounds("diff-card-1").is_some());
+        app.update(vcx, |app, cx| {
+            app.change_diff_context("second.rs".into(), None, cx);
+        });
+        vcx.run_until_parked();
+
+        app.update(vcx, |app, _| {
+            let overlay = app.tabs[0].diff_overlay.as_ref().unwrap();
+            assert_eq!(
+                overlay.focus, None,
+                "expanding a card is not file navigation"
+            );
+            let first = overlay.file_views.get("first.rs").unwrap();
+            assert!(!first.whole, "other file context stays partially expanded");
+            assert_eq!(first.revealed, vec![4..8]);
+            let view = overlay.file_views.get("second.rs").unwrap();
+            assert!(view.whole, "the file-level control expands this file");
+        });
+        assert!(vcx.debug_bounds("diff-card-0").is_some());
+        assert!(vcx.debug_bounds("diff-card-1").is_some());
+    }
+
+    #[gpui::test]
     fn full_file_controls_preserve_change_position_and_layout(cx: &mut TestAppContext) {
         let (app, mut initial_window) = test_window::harness(cx);
         // One overlay scroll handle belongs to one window. The generic harness
@@ -3693,7 +3818,7 @@ mod github_theme_gpui_tests {
                     preview_loading: None,
                     scroll: gpui::ScrollHandle::new(),
                     epoch: None,
-                    file_view: None,
+                    file_views: HashMap::new(),
                     geometry: Rc::default(),
                     anchor: Rc::default(),
                 });
@@ -3704,16 +3829,18 @@ mod github_theme_gpui_tests {
                     source: DiffSource::Staged,
                     ..Default::default()
                 }));
-                o.file_view = Some(DiffFileView {
-                    path: "context.rs".into(),
-                    whole: false,
-                    revealed: vec![],
-                    full: Some(full.clone()),
-                    shown: None,
-                    loading: false,
-                    failed: false,
-                    token: Rc::new(()),
-                });
+                o.file_views.insert(
+                    "context.rs".into(),
+                    DiffFileView {
+                        whole: false,
+                        revealed: vec![],
+                        full: Some(full.clone()),
+                        shown: None,
+                        loading: false,
+                        failed: false,
+                        token: Rc::new(()),
+                    },
+                );
                 cx.notify();
             });
             vcx.run_until_parked();
@@ -3750,8 +3877,8 @@ mod github_theme_gpui_tests {
                         .diff_overlay
                         .as_ref()
                         .unwrap()
-                        .file_view
-                        .as_ref()
+                        .file_views
+                        .get("context.rs")
                         .unwrap()
                         .whole
                 );
@@ -3774,7 +3901,13 @@ mod github_theme_gpui_tests {
             vcx.run_until_parked();
             app.update(vcx, |app, _| {
                 let o = app.tabs[0].diff_overlay.as_ref().unwrap();
-                let f = o.file_view.as_ref().unwrap().shown.as_ref().unwrap();
+                let f = o
+                    .file_views
+                    .get("context.rs")
+                    .unwrap()
+                    .shown
+                    .as_ref()
+                    .unwrap();
                 assert_eq!(f.hunks[0].lines[0].new_no, Some(2));
                 assert_eq!(o.source, DiffSource::Staged);
             });
@@ -3792,8 +3925,8 @@ mod github_theme_gpui_tests {
                         .diff_overlay
                         .as_ref()
                         .unwrap()
-                        .file_view
-                        .is_none(),
+                        .file_views
+                        .is_empty(),
                     "switching files must invalidate a pending context reply"
                 );
             });
@@ -4077,6 +4210,44 @@ mod github_theme_gpui_tests {
                 before.left(),
                 "{mode:?}"
             );
+        }
+    }
+
+    #[gpui::test]
+    fn gap_context_controls_stack_in_the_hunk_gutter(cx: &mut TestAppContext) {
+        let (app, _) = test_window::harness(cx);
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            let mut file = git_diff::synthesize_added(
+                "gutter.rs",
+                b"first\n",
+                &git_diff::DiffBudget::SINGLE_FILE,
+            );
+            file.hunks.push(git_diff::Hunk {
+                header: "@@ -100,0 +100 @@".into(),
+                lines: vec![git_diff::DiffLine {
+                    kind: LineKind::Added,
+                    old_no: None,
+                    new_no: Some(100),
+                    text: "last".into(),
+                }],
+            });
+            let (_, vcx) = cx.add_window_view(|_, _| LongDiff {
+                app: app.clone(),
+                file,
+                mode,
+                vertical: gpui::ScrollHandle::new(),
+            });
+            vcx.run_until_parked();
+
+            let up = vcx
+                .debug_bounds("diff-more:gutter.rs:80:100")
+                .expect("up control is visible");
+            let down = vcx
+                .debug_bounds("diff-more:gutter.rs:2:22")
+                .expect("down control is visible");
+            assert_eq!(up.left(), down.left(), "controls share the left gutter");
+            assert!(up.top() < down.top(), "up control is stacked above down");
+            assert!(up.bottom() <= down.top(), "controls do not overlap");
         }
     }
 
