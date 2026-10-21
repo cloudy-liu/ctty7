@@ -20,6 +20,7 @@ use crate::ui::app::Tty7App;
 use crate::ui::document_column::DocumentChrome;
 use crate::ui::host_ops::{HostId, HostOps, MTime, SharedHost, WatchSub};
 use crate::ui::i18n::{L10nKey, t, t_fmt};
+use crate::ui::rounding::RoundedCorners as _;
 
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -75,6 +76,7 @@ pub(crate) struct TabCode {
     pub(crate) visible: bool,
     pub(crate) files: Vec<OpenFile>,
     pub(crate) active: usize,
+    tab_scroll: gpui::ScrollHandle,
     pub(crate) roots: Vec<PathBuf>,
     pub(crate) expanded: std::collections::HashSet<PathBuf>,
     /// Roots start open. Their folds belong to this tab and last for the session.
@@ -88,6 +90,7 @@ impl TabCode {
             visible: false,
             files: Vec::new(),
             active: 0,
+            tab_scroll: gpui::ScrollHandle::new(),
             roots: Vec::new(),
             expanded: std::collections::HashSet::new(),
             collapsed_roots: HashSet::new(),
@@ -118,7 +121,7 @@ impl TabCode {
         {
             return Some(relative);
         }
-        Some(path.file_name().map(PathBuf::from).unwrap_or_default())
+        Some(path.into_owned())
     }
 }
 
@@ -693,9 +696,8 @@ impl Tty7App {
             return false;
         };
         code.visible = true;
-        let f = code.files.remove(ix);
-        code.files.insert(0, f);
-        code.active = 0;
+        code.active = ix;
+        code.tab_scroll.scroll_to_item(ix);
         self.focus_editor(window, cx);
         cx.notify();
         true
@@ -740,7 +742,7 @@ impl Tty7App {
                 .default_value(text)
         });
         let sub = cx.subscribe_in(&input, window, {
-            let path = path.clone();
+            let input_id = input.entity_id();
             move |this: &mut Tty7App, _input, ev, _window, cx| {
                 if matches!(ev, InputEvent::Change) {
                     let Some(f) = this
@@ -748,7 +750,7 @@ impl Tty7App {
                         .iter_mut()
                         .filter_map(|t| t.code.as_deref_mut())
                         .flat_map(|c| c.files.iter_mut())
-                        .find(|f| f.host.id() == host_id && f.path == path)
+                        .find(|f| f.input.entity_id() == input_id)
                     else {
                         return;
                     };
@@ -780,29 +782,27 @@ impl Tty7App {
             .expect("checked at function entry");
         let code = tab.code.get_or_insert_with(|| Box::new(TabCode::new()));
         let observe = cx.observe(&input, |_, _, cx| cx.notify());
-        code.files.insert(
-            0,
-            OpenFile {
-                path,
-                host,
-                input,
-                dirty: false,
-                disk_mtime: mtime,
-                edit_seq: 0,
-                saving: None,
-                save_pending: false,
-                save_then_close: false,
-                reload_seq: 0,
-                conflict: false,
-                preview,
-                wrap: false,
-                reading,
-                source_highlighter_ready: std::cell::Cell::new(language != "markdown"),
-                _sub: sub,
-                _observe: observe,
-            },
-        );
-        code.active = 0;
+        code.files.push(OpenFile {
+            path,
+            host,
+            input,
+            dirty: false,
+            disk_mtime: mtime,
+            edit_seq: 0,
+            saving: None,
+            save_pending: false,
+            save_then_close: false,
+            reload_seq: 0,
+            conflict: false,
+            preview,
+            wrap: false,
+            reading,
+            source_highlighter_ready: std::cell::Cell::new(language != "markdown"),
+            _sub: sub,
+            _observe: observe,
+        });
+        code.active = code.files.len() - 1;
+        code.tab_scroll.scroll_to_item(code.active);
         code.visible = true;
         self.editor_rebuild_watcher(cx);
         self.focus_editor(window, cx);
@@ -1329,7 +1329,7 @@ impl Tty7App {
                     .editor_file_mut(id)
                     .is_some_and(|f| std::mem::take(&mut f.save_then_close) && !f.dirty);
                 if close && let Some((tab_ix, ix)) = app.editor_file_position(id) {
-                    app.editor_remove_file_in(tab_ix, ix, cx);
+                    app.editor_remove_file_in(tab_ix, ix, window, cx);
                 }
                 cx.notify();
             },
@@ -1363,7 +1363,7 @@ impl Tty7App {
             return;
         };
         if !f.dirty {
-            self.editor_remove_file(ix, cx);
+            self.editor_remove_file(ix, window, cx);
             return;
         }
         let name = f.label();
@@ -1392,7 +1392,7 @@ impl Tty7App {
                 0 => app.editor_save_file(id, true, window, cx),
                 2 => {
                     if let Some((tab_ix, ix)) = app.editor_file_position(id) {
-                        app.editor_remove_file_in(tab_ix, ix, cx);
+                        app.editor_remove_file_in(tab_ix, ix, window, cx);
                     }
                 }
                 _ => {}
@@ -1422,11 +1422,17 @@ impl Tty7App {
         true
     }
 
-    fn editor_remove_file(&mut self, ix: usize, cx: &mut Context<Self>) {
-        self.editor_remove_file_in(self.active, ix, cx);
+    fn editor_remove_file(&mut self, ix: usize, window: &mut Window, cx: &mut Context<Self>) {
+        self.editor_remove_file_in(self.active, ix, window, cx);
     }
 
-    fn editor_remove_file_in(&mut self, tab_ix: usize, ix: usize, cx: &mut Context<Self>) {
+    fn editor_remove_file_in(
+        &mut self,
+        tab_ix: usize,
+        ix: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let Some(code) = self
             .tabs
             .get_mut(tab_ix)
@@ -1440,6 +1446,18 @@ impl Tty7App {
         code.files.remove(ix);
         if code.active >= ix && code.active > 0 {
             code.active -= 1;
+        }
+        code.tab_scroll.scroll_to_item(code.active);
+        let empty = code.files.is_empty();
+        if empty {
+            code.visible = false;
+        }
+        if tab_ix == self.active {
+            if empty {
+                self.focus_active(window, cx);
+            } else {
+                self.focus_editor(window, cx);
+            }
         }
         self.editor_rebuild_watcher(cx);
         cx.notify();
@@ -1625,6 +1643,7 @@ impl Tty7App {
             .min_w_0()
             .h_full()
             .children(header)
+            .child(self.render_editor_breadcrumb(window, cx))
             .when_some(conflict_banner, |this, b| this.child(b))
             .child(div().flex_1().min_h_0().child(body));
 
@@ -1664,7 +1683,12 @@ impl Tty7App {
                     }
                 }))
                 .child(h_flex().flex_1().min_h_0().w_full().child(editor_col))
-                .child(self.render_code_status_bar(window, cx))
+                .when(
+                    self.tab_code()
+                        .and_then(|code| code.active_file())
+                        .is_some_and(|file| !file.preview),
+                    |shell| shell.child(self.render_code_status_bar(window, cx)),
+                )
                 .into_any_element(),
         )
     }
@@ -1686,30 +1710,6 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        let code = self.tab_code();
-        let active = code.and_then(|c| c.active_file());
-        let name = active.map(|f| f.label());
-        let path = code.and_then(|c| c.active_display_path(self.spawn_host(cx)));
-        let directory = path
-            .as_deref()
-            .and_then(Path::parent)
-            .filter(|parent| !parent.as_os_str().is_empty())
-            .map(|parent| {
-                let directory = parent
-                    .components()
-                    .map(|part| part.as_os_str().to_string_lossy())
-                    .collect::<Vec<_>>()
-                    .join(" › ");
-                format!("{directory} › ")
-            });
-        let full_path = active.map(|f| {
-            SharedString::from(
-                crate::ui::path_display::readable_path(&f.path, f.host.id())
-                    .display()
-                    .to_string(),
-            )
-        });
-        let dirty = active.is_some_and(|f| f.dirty);
         // `TITLE_BAR_LEAD` is the room macOS's traffic lights need. Only a
         // header that starts at the left edge of the window has them to clear,
         // and a docked column never does.
@@ -1740,6 +1740,174 @@ impl Tty7App {
                         + crate::ui::tab_strip::trailing_chrome_w()))
                 },
             )
+            .border_b_1()
+            .border_color(cx.theme().border)
+            .child(
+                h_flex()
+                    .id("editor-file-tabs")
+                    .debug_selector(|| "editor-file-tabs".into())
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .overflow_x_scroll()
+                    .when_some(self.tab_code(), |strip, code| {
+                        strip.track_scroll(&code.tab_scroll).children(
+                            code.files.iter().enumerate().map(|(ix, file)| {
+                                let id = file.input.entity_id();
+                                let name = file.label();
+                                let full_path = crate::ui::path_display::readable_path(
+                                    &file.path,
+                                    file.host.id(),
+                                )
+                                .display()
+                                .to_string();
+                                h_flex()
+                                    .id(("editor-file-tab", id))
+                                    .debug_selector(move || format!("editor-file-tab-{ix}"))
+                                    .occlude()
+                                    .flex_none()
+                                    .h_full()
+                                    .max_w_full()
+                                    .px_2()
+                                    .gap_1p5()
+                                    .border_r_1()
+                                    .border_color(cx.theme().border)
+                                    .text_sm()
+                                    .cursor_pointer()
+                                    .when(ix == code.active, |tab| {
+                                        tab.bg(cx.theme().secondary)
+                                            .text_color(cx.theme().foreground)
+                                    })
+                                    .when(ix != code.active, |tab| {
+                                        tab.text_color(cx.theme().muted_foreground)
+                                            .hover(|tab| tab.bg(cx.theme().secondary.opacity(0.5)))
+                                    })
+                                    .tooltip(move |window, cx| {
+                                        gpui_component::tooltip::Tooltip::new(full_path.clone())
+                                            .build(window, cx)
+                                    })
+                                    .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                        cx.stop_propagation()
+                                    })
+                                    .on_click(cx.listener(move |app, _, window, cx| {
+                                        if let Some(code) = app.tab_code_mut()
+                                            && let Some(ix) = code
+                                                .files
+                                                .iter()
+                                                .position(|file| file.input.entity_id() == id)
+                                        {
+                                            code.active = ix;
+                                            code.tab_scroll.scroll_to_item(ix);
+                                        }
+                                        app.focus_editor(window, cx);
+                                        cx.notify();
+                                    }))
+                                    .child(
+                                        crate::ui::file_icons::FileIcon::for_file(&name)
+                                            .render(px(crate::ui::file_icons::ROW_ICON), window),
+                                    )
+                                    .child(div().min_w_0().truncate().child(name))
+                                    .when(file.dirty, |tab| {
+                                        tab.child(
+                                            div()
+                                                .flex_none()
+                                                .size(px(6.))
+                                                .rounded_full()
+                                                .bg(cx.theme().warning),
+                                        )
+                                    })
+                                    .child(
+                                        Button::new(("editor-file-close", id))
+                                            .debug_selector(move || {
+                                                format!("editor-file-close-{ix}")
+                                            })
+                                            .icon(IconName::Close)
+                                            .ghost()
+                                            .xsmall()
+                                            .tooltip(t(L10nKey::Close))
+                                            .w(px(crate::ui::tab_strip::MIN_TARGET))
+                                            .h(px(crate::ui::tab_strip::MIN_TARGET))
+                                            .on_click(cx.listener(move |app, _, window, cx| {
+                                                cx.stop_propagation();
+                                                if let Some(ix) = app.tab_code().and_then(|code| {
+                                                    code.files.iter().position(|file| {
+                                                        file.input.entity_id() == id
+                                                    })
+                                                }) {
+                                                    app.editor_close_file(ix, window, cx);
+                                                }
+                                            })),
+                                    )
+                            }),
+                        )
+                    }),
+            )
+            .child(self.document_fill_button(cx))
+            .child(
+                div().occlude().flex_shrink_0().child(
+                    crate::ui::tab_strip::chrome_tile_sized(
+                        Button::new("editor-panel-close").icon(Icon::new(IconName::Close)),
+                        crate::ui::app::TILE_SIZE,
+                        crate::ui::app::TILE_GLYPH_LINE,
+                        false,
+                        cx,
+                    )
+                    .rounded_lg()
+                    .tooltip(t(L10nKey::EditorBackToTerminal))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.toggle_code_panel(window, cx);
+                    })),
+                ),
+            )
+            .context_menu(move |menu, _window, cx| {
+                Tty7App::document_header_menu(menu, &menu_app, cx)
+            })
+    }
+
+    fn render_editor_breadcrumb(
+        &self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement + use<> {
+        let code = self.tab_code();
+        let active = code.and_then(|c| c.active_file());
+        let name = active.map(|f| f.label());
+        let path = code.and_then(|c| c.active_display_path(self.spawn_host(cx)));
+        let directory = path
+            .as_deref()
+            .and_then(Path::parent)
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .map(|parent| {
+                let directory = parent
+                    .components()
+                    .map(|part| part.as_os_str().to_string_lossy())
+                    .collect::<Vec<_>>()
+                    .join(" › ");
+                format!("{directory} › ")
+            });
+        let full_path = active.map(|f| {
+            SharedString::from(
+                crate::ui::path_display::readable_path(&f.path, f.host.id())
+                    .display()
+                    .to_string(),
+            )
+        });
+        let is_html = active.is_some_and(can_preview_html);
+        let preview = active.is_some_and(|file| file.preview);
+        let has_preview = is_html || active.is_some_and(|file| file.reading.is_some());
+        #[cfg(any(windows, target_os = "macos"))]
+        let html_loading = is_html && self.editor.html_loading;
+        #[cfg(not(any(windows, target_os = "macos")))]
+        let html_loading = false;
+        h_flex()
+            .id("editor-breadcrumb-row")
+            .debug_selector(|| "editor-breadcrumb-row".into())
+            .flex_none()
+            .min_w_0()
+            .h(px(34.))
+            .items_center()
+            .gap_1()
+            .px_2()
             .border_b_1()
             .border_color(cx.theme().border)
             .child(
@@ -1807,111 +1975,8 @@ impl Tty7App {
                             }),
                     ),
             )
-            .when(dirty, |d| {
-                d.child(
-                    div()
-                        .flex_none()
-                        .size(px(6.))
-                        .rounded_full()
-                        .bg(cx.theme().warning),
-                )
-            })
-            .child(self.document_fill_button(cx))
-            .child(
-                div().occlude().flex_shrink_0().child(
-                    crate::ui::tab_strip::chrome_tile_sized(
-                        Button::new("editor-panel-close").icon(Icon::new(IconName::Close)),
-                        crate::ui::app::TILE_SIZE,
-                        crate::ui::app::TILE_GLYPH_LINE,
-                        false,
-                        cx,
-                    )
-                    .rounded_lg()
-                    .tooltip(t(L10nKey::EditorBackToTerminal))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.toggle_code_panel(window, cx);
-                    })),
-                ),
-            )
-            .context_menu(move |menu, _window, cx| {
-                Tty7App::document_header_menu(menu, &menu_app, cx)
-            })
-    }
-
-    fn render_code_status_bar(&self, _window: &Window, cx: &mut Context<Self>) -> gpui::Div {
-        let code = self.tab_code();
-        let muted = cx.theme().muted_foreground;
-        let active = code.and_then(|c| c.active_file());
-        let language = active.map(|f| language_for_path(&f.path));
-        let cursor: Option<SharedString> = active.filter(|f| !f.preview).map(|f| {
-            let pos = f.input.read(cx).cursor_position();
-            t_fmt(
-                L10nKey::EditorLnCol,
-                &[
-                    ("line", &(pos.line + 1).to_string()),
-                    ("column", &(pos.character + 1).to_string()),
-                ],
-            )
-            .into()
-        });
-        let wrap: Option<bool> = active.filter(|f| !f.preview).map(|f| f.wrap);
-        let is_markdown = active.is_some_and(|f| language_for_path(&f.path) == "markdown");
-        let is_html = active.is_some_and(can_preview_html);
-        #[cfg(any(windows, target_os = "macos"))]
-        let html_loading = is_html && self.editor.html_loading;
-        #[cfg(not(any(windows, target_os = "macos")))]
-        let html_loading = false;
-        let preview = active.is_some_and(|f| f.preview);
-
-        h_flex()
-            .debug_selector(|| "editor-status-bar".into())
-            .flex_none()
-            .w_full()
-            .h(px(26.))
-            .bg(cx.theme().background)
-            .items_center()
-            .gap_1()
-            .px_3()
-            .border_t_1()
-            .border_color(cx.theme().border)
-            .text_xs()
-            .text_color(muted)
-            .child(div().flex_1().min_w_0().truncate().children(language))
-            .when(is_markdown || is_html, |this| {
-                this.child(
-                    crate::ui::tab_strip::chrome_tile_sized(
-                        Button::new(if is_html {
-                            "status-html-preview"
-                        } else {
-                            "status-md-preview"
-                        })
-                        .debug_selector(move || {
-                            if is_html {
-                                "status-html-preview".into()
-                            } else {
-                                "status-md-preview".into()
-                            }
-                        })
-                        .loading(html_loading)
-                        .icon(if preview {
-                            Icon::default().path("icons/pencil.svg")
-                        } else {
-                            Icon::new(IconName::Eye)
-                        }),
-                        crate::ui::tab_strip::MIN_TARGET,
-                        14.,
-                        false,
-                        cx,
-                    )
-                    .tooltip(if preview {
-                        t(L10nKey::EditorEdit)
-                    } else {
-                        t(L10nKey::EditorPreview)
-                    })
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.editor_toggle_preview(window, cx)),
-                    ),
-                )
+            .when(has_preview, |row| {
+                row.child(self.render_editor_preview_modes(is_html, preview, cx))
             })
             .when(is_html, |this| {
                 this.child(
@@ -1932,6 +1997,7 @@ impl Tty7App {
                     Button::new("status-html-refresh")
                         .debug_selector(|| "status-html-refresh".into())
                         .icon(Icon::default().path("icons/refresh.svg"))
+                        .loading(html_loading)
                         .ghost()
                         .xsmall()
                         .w(px(crate::ui::tab_strip::MIN_TARGET))
@@ -1942,6 +2008,106 @@ impl Tty7App {
                         ),
                 )
             })
+    }
+
+    fn render_editor_preview_modes(
+        &self,
+        is_html: bool,
+        preview: bool,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let surface = cx.global::<crate::ui::presets::Surfaces>().window;
+        let options = [
+            t(L10nKey::EditorPreview),
+            if is_html { "HTML" } else { "Markdown" },
+        ];
+        h_flex()
+            .id("editor-preview-modes")
+            .debug_selector(|| "editor-preview-modes".into())
+            .flex_none()
+            .h(px(24.))
+            .rounded(crate::ui::rounding::TRACK_RADIUS)
+            .border_1()
+            .border_color(cx.theme().border)
+            .bg(gpui::rgb(surface.base))
+            .overflow_hidden()
+            .children(options.into_iter().enumerate().map(|(ix, label)| {
+                let selected = (ix == 0) == preview;
+                h_flex()
+                    .id(("editor-preview-mode", ix))
+                    .debug_selector(move || format!("editor-preview-mode-{ix}"))
+                    .h_full()
+                    .items_center()
+                    .justify_center()
+                    .px_1()
+                    .text_xs()
+                    .cursor_pointer()
+                    .rounded_corners(crate::ui::rounding::segment_corners(
+                        ix,
+                        2,
+                        crate::ui::rounding::TRACK_RADIUS,
+                        crate::ui::rounding::HAIRLINE,
+                    ))
+                    .when(ix > 0, |cell| {
+                        cell.border_l_1().border_color(cx.theme().border)
+                    })
+                    .when(selected, |cell| {
+                        cell.bg(gpui::rgb(surface.selected))
+                            .text_color(gpui::rgb(surface.text_selected))
+                            .font_weight(gpui::FontWeight::MEDIUM)
+                    })
+                    .when(!selected, |cell| {
+                        cell.text_color(gpui::rgb(surface.text_resting))
+                            .hover(|cell| cell.bg(gpui::rgb(surface.hover)))
+                    })
+                    .active(|cell| cell.bg(gpui::rgb(surface.pressed)))
+                    .child(label)
+                    .on_click(cx.listener(move |app, _, window, cx| {
+                        let requested = ix == 0;
+                        if app
+                            .tab_code()
+                            .and_then(|code| code.active_file())
+                            .is_some_and(|file| file.preview != requested)
+                        {
+                            app.editor_toggle_preview(window, cx);
+                        }
+                    }))
+            }))
+            .into_any_element()
+    }
+
+    fn render_code_status_bar(&self, _window: &Window, cx: &mut Context<Self>) -> gpui::Div {
+        let code = self.tab_code();
+        let muted = cx.theme().muted_foreground;
+        let active = code.and_then(|c| c.active_file());
+        let language = active.map(|f| language_for_path(&f.path));
+        let cursor: Option<SharedString> = active.filter(|f| !f.preview).map(|f| {
+            let pos = f.input.read(cx).cursor_position();
+            t_fmt(
+                L10nKey::EditorLnCol,
+                &[
+                    ("line", &(pos.line + 1).to_string()),
+                    ("column", &(pos.character + 1).to_string()),
+                ],
+            )
+            .into()
+        });
+        let wrap: Option<bool> = active.filter(|f| !f.preview).map(|f| f.wrap);
+
+        h_flex()
+            .debug_selector(|| "editor-status-bar".into())
+            .flex_none()
+            .w_full()
+            .h(px(26.))
+            .bg(cx.theme().background)
+            .items_center()
+            .gap_1()
+            .px_3()
+            .border_t_1()
+            .border_color(cx.theme().border)
+            .text_xs()
+            .text_color(muted)
+            .child(div().flex_1().min_w_0().truncate().children(language))
             .when_some(wrap, |this, wrap| {
                 this.child(
                     crate::ui::tab_strip::chrome_tile_sized(
@@ -2097,6 +2263,298 @@ mod tests {
             cx.notify();
         });
         (app, vcx)
+    }
+
+    #[gpui::test]
+    fn document_tabs_open_in_order_switch_and_close_independently(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            for path in [
+                "/work/first/guide.md",
+                "/work/second/guide.md",
+                "/work/main.rs",
+            ] {
+                app.editor_install_file(
+                    tty7_core::host::local::LocalHost::new(),
+                    path.into(),
+                    "# Document\n".into(),
+                    None,
+                    window,
+                    cx,
+                );
+            }
+            // Reopening a file must activate it without moving its tab.
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/work/second/guide.md".into(),
+                String::new(),
+                None,
+                window,
+                cx,
+            );
+        });
+        vcx.run_until_parked();
+        app.read_with(&vcx, |app, _| {
+            let code = app.tab_code().unwrap();
+            assert_eq!(
+                code.files
+                    .iter()
+                    .map(|f| f.path.to_str().unwrap())
+                    .collect::<Vec<_>>(),
+                [
+                    "/work/first/guide.md",
+                    "/work/second/guide.md",
+                    "/work/main.rs"
+                ]
+            );
+            assert_eq!(code.active, 1);
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let first = vcx
+            .debug_bounds("editor-file-tab-0")
+            .expect("the first file has a visible tab");
+        vcx.simulate_click(first.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        app.read_with(&vcx, |app, _| assert_eq!(app.tab_code().unwrap().active, 0));
+        // Closing an inactive file does not activate it through event bubbling.
+        let close = vcx.debug_bounds("editor-file-close-1").unwrap();
+        vcx.simulate_click(close.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        app.read_with(&vcx, |app, _| {
+            let code = app.tab_code().unwrap();
+            assert_eq!(
+                code.active_file().unwrap().path,
+                Path::new("/work/first/guide.md")
+            );
+            assert_eq!(code.files.len(), 2);
+        });
+        for remaining in [1, 0] {
+            let close = vcx.debug_bounds("editor-file-close-0").unwrap();
+            vcx.simulate_click(close.center(), gpui::Modifiers::none());
+            vcx.run_until_parked();
+            app.read_with(&vcx, |app, _| {
+                let code = app.tab_code().unwrap();
+                assert_eq!(code.files.len(), remaining);
+                assert_eq!(code.visible, remaining != 0);
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn document_tabs_reopen_canonical_local_paths_without_duplicates(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("guide.md");
+        let second = dir.path().join("main.rs");
+        std::fs::write(&first, "# Guide\n").unwrap();
+        std::fs::write(&second, "fn main() {}\n").unwrap();
+        for path in [&first, &second, &first] {
+            let canonical = std::fs::canonicalize(path).unwrap();
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.editor_open_on_host(tty7_core::host::local::LocalHost::new(), path, window, cx);
+            });
+            wait_for_markdown(&mut vcx, |vcx| {
+                app.read_with(vcx, |app, _| {
+                    app.tab_code()
+                        .and_then(|code| code.active_file())
+                        .is_some_and(|file| file.path == canonical)
+                })
+            });
+        }
+        app.read_with(&vcx, |app, _| {
+            let code = app.tab_code().unwrap();
+            assert_eq!(
+                code.files.len(),
+                2,
+                "ordinary and canonical paths share one file tab"
+            );
+            assert_eq!(code.active, 0);
+            assert_eq!(code.files[0].path, std::fs::canonicalize(&first).unwrap());
+            assert_eq!(code.files[1].path, std::fs::canonicalize(&second).unwrap());
+        });
+    }
+
+    #[gpui::test]
+    fn document_tabs_keep_modes_edits_and_protect_dirty_closes(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let first = dir.path().join("first.md");
+        let second = dir.path().join("second.md");
+        std::fs::write(&first, "# First\n").unwrap();
+        std::fs::write(&second, "# Second\n").unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            for path in [&first, &second] {
+                app.editor_install_file(
+                    tty7_core::host::local::LocalHost::new(),
+                    path.clone(),
+                    std::fs::read_to_string(path).unwrap(),
+                    None,
+                    window,
+                    cx,
+                );
+            }
+        });
+        vcx.run_until_parked();
+        let first_tab = vcx.debug_bounds("editor-file-tab-0").unwrap();
+        vcx.simulate_click(first_tab.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        let source = vcx.debug_bounds("editor-preview-mode-1").unwrap();
+        vcx.simulate_click(source.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        vcx.simulate_keystrokes("x");
+        let (edited, cursor) = app.read_with(&vcx, |app, cx| {
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(file.dirty);
+            (
+                file.input.read(cx).text().to_string(),
+                file.input.read(cx).cursor_position(),
+            )
+        });
+        let second_tab = vcx.debug_bounds("editor-file-tab-1").unwrap();
+        vcx.simulate_click(second_tab.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        app.read_with(&vcx, |app, _| {
+            assert!(app.tab_code().unwrap().active_file().unwrap().preview)
+        });
+        let first_tab = vcx.debug_bounds("editor-file-tab-0").unwrap();
+        vcx.simulate_click(first_tab.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        app.read_with(&vcx, |app, cx| {
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(!file.preview);
+            assert_eq!(file.input.read(cx).text().to_string(), edited);
+            assert_eq!(file.input.read(cx).cursor_position(), cursor);
+        });
+        for answer in [L10nKey::Cancel, L10nKey::Save] {
+            let close = vcx.debug_bounds("editor-file-close-0").unwrap();
+            vcx.simulate_click(close.center(), gpui::Modifiers::none());
+            vcx.run_until_parked();
+            cx.simulate_prompt_answer(crate::ui::i18n::t(answer));
+            vcx.run_until_parked();
+            if answer == L10nKey::Cancel {
+                app.read_with(&vcx, |app, _| {
+                    assert_eq!(app.tab_code().unwrap().files.len(), 2)
+                });
+            }
+        }
+        wait_for_markdown(&mut vcx, |vcx| {
+            app.read_with(vcx, |app, _| app.tab_code().unwrap().files.len() == 1)
+        });
+        assert_eq!(std::fs::read_to_string(&first).unwrap(), edited);
+        app.read_with(&vcx, |app, _| {
+            assert!(app.tab_code().unwrap().active_file().unwrap().preview)
+        });
+        let source = vcx.debug_bounds("editor-preview-mode-1").unwrap();
+        vcx.simulate_click(source.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        vcx.simulate_keystrokes("x");
+        let close = vcx.debug_bounds("editor-file-close-0").unwrap();
+        vcx.simulate_click(close.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        cx.simulate_prompt_answer(crate::ui::i18n::t(L10nKey::EditorDiscard));
+        vcx.run_until_parked();
+        app.read_with(&vcx, |app, _| assert!(!app.tab_code().unwrap().visible));
+        assert_eq!(std::fs::read_to_string(&second).unwrap(), "# Second\n");
+    }
+
+    #[gpui::test]
+    fn document_tabs_reveal_opened_files_when_the_strip_overflows(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        vcx.simulate_resize(gpui::size(px(560.), px(900.)));
+        app.update_in(&mut vcx, |app, window, cx| {
+            for ix in 0..8 {
+                app.editor_install_file(
+                    tty7_core::host::local::LocalHost::new(),
+                    format!("/work/document-number-{ix}.rs").into(),
+                    "fn main() {}".into(),
+                    None,
+                    window,
+                    cx,
+                );
+            }
+        });
+        vcx.run_until_parked();
+        for (path, selector) in [
+            ("/work/document-number-7.rs", "editor-file-tab-7"),
+            ("/work/document-number-0.rs", "editor-file-tab-0"),
+        ] {
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.editor_open_on_host(
+                    tty7_core::host::local::LocalHost::new(),
+                    Path::new(path),
+                    window,
+                    cx,
+                )
+            });
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            let strip = vcx.debug_bounds("editor-file-tabs").unwrap();
+            let tab = vcx.debug_bounds(selector).unwrap();
+            assert!(
+                tab.left() >= strip.left() && tab.right() <= strip.right(),
+                "active tab must be revealed: {tab:?}, strip: {strip:?}"
+            );
+        }
+        app.read_with(&vcx, |app, _| {
+            assert_eq!(app.tab_code().unwrap().files.len(), 8)
+        });
+    }
+
+    #[gpui::test]
+    fn document_tabs_edit_the_owning_session_when_paths_match(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let original = "fn first() {}";
+        let first_session = app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/work/shared.rs".into(),
+                original.into(),
+                None,
+                window,
+                cx,
+            );
+            let first = app.active;
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.activate(app.tabs.len() - 1, window, cx);
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/work/shared.rs".into(),
+                original.into(),
+                None,
+                window,
+                cx,
+            );
+            first
+        });
+        vcx.run_until_parked();
+        vcx.simulate_keystrokes("x");
+        app.read_with(&vcx, |app, cx| {
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(
+                file.dirty,
+                "editing belongs to the current session's buffer"
+            );
+            assert_ne!(file.input.read(cx).text().to_string(), original);
+        });
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.activate(first_session, window, cx)
+        });
+        vcx.run_until_parked();
+        app.read_with(&vcx, |app, cx| {
+            let code = app.tab_code().unwrap();
+            assert_eq!(code.files.len(), 1);
+            let file = code.active_file().unwrap();
+            assert!(
+                !file.dirty,
+                "another session's edits do not dirty this buffer"
+            );
+            assert_eq!(file.input.read(cx).text().to_string(), original);
+        });
     }
 
     #[gpui::test]
@@ -2427,18 +2885,18 @@ mod tests {
             code.files[active].path = "/work/second/docs/guide.md".into();
             assert_eq!(
                 code.active_display_path(HostId(99)),
-                Some(PathBuf::from("guide.md")),
+                Some(PathBuf::from("/work/second/docs/guide.md")),
                 "roots on another host must not label this buffer's path"
             );
             code.roots = vec!["/work/elsewhere".into()];
             assert_eq!(
                 code.active_display_path(HostId::LOCAL),
-                Some(PathBuf::from("guide.md"))
+                Some(PathBuf::from("/work/second/docs/guide.md"))
             );
             code.roots.clear();
             assert_eq!(
                 code.active_display_path(HostId::LOCAL),
-                Some(PathBuf::from("guide.md"))
+                Some(PathBuf::from("/work/second/docs/guide.md"))
             );
         });
     }
@@ -2585,19 +3043,52 @@ mod tests {
                     path.size.width > px(20.) && path.size.height > px(8.),
                     "the document title must have visible space: {path:?}"
                 );
-                let footer = vcx.debug_bounds("editor-status-bar").unwrap();
-                let toggle = vcx.debug_bounds("status-md-preview").unwrap();
-                assert!(toggle.size.width >= px(24.) && toggle.size.height >= px(24.));
-                assert!(toggle.left() >= footer.left() && toggle.right() <= footer.right());
-                vcx.simulate_click(toggle.center(), gpui::Modifiers::none());
+                assert!(
+                    vcx.debug_bounds("status-md-preview").is_none(),
+                    "the footer toggle is removed"
+                );
+                let modes = vcx
+                    .debug_bounds("editor-preview-modes")
+                    .expect("text mode segments are beside the breadcrumb");
+                assert!(modes.size.height >= px(24.));
+                let row = vcx.debug_bounds("editor-breadcrumb-row").unwrap();
+                assert!(modes.left() >= path.right() && modes.right() <= row.right());
+                // Pick the already selected segment first. It must not toggle.
+                let selected_x = if expected_preview {
+                    modes.right() - px(12.)
+                } else {
+                    modes.left() + px(12.)
+                };
+                vcx.simulate_click(
+                    gpui::point(selected_x, modes.center().y),
+                    gpui::Modifiers::none(),
+                );
+                vcx.run_until_parked();
+                app.read_with(&vcx, |app, _| {
+                    assert_eq!(
+                        app.tab_code().unwrap().active_file().unwrap().preview,
+                        !expected_preview
+                    )
+                });
+                let pick_x = if expected_preview {
+                    modes.left() + px(12.)
+                } else {
+                    modes.right() - px(12.)
+                };
+                vcx.simulate_click(
+                    gpui::point(pick_x, modes.center().y),
+                    gpui::Modifiers::none(),
+                );
                 vcx.run_until_parked();
                 let preview = app.read_with(&vcx, |app, _| {
                     app.tab_code().unwrap().active_file().unwrap().preview
                 });
                 assert_eq!(preview, expected_preview);
                 if preview {
+                    assert!(vcx.debug_bounds("editor-status-bar").is_none());
                     assert!(vcx.debug_bounds("status-wrap").is_none());
                 } else {
+                    let footer = vcx.debug_bounds("editor-status-bar").unwrap();
                     let wrap = vcx.debug_bounds("status-wrap").unwrap();
                     assert!(wrap.size.width >= px(24.) && wrap.size.height >= px(24.));
                     assert!(wrap.left() >= footer.left() && wrap.right() <= footer.right());
@@ -3971,6 +4462,26 @@ mod tests {
         );
         vcx.simulate_keystrokes("pagedown");
         assert!(reading.read_with(&vcx, |reading, _| reading.scroll.offset().y) < px(0.));
+        let reading_offset = reading.read_with(&vcx, |reading, _| reading.scroll.offset());
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/markdown-tests/other.rs".into(),
+                "fn main() {}".into(),
+                None,
+                window,
+                cx,
+            );
+        });
+        vcx.run_until_parked();
+        let tab = vcx.debug_bounds("editor-file-tab-0").unwrap();
+        vcx.simulate_click(tab.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        assert_eq!(
+            reading.read_with(&vcx, |reading, _| reading.scroll.offset()),
+            reading_offset,
+            "switching file tabs preserves the reading position"
+        );
         vcx.simulate_keystrokes("secondary-a secondary-c");
         reading.read_with(&vcx, |reading, cx| {
             assert!(reading.text.read(cx).selected_text().contains("Paragraph."));
