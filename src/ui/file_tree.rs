@@ -2056,6 +2056,18 @@ impl Tty7App {
                     }
                 }),
             );
+            if paths_are_local && super::code_editor::language_for_path(path) == "html" {
+                menu = menu.item(
+                    PopupMenuItem::new(t(L10nKey::PanelOpenInBrowser)).on_click({
+                        let app = app.clone();
+                        let p = p.clone();
+                        move |_, window, cx| {
+                            let _ = app
+                                .update(cx, |this, cx| this.open_html_in_browser(&p, window, cx));
+                        }
+                    }),
+                );
+            }
         }
         if is_dir {
             menu = menu.item(
