@@ -6,6 +6,54 @@ const MAX_DEPTH: u8 = 6;
 
 const MAX_PROCS: usize = 64;
 
+pub fn descends_from(pid: u32, ancestor: u32) -> bool {
+    runs_under(pid, ancestor, parent_pid)
+}
+
+const MAX_ANCESTRY: usize = 64;
+
+fn runs_under(pid: u32, ancestor: u32, parent_of: impl Fn(u32) -> Option<u32>) -> bool {
+    let mut cur = pid;
+    for _ in 0..MAX_ANCESTRY {
+        if cur == ancestor {
+            return true;
+        }
+        match parent_of(cur) {
+            Some(parent) if parent > 1 && parent != cur => cur = parent,
+            _ => return false,
+        }
+    }
+    false
+}
+
+#[cfg(target_os = "macos")]
+fn parent_pid(pid: u32) -> Option<u32> {
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let ret = unsafe {
+        libc::proc_pidinfo(
+            pid as libc::c_int,
+            libc::PROC_PIDTBSDINFO,
+            0,
+            &mut info as *mut _ as *mut libc::c_void,
+            size,
+        )
+    };
+    (ret == size).then_some(info.pbi_ppid)
+}
+
+#[cfg(target_os = "linux")]
+fn parent_pid(pid: u32) -> Option<u32> {
+    let stat = std::fs::read_to_string(format!("/proc/{pid}/stat")).ok()?;
+    let close = stat.rfind(')')?;
+    stat[close + 1..].split_whitespace().nth(1)?.parse().ok()
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn parent_pid(pid: u32) -> Option<u32> {
+    process_table().get(&pid).map(|row| row.ppid)
+}
+
 pub fn snapshot(shell_pid: u32, fg_pgid: Option<i32>) -> PaneProcs {
     let procs = processes(shell_pid, fg_pgid);
     let ports = listening_ports(&procs);
@@ -445,5 +493,26 @@ mod tests {
         }
         assert_eq!(entry("172.17.0.1").authority(), "172.17.0.1:8080");
         assert_eq!(entry("192.168.1.20").authority(), "192.168.1.20:8080");
+    }
+
+    #[test]
+    fn hook_ownership_requires_the_panes_ancestry() {
+        let parents = |pid| match pid {
+            30 => Some(20),
+            20 => Some(10),
+            10 => Some(1),
+            _ => None,
+        };
+        assert!(runs_under(30, 10, parents));
+        assert!(runs_under(10, 10, parents));
+        assert!(!runs_under(30, 99, parents));
+        assert!(!runs_under(99, 10, parents));
+        assert!(!runs_under(30, 10, |pid| Some(pid)));
+        assert!(!runs_under(30, 10, |pid| Some(if pid == 30 {
+            20
+        } else {
+            30
+        })));
+        assert!(descends_from(std::process::id(), std::process::id()));
     }
 }

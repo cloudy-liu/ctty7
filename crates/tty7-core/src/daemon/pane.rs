@@ -2104,48 +2104,7 @@ impl DaemonPane {
                                     before.agent.as_ref(),
                                     after.agent.as_ref(),
                                 );
-                                crate::core::machine::observe_pane(pane, |p| {
-                                    if after.cwd.is_some() {
-                                        p.cwd = after.cwd;
-                                    }
-                                    // Unlike the others this one is also cleared
-                                    // by a reset, so it is assigned either way.
-                                    p.osc_title = after.osc_title;
-                                    // The window may have seeded a queued resume
-                                    // before process detection. A title/cwd update
-                                    // must not erase that identity.
-                                    if agent_changed {
-                                        let mut agent = after.agent;
-                                        if let (Some(known), Some(observed)) = (&p.agent, &mut agent)
-                                            && known.agent == observed.agent
-                                            && observed.launch_argv.as_deref().is_none_or(|argv| {
-                                                known.session_id.as_deref().is_some_and(|id| {
-                                                    observed.agent.resumes_session(id, argv)
-                                                })
-                                            })
-                                        {
-                                            // Keep a known id while the same queued
-                                            // resume starts, even for agents with no
-                                            // hook. Windows identity-only probes also
-                                            // cannot invalidate the saved command.
-                                            observed.session_id = observed.session_id.take()
-                                                .or_else(|| known.session_id.clone());
-                                            observed.launch_argv = observed.launch_argv.take()
-                                                .or_else(|| known.launch_argv.clone());
-                                        }
-                                        p.agent = agent;
-                                    } else if command_started
-                                        && p.agent.as_ref().is_some_and(|a| a.restore_pending)
-                                    {
-                                        p.agent = None;
-                                    }
-                                    if after.shell.is_some() {
-                                        p.shell = after.shell;
-                                    }
-                                    if alive {
-                                        p.live = true;
-                                    }
-                                });
+                                publish_facts(pane, alive, after, agent_changed, command_started);
                             }
                         }
                         Err(err) if err.kind() == std::io::ErrorKind::Interrupted => continue,
@@ -2234,6 +2193,40 @@ impl DaemonPane {
         crate::core::machine::observe_pane(state.id, |record| record.agent = facts);
         let session = state.agent_session.clone();
         notify(&mut state, DaemonMsg::AgentStatus(session));
+    }
+
+    pub fn report_agent_event(&self, pid: u32, body: &str) -> Result<(), String> {
+        let shell = self
+            .pty()
+            .and_then(|pty| pty.shell_pid)
+            .ok_or_else(|| format!("pane {} runs no local process", self.id))?;
+        if !crate::daemon::procinfo::descends_from(pid, shell) {
+            return Err(format!("process {pid} does not run in pane {}", self.id));
+        }
+        self.apply_reported_agent_event(body)
+    }
+
+    /// Apply a socket report and preserve the fork's conversation markers.
+    pub fn apply_reported_agent_event(&self, body: &str) -> Result<(), String> {
+        let mut st = self.state.lock().unwrap();
+        let before = observed_facts(&st);
+        apply_socket_agent_event(&mut st, body, &self.gate)?;
+        let after = observed_facts(&st);
+        drop(st);
+        if !self.shutting_down.load(Ordering::SeqCst) && facts_changed(&before, &after) {
+            publish_facts(self.id, true, after, true, false);
+        }
+        Ok(())
+    }
+
+    pub fn codex_candidate(&self) -> CodexCandidate {
+        let st = self.state.lock().unwrap();
+        CodexCandidate {
+            pane: self.id,
+            runs_codex: st.alive && st.agent == Some(crate::core::cli_agent::CLIAgent::Codex),
+            cwd: st.cwd.clone(),
+            session: st.agent_session.as_ref().and_then(|s| s.session_id.clone()),
+        }
     }
 
     pub fn gate(&self) -> Arc<OutputGate> {
@@ -2806,6 +2799,60 @@ fn observed_facts(st: &PaneState) -> ObservedFacts {
     }
 }
 
+fn publish_facts(
+    pane: u64,
+    alive: bool,
+    after: ObservedFacts,
+    agent_changed: bool,
+    command_started: bool,
+) {
+    crate::core::machine::observe_pane(pane, |p| {
+        if after.cwd.is_some() {
+            p.cwd = after.cwd;
+        }
+        // Unlike the others this one is also cleared
+        // by a reset, so it is assigned either way.
+        p.osc_title = after.osc_title;
+        // The window may have seeded a queued resume
+        // before process detection. A title/cwd update
+        // must not erase that identity.
+        if agent_changed {
+            let mut agent = after.agent;
+            if let (Some(known), Some(observed)) = (&p.agent, &mut agent)
+                && known.agent == observed.agent
+                && observed.launch_argv.as_deref().is_none_or(|argv| {
+                    known
+                        .session_id
+                        .as_deref()
+                        .is_some_and(|id| observed.agent.resumes_session(id, argv))
+                })
+            {
+                // Keep a known id while the same queued
+                // resume starts, even for agents with no
+                // hook. Windows identity-only probes also
+                // cannot invalidate the saved command.
+                observed.session_id = observed
+                    .session_id
+                    .take()
+                    .or_else(|| known.session_id.clone());
+                observed.launch_argv = observed
+                    .launch_argv
+                    .take()
+                    .or_else(|| known.launch_argv.clone());
+            }
+            p.agent = agent;
+        } else if command_started && p.agent.as_ref().is_some_and(|a| a.restore_pending) {
+            p.agent = None;
+        }
+        if after.shell.is_some() {
+            p.shell = after.shell;
+        }
+        if alive {
+            p.live = true;
+        }
+    });
+}
+
 fn facts_changed(before: &ObservedFacts, after: &ObservedFacts) -> bool {
     before.cwd != after.cwd
         || before.osc_title != after.osc_title
@@ -3031,6 +3078,75 @@ fn apply_probed_cwd(st: &mut PaneState, probed: Option<PathBuf>) {
     }
     notify(st, DaemonMsg::Cwd(probed.clone()));
     st.cwd = Some(probed);
+}
+
+/// A running Codex pane as seen by a hook from its shared app-server.
+#[derive(Debug, Clone)]
+pub struct CodexCandidate {
+    pub pane: u64,
+    pub runs_codex: bool,
+    pub cwd: Option<PathBuf>,
+    pub session: Option<String>,
+}
+
+/// Codex's shared app-server inherits its first client's TTY7_PANE. Match
+/// the session first, then its cwd, before using that inherited pane as a tie
+/// breaker. A `/new` session prefers a pane that already had a session.
+pub fn codex_report_target(
+    panes: &[CodexCandidate],
+    named: u64,
+    session: Option<&str>,
+    cwd: Option<&Path>,
+    cleared: bool,
+) -> Option<u64> {
+    let codex = || panes.iter().filter(|p| p.runs_codex);
+    if let Some(session) = session
+        && let Some(owner) = codex().find(|p| p.session.as_deref() == Some(session))
+    {
+        return Some(owner.pane);
+    }
+    let here: Vec<&CodexCandidate> = codex()
+        .filter(|p| {
+            cwd.zip(p.cwd.as_deref())
+                .is_some_and(|(cwd, c)| same_dir(c, cwd))
+        })
+        .collect();
+    let pool = if here.is_empty() {
+        codex().collect()
+    } else {
+        here
+    };
+    let likely: Vec<&CodexCandidate> = pool
+        .iter()
+        .copied()
+        .filter(|p| p.session.is_some() == cleared)
+        .collect();
+    let pool = if likely.is_empty() { pool } else { likely };
+    match pool.as_slice() {
+        [only] => Some(only.pane),
+        [] => None,
+        several => several.iter().find(|p| p.pane == named).map(|p| p.pane),
+    }
+}
+
+fn apply_socket_agent_event(
+    st: &mut PaneState,
+    body: &str,
+    gate: &OutputGate,
+) -> Result<(), String> {
+    if !st.alive {
+        return Err(format!("pane {} is not running", st.id));
+    }
+    let event = crate::core::cli_agent::parse_agent_event_body(body.as_bytes())
+        .ok_or_else(|| "not an agent event".to_string())?;
+    apply_agent_signals(st, vec![event], None);
+    // The GUI's conversation outline scans these markers. Record and deliver
+    // the complete sequence under the same lock as PTY output, never by
+    // writing into the agent's console from another process.
+    let marker = crate::core::agent_hooks::hook_sequence(body);
+    st.ring.append(&marker);
+    fan_out_output(st, &marker, Vec::new(), gate);
+    Ok(())
 }
 
 fn same_dir(a: &Path, b: &Path) -> bool {
@@ -5855,6 +5971,7 @@ mod tests {
                     cwd: None,
                     message: None,
                     prompt: None,
+                    source: None,
                 }],
                 None,
             );
@@ -5874,6 +5991,7 @@ mod tests {
                     cwd: None,
                     message: None,
                     prompt: Some("hello".into()),
+                    source: None,
                 }],
                 None,
             );
@@ -6706,6 +6824,7 @@ mod tests {
                 message: None,
                 cwd: None,
                 prompt: None,
+                source: None,
             }],
             None,
         );
@@ -6748,6 +6867,7 @@ mod tests {
             message: None,
             cwd: None,
             prompt: None,
+            source: None,
         };
         let detect = |id| {
             Some((
@@ -8752,5 +8872,193 @@ mod tests {
 
         apply_signals(&mut st, SniffSignals::default());
         assert_eq!(st.cwd, Some(PathBuf::from("/tmp/x")));
+    }
+
+    #[test]
+    fn a_codex_report_finds_its_pane_by_session_then_directory() {
+        let pane = |pane: u64, codex: bool, cwd: &str, session: Option<&str>| CodexCandidate {
+            pane,
+            runs_codex: codex,
+            cwd: Some(PathBuf::from(cwd)),
+            session: session.map(str::to_string),
+        };
+        let panes = [
+            pane(1, true, "/work/a", Some("s-a")),
+            pane(2, true, "/work/b", None),
+            pane(3, false, "/work/b", None),
+            pane(4, true, "/work/c", Some("s-c")),
+            pane(5, true, "/work/c", None),
+        ];
+        let target = |named: u64, session: Option<&str>, cwd: &str| {
+            codex_report_target(&panes, named, session, Some(Path::new(cwd)), false)
+        };
+
+        // The app-server was started in pane 1, so every hook names it.
+        assert_eq!(target(1, Some("s-a"), "/work/a"), Some(1));
+        assert_eq!(
+            target(1, Some("s-c"), "/work/elsewhere"),
+            Some(4),
+            "a reported session stays with its pane"
+        );
+        assert_eq!(
+            target(1, Some("s-new"), "/work/b"),
+            Some(2),
+            "a new session goes to the one Codex pane in its directory"
+        );
+        assert_eq!(
+            target(1, Some("s-new"), "/work/c"),
+            Some(5),
+            "of two there, the one yet to report a session"
+        );
+        assert_eq!(
+            target(1, Some("s-next"), "/work/a"),
+            Some(1),
+            "a new session in a pane that had one before (/new) is still that pane's"
+        );
+        assert_eq!(
+            codex_report_target(&panes, 1, Some("s-c2"), Some(Path::new("/work/c")), true),
+            Some(4),
+            "but a session /new started goes to the one that had a session"
+        );
+        assert_eq!(
+            target(1, Some("s-new"), "/work/none"),
+            None,
+            "a directory no pane runs Codex in leaves every fresh pane in the running"
+        );
+        let elsewhere = [
+            pane(1, true, "/work/a", Some("s-a")),
+            pane(2, true, "/home", None),
+        ];
+        assert_eq!(
+            codex_report_target(
+                &elsewhere,
+                1,
+                Some("s-b"),
+                Some(Path::new("/work/b")),
+                false
+            ),
+            Some(2),
+            "codex -C: the one Codex pane yet to report, not the app-server's"
+        );
+
+        let twins = [
+            pane(6, true, "/work/d", None),
+            pane(7, true, "/work/d", None),
+        ];
+        let twin = |named| {
+            codex_report_target(&twins, named, Some("s"), Some(Path::new("/work/d")), false)
+        };
+        assert_eq!(twin(7), Some(7), "a tie goes to the pane the hook named");
+        assert_eq!(twin(1), None, "and is no one's otherwise");
+    }
+
+    #[test]
+    fn a_new_codex_session_does_not_move_the_first_pane_to_scratch() {
+        use crate::core::cli_agent::CLIAgent;
+        let first_dir = PathBuf::from("C:/work/ctty7");
+        let second_dir = PathBuf::from("C:/work/plain-folder");
+        let mut first = test_state(true);
+        first.cwd = Some(first_dir.clone());
+        first.agent = Some(CLIAgent::Codex);
+        let first_start = serde_json::json!({"agent":"codex", "event":"session-start",
+            "session_id":"ctty7-session", "cwd":first_dir})
+        .to_string();
+        let gate = OutputGate::new();
+        apply_socket_agent_event(&mut first, &first_start, &gate).unwrap();
+        let mut second = test_state(true);
+        second.cwd = Some(second_dir.clone());
+        second.agent = Some(CLIAgent::Codex);
+        let (tx, rx) = mpsc::channel();
+        second.subscriber = Some(tx);
+        let start = serde_json::json!({"agent":"codex", "event":"session-start",
+            "session_id":"new-session", "cwd":second_dir})
+        .to_string();
+        let candidates = [
+            CodexCandidate {
+                pane: 1,
+                runs_codex: true,
+                cwd: first.cwd.clone(),
+                session: Some("ctty7-session".into()),
+            },
+            CodexCandidate {
+                pane: 2,
+                runs_codex: true,
+                cwd: second.cwd.clone(),
+                session: None,
+            },
+        ];
+        // The shared app-server still names pane 1 before the first prompt.
+        let target = codex_report_target(
+            &candidates,
+            1,
+            Some("new-session"),
+            Some(&second_dir),
+            false,
+        );
+        assert_eq!(target, Some(2));
+        let owner = match target {
+            Some(1) => &mut first,
+            Some(2) => &mut second,
+            _ => panic!("no owner"),
+        };
+        apply_socket_agent_event(owner, &start, &gate).unwrap();
+        let prompt = serde_json::json!({"agent":"codex", "event":"prompt-submit",
+            "session_id":"new-session", "cwd":second_dir, "prompt":"first message"})
+        .to_string();
+        apply_socket_agent_event(&mut second, &prompt, &gate).unwrap();
+        assert_eq!(
+            first.agent_session.as_ref().unwrap().cwd.as_ref(),
+            Some(&first_dir)
+        );
+        assert_eq!(
+            first.agent_session.as_ref().unwrap().session_id.as_deref(),
+            Some("ctty7-session")
+        );
+        assert_eq!(
+            second.agent_session.as_ref().unwrap().cwd.as_ref(),
+            Some(&second_dir)
+        );
+        assert_eq!(
+            second.agent_session.as_ref().unwrap().status,
+            crate::core::cli_agent::AgentStatus::Working
+        );
+        let ring = second.ring.flatten();
+        assert!(
+            ring.windows(b"first message".len())
+                .any(|w| w == b"first message"),
+            "reattach must keep the conversation marker"
+        );
+        let outputs: Vec<_> = rx
+            .try_iter()
+            .filter_map(|m| match m {
+                DaemonMsg::Output(bytes) => Some(bytes),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(outputs.len(), 2);
+        assert_eq!(outputs.concat(), ring);
+        assert_eq!(
+            gate.queued_bytes(),
+            ring.len() as i64,
+            "socket markers use the existing output budget"
+        );
+    }
+
+    #[test]
+    fn socket_reports_reject_invalid_and_dead_panes_without_output() {
+        let mut st = test_state(true);
+        let gate = OutputGate::new();
+        assert!(apply_socket_agent_event(&mut st, "{broken", &gate).is_err());
+        st.alive = false;
+        assert!(
+            apply_socket_agent_event(
+                &mut st,
+                r#"{"agent":"codex","event":"session-start"}"#,
+                &gate
+            )
+            .is_err()
+        );
+        assert!(st.ring.flatten().is_empty());
+        assert!(st.agent_session.is_none());
     }
 }
