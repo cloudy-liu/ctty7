@@ -25,6 +25,15 @@ to check relative JavaScript, SVG decoding, CSS grid, page dimensions, a DOM
 button click and refresh. These callbacks exist only with
 `markdown-visual-tests`; production builds have no test script interface.
 
+The runner also switches to `next.htm` and back and checks that the same browser
+instance serves both files. Resources live in a parent directory, exercising
+`../assets/` as well as Unicode paths. It then opens a fixture-owned temporary
+HTML file, deletes that file and refreshes, requiring asynchronous navigation
+failure to restore source mode with the original buffer intact. WebView2
+navigation-completed/process-failed events and a WKWebView navigation-delegate
+observer feed the same document-panel recovery. Failures retain their request
+identity, and stale requests or different active documents are ignored.
+
 The macOS artifact includes a desktop screenshot taken with `screencapture`.
 GPUI's GPU-only capture cannot prove a native child view is visible. Inspect
 the screenshot separately from the DOM results; successful evaluation or a
@@ -33,6 +42,13 @@ The artifact also records the browser user agent, architecture, DPR, viewport
 and one cold resource-readiness sample. This sample includes document opening
 and polling overhead and does not measure first visible paint or establish a
 performance target.
+
+On 2026-10-21 the Windows development run passed resources, CSS grid, script
+interaction, refresh, both file switches, instance reuse and deleted-file
+recovery. At a 489 × 829 CSS-pixel viewport and DPR 1.75 with Edge/WebView2 155,
+one debug sample recorded 3,454.58 ms to polled resource readiness, 336.29 ms
+for refresh and 378.80 / 395.56 ms for the two file switches. These are single
+observations, including polling overhead, not percentiles or release benchmarks.
 
 Complete the following real-device checks before release, recording Windows,
 Apple Silicon and Intel separately:

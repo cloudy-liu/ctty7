@@ -133,13 +133,13 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     app.editor_sync_html_preview(true, window, cx);
                 })).unwrap();
                 cx.background_executor().timer(Duration::from_secs(2)).await;
-                std::fs::write(&options.output, serde_json::to_vec_pretty(&serde_json::json!({
+                let mut evidence = serde_json::json!({
                     "os": std::env::consts::OS, "arch": std::env::consts::ARCH,
                     "cold_load_poll_ms": cold_load_ms, "refresh_poll_ms": refresh_ms,
                     "switch_poll_ms": switch_ms, "samples": samples,
                     "script_click": true, "refresh": true,
                     "note": "DOM polling includes resource readiness; it does not measure first visible paint. Screenshot must be inspected separately."
-                })).unwrap()).unwrap();
+                });
                 eprintln!("NATIVE_HTML_READY_FOR_CAPTURE");
                 cx.background_executor().timer(Duration::from_secs(options.hold_seconds.unwrap_or(4))).await;
                 cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
@@ -148,6 +148,40 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     assert!(app.editor.html.is_none());
                 })).unwrap();
                 drop(view);
+                // Delete only a fixture-owned temporary file, never the input
+                // document. Navigation begins successfully and fails later.
+                let mut fault = tempfile::Builder::new().suffix(".html").tempfile().unwrap();
+                use std::io::Write as _;
+                let saved = "<!doctype html><title>Failure recovery</title><p>Saved buffer</p>";
+                fault.write_all(saved.as_bytes()).unwrap();
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    app.editor_open_on_host(tty7_core::host::local::LocalHost::new(), fault.path(), window, cx);
+                })).unwrap();
+                let started = Instant::now();
+                loop {
+                    assert!(started.elapsed() < Duration::from_secs(15), "fault fixture did not load");
+                    cx.background_executor().timer(Duration::from_millis(100)).await;
+                    let view = app.read_with(cx, |app, _| app.editor.html.clone());
+                    if let Some(view) = view {
+                        let rx = view.read_with(cx, |view, cx| view.inspect("document.title", cx)).unwrap();
+                        if rx.recv().await.unwrap_or_default() == "\"Failure recovery\"" { break; }
+                    }
+                }
+                fault.close().unwrap();
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    app.editor_refresh_html(window, cx);
+                })).unwrap();
+                let started = Instant::now();
+                loop {
+                    assert!(started.elapsed() < Duration::from_secs(15), "asynchronous failure did not restore source");
+                    cx.background_executor().timer(Duration::from_millis(100)).await;
+                    if app.read_with(cx, |app, cx| {
+                        let file = app.tab_code().unwrap().active_file().unwrap();
+                        !file.preview && app.editor.html.is_none() && file.input.read(cx).text().to_string() == saved
+                    }) { break; }
+                }
+                evidence["navigation_failure_recovery"] = true.into();
+                std::fs::write(&options.output, serde_json::to_vec_pretty(&evidence).unwrap()).unwrap();
                 eprintln!("NATIVE_HTML_SOURCE_RESTORED");
                 cx.background_executor().timer(Duration::from_secs(10)).await;
                 eprintln!("NATIVE_HTML_PASSED");

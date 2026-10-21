@@ -170,6 +170,8 @@ libc = "0.2"
 # PATH comes back mangled. 0.61 is already in the tree (tray-icon pulls it), so
 # this pins no new code.
 [target.'cfg(windows)'.dependencies]
+# Observe asynchronous WebView2 navigation failures; already pulled by WRY.
+webview2-com = "0.38"
 windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Storage_FileSystem",
@@ -229,6 +231,9 @@ winresource = "0.1"
 # app appearance to match the active theme (see `ui::theme::sync_native_appearance`)
 # so the native traffic-light buttons render in the right light/dark style.
 [target.'cfg(target_os = "macos")'.dependencies]
+# Forward WRY's navigation delegate while observing WKWebView failures.
+objc2-web-kit = { version = "0.3", default-features = false, features = ["WKNavigationDelegate", "WKNavigation", "WKWebView", "WKNavigationAction", "WKNavigationResponse", "WKDownload", "block2", "objc2-app-kit"] }
+block2 = "0.6"
 # CFStringTokenizer FFI for dictionary-based CJK word segmentation on
 # double-click (`terminal::smart_select`). Already in the tree transitively,
 # and it makes jieba unnecessary here — see the non-macos section below.

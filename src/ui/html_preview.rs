@@ -11,16 +11,21 @@ use std::{
 use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Render, Window, prelude::*};
 use raw_window_handle::{RawWindowHandle, WindowHandle};
 
+mod navigation;
+pub(crate) use navigation::Failure;
+
 pub(crate) struct PendingHtmlPreview {
     path: PathBuf,
     webview: wry::WebView,
     started: Rc<Cell<Instant>>,
+    observer: navigation::Observer,
 }
 
 pub(crate) struct HtmlPreview {
     pub(crate) path: PathBuf,
     view: Entity<gpui_wry::WebView>,
     started: Rc<Cell<Instant>>,
+    observer: navigation::Observer,
 }
 
 impl HtmlPreview {
@@ -52,17 +57,19 @@ impl HtmlPreview {
                     }
                 }
             });
-        #[cfg(windows)]
-        let builder = builder.with_url(url.as_str());
         // The handle comes from the current GPUI window and is used only
         // synchronously on its UI thread. No native handle crosses threads.
         let webview = builder.build_as_child(&unsafe { WindowHandle::borrow_raw(parent) })?;
+        let observer = navigation::Observer::install(&webview)?;
+        #[cfg(windows)]
+        webview.load_url(url.as_str())?;
         #[cfg(target_os = "macos")]
         load_file_url(&webview, &url)?;
         Ok(PendingHtmlPreview {
             path: path.to_path_buf(),
             webview,
             started,
+            observer,
         })
     }
 
@@ -71,6 +78,7 @@ impl HtmlPreview {
             path,
             webview,
             started,
+            observer,
         } = pending;
         let view = cx.new(|cx| gpui_wry::WebView::new(webview, window, cx));
         // The adapter starts visible internally even when the native builder
@@ -80,6 +88,7 @@ impl HtmlPreview {
             path,
             view,
             started,
+            observer,
         }
     }
 
@@ -90,6 +99,7 @@ impl HtmlPreview {
         let url = url::Url::from_file_path(path)
             .map_err(|_| anyhow::anyhow!("HTML preview requires an absolute local file path"))?;
         self.started.set(Instant::now());
+        self.observer.begin();
         #[cfg(windows)]
         self.view.read(cx).raw().load_url(url.as_str())?;
         #[cfg(target_os = "macos")]
@@ -100,8 +110,17 @@ impl HtmlPreview {
 
     pub(crate) fn reload(&self, cx: &App) -> anyhow::Result<()> {
         self.started.set(Instant::now());
+        self.observer.begin();
         self.view.read(cx).raw().reload()?;
         Ok(())
+    }
+
+    pub(crate) fn failures(&self) -> smol::channel::Receiver<Failure> {
+        self.observer.failures.clone()
+    }
+
+    pub(crate) fn is_current_failure(&self, failure: &Failure) -> bool {
+        self.observer.is_current(failure)
     }
 
     #[cfg(feature = "markdown-visual-tests")]

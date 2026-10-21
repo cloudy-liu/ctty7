@@ -969,6 +969,46 @@ impl Tty7App {
                             let html =
                                 super::html_preview::HtmlPreview::attach(pending, window, cx);
                             this.editor.html = Some(cx.new(|_| html));
+                            let html = this.editor.html.as_ref().unwrap();
+                            let failures = html.read(cx).failures();
+                            let html = html.downgrade();
+                            cx.spawn_in(window, async move |this, cx| {
+                                while let Ok(failure) = failures.recv().await {
+                                    let _ = this.update_in(cx, |this, window, cx| {
+                                        let Some(current) =
+                                            this.editor.html.as_ref().filter(|current| {
+                                                current.downgrade() == html
+                                                    && current.read(cx).is_current_failure(&failure)
+                                            })
+                                        else {
+                                            return;
+                                        };
+                                        let path = &current.read(cx).path;
+                                        if !this
+                                            .tab_code()
+                                            .and_then(|code| code.active_file())
+                                            .is_some_and(|file| {
+                                                file.preview
+                                                    && can_preview_html(file)
+                                                    && file.path == *path
+                                            })
+                                        {
+                                            return;
+                                        }
+                                        this.editor_fallback_html_source();
+                                        this.focus_editor(window, cx);
+                                        window.push_notification(
+                                            t_fmt(
+                                                L10nKey::EditorHtmlFailed,
+                                                &[("error", &failure.message)],
+                                            ),
+                                            cx,
+                                        );
+                                        cx.notify();
+                                    });
+                                }
+                            })
+                            .detach();
                             if let Some(code) = this.tab_code_mut() {
                                 code.files[code.active].preview = true;
                             }
