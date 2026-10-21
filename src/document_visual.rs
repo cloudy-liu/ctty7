@@ -253,6 +253,16 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                         window.refresh();
                         let _ = window.draw(cx);
                         let file = app.read(cx).tab_code().unwrap().active_file().unwrap();
+                        assert_eq!(
+                            file.path, files[options.active],
+                            "selected document changed before capture"
+                        );
+                        if let Some(preview) = options.preview {
+                            assert_eq!(
+                                file.preview, preview,
+                                "requested preview failed before capture"
+                            );
+                        }
                         let html = file.preview
                             && matches!(
                                 file.path.extension().and_then(|s| s.to_str()),
