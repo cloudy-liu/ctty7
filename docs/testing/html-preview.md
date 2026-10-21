@@ -50,6 +50,29 @@ one debug sample recorded 3,454.58 ms to polled resource readiness, 336.29 ms
 for refresh and 378.80 / 395.56 ms for the two file switches. These are single
 observations, including polling overhead, not percentiles or release benchmarks.
 
+The same run used Windows 11 build 22000 and a Ryzen 7 5800H with 16 logical
+processors. Three process-tree samples per state, using the existing
+`scripts/bench/html-preview-memory.ps1`, gave these medians. The GUI and its
+browser descendants are included; the shared session daemon is excluded.
+
+| State | WebView2 processes | Private resident MiB | Private committed MiB | Idle CPU, one core % |
+| --- | ---: | ---: | ---: | ---: |
+| Active preview after refresh and switching | 6 | 133.12 | 329.25 | 0 |
+| Source restored after navigation failure | 0 | 19.80 | 108.21 | 0 |
+
+The source samples observed 5, then 0, then 0 browser processes as shutdown
+completed. This establishes short-run process cleanup on this Windows sample,
+not long-term leak behavior or macOS resource reclamation. There was no matched
+pre-opening baseline or release-profile comparison in this run.
+
+Final local `cargo test --workspace --locked` passed 3,131 tests with 12 ignored.
+All six focused HTML regressions pass, including the two observed red/green
+cases for column-only navigation and pending unsaved edits. `cargo check`,
+the native visual-feature build, formatting, Host boundary and four pinned
+agent-manifest Python tests also pass. Standards review found no violations;
+Spec review found no remaining definite implementation blocker and retains
+the native-device validation gap below.
+
 Complete the following real-device checks before release, recording Windows,
 Apple Silicon and Intel separately:
 
