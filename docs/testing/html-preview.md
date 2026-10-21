@@ -4,6 +4,24 @@ The Windows preview loads the original saved `file://` URL through WebView2.
 Chrome is the browser reference. The application uses one lazy browser view per
 window and releases it when the user leaves HTML preview.
 
+## Default opening regression
+
+Starting with v0.7.1, a newly opened saved local Windows HTML/HTM file requests
+browser preview immediately. The render loop creates the browser lazily even
+when no browser instance exists yet. Explicit line/column navigation opens the
+source editor, and reactivating an already open file preserves its selected mode.
+Unsaved source changes still require saving before preview or refresh.
+
+The v0.7.0 release included the browser implementation from PR #172 but omitted
+the local default-opening changes. Its original test explicitly required source
+mode on first open. The preserved changes were recovered from the release
+preparation stash; see the [local-change audit](local-change-audit-v0.7.1.md).
+Regression coverage now checks both the selected mode and the render-loop sync
+request, including before the first browser exists and after switching to source.
+
+The browser comparisons and resource measurements below were recorded for
+PR #172. They are historical measurements, not new v0.7.1 performance results.
+
 ## Visual evidence
 
 | Before, source only | After, embedded browser |
@@ -125,7 +143,7 @@ the focus, target-size and composition changes.
 
 1. Build with `cargo build --locked --features markdown-visual-tests --bin tty7-app`.
 2. Launch an isolated app configuration, open the fixture from the file tree,
-   and measure source mode with `html-preview-memory.ps1`.
+   switch to source, and measure source mode with `html-preview-memory.ps1`.
 3. Click the preview icon, exercise the page and refresh, then take active and
    closed process-tree samples using the same root PID.
 4. For test captures only, launch with

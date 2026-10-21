@@ -39,6 +39,15 @@ Use a strict `vX.Y.Z` tag matching the workspace version and package metadata.
 The first ctty7 release is v0.1.0. Keep all previous tags and Releases.
 There is one official release channel; no rolling or prerelease channel.
 
+Before freezing the candidate, inspect local stashes and ctty7-related temporary
+patches and worktrees. Compare their behavior against the candidate, because a
+squash merge changes commit identities and an empty working tree does not prove
+that locally validated changes were merged. Record which changes are included,
+already present, superseded, or intentionally archived. Preserve the originals
+until their disposition is established; do not clear local edits merely to make
+release preparation clean. The [v0.7.1 audit](../testing/local-change-audit-v0.7.1.md)
+records the default-HTML-preview omission that this check prevents.
+
 At release preparation time, query the latest published custom release again
 and review the full range from that tag to the intended release commit,
 including merge and release commits, so no change is missed.
@@ -56,9 +65,9 @@ only, following the format in AGENTS.md:
 - no inherited capabilities presented as new, and no CI run IDs or checksum
   detail; link the one-time manual migration guide when it applies.
 
-Choose the next semantic version for the accepted scope. The current published
-release is v0.3.0; its [verification record](../testing/release-v0.3.0.md)
-documents the source, package checks, and completed publication.
+Choose the next semantic version for the accepted scope. Query the repository's
+latest published release instead of inferring it from this runbook's historical
+verification records.
 
 ## Build, verify, publish
 

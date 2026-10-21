@@ -7528,7 +7528,7 @@ impl Render for Tty7App {
         self.declare_displayed_panes(cx);
         self.scm_sync_watchers(window, cx);
         #[cfg(windows)]
-        if self.editor.html.is_some() {
+        if self.editor_needs_html_preview_sync() {
             let unobstructed = self.settings.is_none()
                 && self.palette.is_none()
                 && self.switcher.is_none()
