@@ -3,6 +3,8 @@
     windows_subsystem = "windows"
 )]
 
+#[cfg(feature = "markdown-visual-tests")]
+mod agent_attention_visual;
 mod core;
 mod daemon;
 #[cfg(feature = "markdown-visual-tests")]
@@ -527,6 +529,15 @@ fn main() {
     }
 
     apply_config_dir_arg(&args);
+
+    #[cfg(feature = "markdown-visual-tests")]
+    if let Some(index) = args
+        .iter()
+        .position(|arg| arg == "--agent-attention-visual")
+    {
+        agent_attention_visual::run(args.get(index + 1).expect("attention fixture options path"));
+        return;
+    }
 
     #[cfg(feature = "markdown-visual-tests")]
     if let Some(index) = args.iter().position(|arg| arg == "--diff-profile") {

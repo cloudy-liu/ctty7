@@ -4843,12 +4843,20 @@ impl Tty7App {
         }
     }
 
-    pub(crate) fn mark_tab_unread(&mut self, index: usize, cx: &mut Context<Self>) {
+    pub(crate) fn mark_tab_unread(
+        &mut self,
+        index: usize,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         use crate::core::cli_agent::AgentStatus;
         let Some(tab) = self.tabs.get(index) else {
             return;
         };
-        let refocus = (index == self.active).then(|| tab.focus_target()).flatten();
+        let refocus = (index == self.active)
+            .then(|| tab.focus_target())
+            .flatten()
+            .filter(|leaf| !leaf.focus_handle(cx).is_focused(window));
         for leaf in tab.pane.terminals() {
             let refocus_incoming =
                 refocus.as_ref().map(|s| s.entity_id()) == Some(leaf.entity_id());
@@ -4858,6 +4866,11 @@ impl Tty7App {
                     cx.notify();
                 }
             });
+        }
+        // The tab context menu does not restore the terminal's focus itself.
+        // Deliver the protected refocus now, instead of swallowing a later click.
+        if let Some(leaf) = refocus {
+            leaf.focus_handle(cx).focus(window, cx);
         }
         cx.notify();
     }
@@ -5530,7 +5543,7 @@ impl Tty7App {
             CloseOtherTabs => self.close_other_tabs(self.active, window, cx),
             CloseTabsToTheRight => self.close_tabs_right_of(self.active, window, cx),
             CopyWorkingDirectory => self.copy_active_cwd(window, cx),
-            MarkTabUnread => self.mark_tab_unread(self.active, cx),
+            MarkTabUnread => self.mark_tab_unread(self.active, window, cx),
             ForkAgentSession => self.fork_active_pane_session(ForkPlacement::NewTab, window, cx),
             CopyAgentSessionId => self.copy_agent_session_id(self.active, window, cx),
             RenameWorkspace => self.start_workspace_rename(window, cx),
@@ -8165,8 +8178,8 @@ impl Render for Tty7App {
                 .on_action(cx.listener(|this, _: &CopyWorkingDirectory, window, cx| {
                     this.copy_active_cwd(window, cx)
                 }))
-                .on_action(cx.listener(|this, _: &MarkTabUnread, _window, cx| {
-                    this.mark_tab_unread(this.active, cx)
+                .on_action(cx.listener(|this, _: &MarkTabUnread, window, cx| {
+                    this.mark_tab_unread(this.active, window, cx)
                 }))
                 .on_action(cx.listener(|this, _: &ForkAgentSession, window, cx| {
                     this.fork_active_pane_session(ForkPlacement::NewTab, window, cx)
@@ -10532,6 +10545,73 @@ mod run_badge_gpui_tests {
             vcx.background_executor.run_until_parked();
         }
         render_probe::draws()
+    }
+
+    #[gpui::test]
+    fn marking_a_tab_unread_restores_menu_focus_without_swallowing_the_next_visit(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, mut vcx, mut streams) = working_window(cx, 2);
+        app.update_in(&mut vcx, |app, window, cx| app.focus_active(window, cx));
+        for stream in &mut streams {
+            report(stream, AgentStatus::Done);
+        }
+        for _ in 0..200 {
+            vcx.background_executor.run_until_parked();
+            if app.read_with(&vcx, |app, cx| {
+                app.tabs
+                    .iter()
+                    .all(|tab| tab.agent_status(cx) == Some(AgentStatus::Done))
+            }) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
+        let pane = app.read_with(&vcx, |app, _| app.tabs[0].pane.terminals()[0].clone());
+        for from_menu in [true, false] {
+            let menu_focus = from_menu.then(|| {
+                vcx.update(|window, cx| {
+                    let focus = cx.focus_handle();
+                    focus.focus(window, cx);
+                    focus
+                })
+            });
+            vcx.background_executor.run_until_parked();
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.mark_tab_unread(0, window, cx)
+            });
+            vcx.background_executor.run_until_parked();
+            vcx.update(|window, cx| {
+                assert!(
+                    pane.read(cx).focus_handle.is_focused(window),
+                    "the menu must return focus"
+                );
+                assert!(
+                    pane.read(cx).agent_result_unread(),
+                    "marking unread must survive that refocus"
+                );
+            });
+            drop(menu_focus);
+            vcx.deactivate_window();
+            vcx.update(|window, _| window.activate_window());
+            vcx.background_executor.run_until_parked();
+            assert!(!pane.read_with(&vcx, |pane, _| pane.agent_result_unread()));
+        }
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.mark_tab_unread(1, window, cx)
+        });
+        vcx.background_executor.run_until_parked();
+        vcx.update(|window, cx| {
+            assert!(
+                pane.read(cx).focus_handle.is_focused(window),
+                "an inactive tab must not steal focus"
+            );
+        });
+        assert!(app.read_with(&vcx, |app, cx| {
+            app.tabs[1].pane.terminals()[0]
+                .read(cx)
+                .agent_result_unread()
+        }));
     }
 
     #[gpui::test]
