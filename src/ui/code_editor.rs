@@ -1726,6 +1726,9 @@ impl Tty7App {
             row
         };
         let menu_app = cx.entity().downgrade();
+        let surface = cx.global::<crate::ui::presets::Surfaces>().window;
+        let font = gpui::font(cx.theme().font_family.clone());
+        let rem = window.rem_size().as_f32();
         row.flex_none()
             .min_w_0()
             .h(px(crate::ui::app::TITLE_BAR_HEIGHT))
@@ -1755,6 +1758,19 @@ impl Tty7App {
                             code.files.iter().enumerate().map(|(ix, file)| {
                                 let id = file.input.entity_id();
                                 let name = file.label();
+                                let text_width = crate::ui::tab_strip::measure_text(
+                                    window.text_system(),
+                                    &font,
+                                    rem * 0.875,
+                                    &name,
+                                );
+                                // Match the row's padding, gaps, icon, close target and border.
+                                let chrome_width = rem * 1.75
+                                    + crate::ui::file_icons::ROW_ICON
+                                    + crate::ui::tab_strip::MIN_TARGET
+                                    + 1.
+                                    + if file.dirty { 6. + rem * 0.375 } else { 0. };
+                                let tab_width = (text_width + chrome_width).ceil().min(260.);
                                 let full_path = crate::ui::path_display::readable_path(
                                     &file.path,
                                     file.host.id(),
@@ -1767,6 +1783,7 @@ impl Tty7App {
                                     .occlude()
                                     .flex_none()
                                     .h_full()
+                                    .w(px(tab_width))
                                     .max_w_full()
                                     .px_2()
                                     .gap_1p5()
@@ -1775,12 +1792,13 @@ impl Tty7App {
                                     .text_sm()
                                     .cursor_pointer()
                                     .when(ix == code.active, |tab| {
-                                        tab.bg(cx.theme().secondary)
-                                            .text_color(cx.theme().foreground)
+                                        tab.bg(gpui::rgb(surface.selected))
+                                            .text_color(gpui::rgb(surface.text_selected))
                                     })
                                     .when(ix != code.active, |tab| {
-                                        tab.text_color(cx.theme().muted_foreground)
-                                            .hover(|tab| tab.bg(cx.theme().secondary.opacity(0.5)))
+                                        tab.bg(gpui::rgb(surface.base))
+                                            .text_color(gpui::rgb(surface.text_resting))
+                                            .hover(|tab| tab.bg(gpui::rgb(surface.hover)))
                                     })
                                     .tooltip(move |window, cx| {
                                         gpui_component::tooltip::Tooltip::new(full_path.clone())
@@ -1803,10 +1821,24 @@ impl Tty7App {
                                         cx.notify();
                                     }))
                                     .child(
-                                        crate::ui::file_icons::FileIcon::for_file(&name)
-                                            .render(px(crate::ui::file_icons::ROW_ICON), window),
+                                        div().flex_none().child(
+                                            crate::ui::file_icons::FileIcon::for_file(&name)
+                                                .render(
+                                                    px(crate::ui::file_icons::ROW_ICON),
+                                                    window,
+                                                ),
+                                        ),
                                     )
-                                    .child(div().min_w_0().truncate().child(name))
+                                    .child(
+                                        div()
+                                            .debug_selector(move || {
+                                                format!("editor-file-name-{ix}")
+                                            })
+                                            .flex_1()
+                                            .min_w_0()
+                                            .truncate()
+                                            .child(name),
+                                    )
                                     .when(file.dirty, |tab| {
                                         tab.child(
                                             div()
@@ -1825,6 +1857,7 @@ impl Tty7App {
                                             .ghost()
                                             .xsmall()
                                             .tooltip(t(L10nKey::Close))
+                                            .flex_shrink_0()
                                             .w(px(crate::ui::tab_strip::MIN_TARGET))
                                             .h(px(crate::ui::tab_strip::MIN_TARGET))
                                             .on_click(cx.listener(move |app, _, window, cx| {
@@ -2339,6 +2372,67 @@ mod tests {
                 assert_eq!(code.files.len(), remaining);
                 assert_eq!(code.visible, remaining != 0);
             });
+        }
+    }
+
+    #[gpui::test]
+    fn document_tabs_show_typical_filenames_when_the_header_has_room(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        vcx.simulate_resize(gpui::size(px(1200.), px(760.)));
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.set_document_layout(crate::core::config::DocumentLayout::Fill, cx);
+            for name in ["migration.md", "release.md", "settings.rs"] {
+                app.editor_install_file(
+                    tty7_core::host::local::LocalHost::new(),
+                    Path::new("/work").join(name),
+                    String::new(),
+                    None,
+                    window,
+                    cx,
+                );
+            }
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        for (filename, name_selector, tab_selector, close_selector) in [
+            (
+                "migration.md",
+                "editor-file-name-0",
+                "editor-file-tab-0",
+                "editor-file-close-0",
+            ),
+            (
+                "release.md",
+                "editor-file-name-1",
+                "editor-file-tab-1",
+                "editor-file-close-1",
+            ),
+            (
+                "settings.rs",
+                "editor-file-name-2",
+                "editor-file-tab-2",
+                "editor-file-close-2",
+            ),
+        ] {
+            let name = vcx.debug_bounds(name_selector).unwrap();
+            let tab = vcx.debug_bounds(tab_selector).unwrap();
+            let close = vcx.debug_bounds(close_selector).unwrap();
+            let text_width = vcx.update(|window, cx| {
+                crate::ui::tab_strip::measure_text(
+                    window.text_system(),
+                    &gpui::font(cx.theme().font_family.clone()),
+                    window.rem_size().as_f32() * 0.875,
+                    filename,
+                )
+            });
+            assert!(
+                name.size.width >= px(text_width - 0.5),
+                "ordinary filenames must be readable instead of an ellipsis: {name_selector}: {name:?}"
+            );
+            assert!(name.left() > tab.left() && name.right() <= close.left());
+            assert!(close.right() <= tab.right());
         }
     }
 
