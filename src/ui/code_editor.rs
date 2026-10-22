@@ -1727,6 +1727,7 @@ impl Tty7App {
         };
         let menu_app = cx.entity().downgrade();
         let surface = cx.global::<crate::ui::presets::Surfaces>().window;
+        let inactive_tab = surface.hover;
         let font = gpui::font(cx.theme().font_family.clone());
         let rem = window.rem_size().as_f32();
         row.flex_none()
@@ -1752,6 +1753,7 @@ impl Tty7App {
                     .flex_1()
                     .min_w_0()
                     .h_full()
+                    .bg(gpui::rgb(inactive_tab))
                     .overflow_x_scroll()
                     .when_some(self.tab_code(), |strip, code| {
                         strip.track_scroll(&code.tab_scroll).children(
@@ -1792,13 +1794,13 @@ impl Tty7App {
                                     .text_sm()
                                     .cursor_pointer()
                                     .when(ix == code.active, |tab| {
-                                        tab.bg(gpui::rgb(surface.selected))
+                                        tab.bg(gpui::rgb(surface.base))
                                             .text_color(gpui::rgb(surface.text_selected))
                                     })
                                     .when(ix != code.active, |tab| {
-                                        tab.bg(gpui::rgb(surface.base))
+                                        tab.bg(gpui::rgb(inactive_tab))
                                             .text_color(gpui::rgb(surface.text_resting))
-                                            .hover(|tab| tab.bg(gpui::rgb(surface.hover)))
+                                            .hover(|tab| tab.bg(gpui::rgb(surface.selected)))
                                     })
                                     .tooltip(move |window, cx| {
                                         gpui_component::tooltip::Tooltip::new(full_path.clone())
@@ -1994,6 +1996,7 @@ impl Tty7App {
                                         .min_w_0()
                                         .overflow_hidden()
                                         .text_ellipsis()
+                                        .text_color(cx.theme().muted_foreground)
                                         .child(name.clone()),
                                 )
                             })
