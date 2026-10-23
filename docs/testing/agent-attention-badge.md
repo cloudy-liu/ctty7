@@ -201,3 +201,67 @@ computer use failed to activate the captured test and Screenshot Tool windows.
 Vertical/horizontal shell placement, pinned/grouped-button rendering and
 Explorer restart remain pending interactive acceptance. The screenshots
 elsewhere in this document are historical evidence, not captures of this fix.
+
+## Cleared taskbar icon follow-up on 2026-10-23
+
+The new native acceptance found a separate clearing bug on the integrated
+main build. The fixture reported aggregate `attention: false` and all Agent
+panes had `unread: false`, but Explorer still showed the upper-right reminder.
+Returning a window to its null icon override restored the title-bar fallback
+without refreshing the taskbar bitmap.
+
+The correction saves the effective original icon. If `WM_GETICON` returns
+null, it obtains the borrowed class icon through `GetClassLongPtrW`, using
+the large class icon when the small class handle is absent. Clearing now
+sends a real, unbadged icon handle. The window class retains ownership, so
+the application creates no additional icons and never destroys class icons.
+Explicit per-window icons and the existing attention-icon lifetime remain
+covered by the native-window tests.
+
+Microsoft documents the null-window-icon/class-icon fallback in
+[WM_GETICON](https://learn.microsoft.com/en-us/windows/win32/winmsg/wm-geticon).
+Chromium's own [class-icon restoration](https://chromium.googlesource.com/chromium/src/+/49f72db8dbff60fb22dfddf09dddeffe54f674db/chrome/browser/ui/views/frame/glass_browser_frame_view.cc)
+also uses explicit class handles to refresh a taskbar icon after an override.
+
+### Native Before/After
+
+These are lossless crops of full-desktop captures made through Windows
+Screenshot Tool. Both show the fixture after its aggregate attention became
+false. Only the fixture taskbar button is retained in the repository images.
+
+| Before, attention cleared but bitmap stale | After, attention cleared and original logo restored |
+| --- | --- |
+| ![Stale attention circle after clearing](images/agent-attention-clear/before-cleared-taskbar.png) | ![Normal logo after clearing](images/agent-attention-clear/after-cleared-taskbar.png) |
+
+The baseline is fork main `b0b57316`; the changed build adds the class-icon
+fallback correction. Both runs use the same two-window
+`--agent-attention-visual` fixture, Windows 11 build 22000.2538, 175% display
+scale, a 2560 by 1600 desktop and the bottom horizontal taskbar.
+
+Send `{"sequence":1,"reports":[[0,0,"done"]]}` while the first Agent pane is
+unfocused, then `{"sequence":2,"reports":[[0,0,"working"]]}`. Wait for the
+fixture's state JSON to report sequence 2 and `attention: false`, and allow
+the existing taskbar poll to run before capture. In both recorded states,
+every pane reports `unread: false`. The original run retains the circle;
+the corrected run displays the plain logo. The earlier capture also verifies
+that active attention is visibly composed into the upper-right of the real
+taskbar icon.
+
+### Regression and limits
+
+`clearing_attention_supplies_the_class_icon_to_explorer` registers a real
+Win32 class with an icon but no per-window override. It failed before the
+fix because clearing installed two null handles. It passes after the fix,
+covering repeated attention/clear cycles, both icon slots and dropping the
+taskbar owner while attention is active. The full tray suite passes 11 tests.
+The workspace suite reports 3,158 passed and 12 ignored in its standard
+summaries. The native-feature build, rustfmt, diff whitespace and Host
+boundary checks pass.
+
+The earlier handle/pixel tests did not cover a window with a class icon and
+no explicit icon, which is the production GPUI case. Their passing null-handle
+assertions could not establish that Explorer had cleared its cached bitmap.
+The native comparison above closes that coverage gap for this environment.
+Vertical taskbars, live orientation changes, other taskbar customizations and
+Explorer recreation remain unverified; these screenshots do not claim those
+checks passed.
