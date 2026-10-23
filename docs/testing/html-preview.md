@@ -22,8 +22,9 @@ and copies the existing fixture into a directory containing Chinese characters
 and spaces, with an uppercase `.HTML` extension. It opens the document through
 the production editor entry point and uses actual WebView evaluation callbacks
 to check relative JavaScript, SVG decoding, CSS grid, page dimensions, a DOM
-button click and refresh. These callbacks exist only with
-`markdown-visual-tests`; production builds have no test script interface.
+button click and refresh. Arbitrary inspection exists only with
+`markdown-visual-tests`; production builds evaluate only host-owned scroll
+capture and restoration scripts and have no page-to-app script bridge.
 
 The runner also switches to `next.htm` and back and checks that the same browser
 instance serves both files. Resources live in a parent directory, exercising
@@ -33,6 +34,27 @@ failure to restore source mode with the original buffer intact. WebView2
 navigation-completed/process-failed events and a WKWebView navigation-delegate
 observer feed the same document-panel recovery. Failures retain their request
 identity, and stale requests or different active documents are ignored.
+
+The file-tab regression scrolls the original page to 600 CSS pixels, switches
+to a second HTML file and returns, requiring the same reading position. It also
+requires the browser to release when switching to Markdown or source and to
+restore the reading position after recreation. Separate sessions opening the
+same path retain different positions; rapid selection changes and closing then
+reopening a path must not transfer a stale position. Assertions allow less than
+one CSS pixel for device-pixel rounding. The fixture page has sufficient height
+for these checks at either viewport.
+The browser captures the outgoing viewport before navigation and restores it
+after the native load-completed event. File buffer identities keep independent
+terminal sessions separate, including when they open the same path. Leaving
+HTML preview releases the singleton after capture. The three-second evaluation
+deadline recovers from a hung renderer; ordinary transitions wait for native
+callbacks and do not use layout delays. Refresh starts the saved page at the top.
+
+On 2026-10-23 the Windows native acceptance reproduced lost scroll after browser
+recreation. The hidden gpui-wry child skipped layout, so restoration ran against
+a zero-size viewport. Sizing the hidden viewport before restoration passed the
+same acceptance, including independent sessions, rapid switches, close/reopen,
+browser release and deleted-file recovery at 175% display scale.
 
 The macOS artifact includes a desktop screenshot taken with `screencapture`.
 GPUI's GPU-only capture cannot prove a native child view is visible. Inspect

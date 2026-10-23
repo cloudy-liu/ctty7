@@ -9,13 +9,13 @@ use objc2_web_kit::{
     WKNavigationResponse, WKNavigationResponsePolicy, WKWebView,
 };
 
-use super::Failure;
+use super::{Event, Failure};
 
 pub(crate) struct State {
     original: Retained<ProtocolObject<dyn WKNavigationDelegate>>,
     request: Rc<Cell<u64>>,
     latest: Cell<(usize, u64)>,
-    tx: smol::channel::Sender<Failure>,
+    tx: smol::channel::Sender<Event>,
 }
 
 define_class!(
@@ -57,10 +57,10 @@ define_class!(
 
         #[unsafe(method(webViewWebContentProcessDidTerminate:))]
         fn terminated(&self, _: &WKWebView) {
-            let _ = self.ivars().tx.try_send(Failure {
+            let _ = self.ivars().tx.try_send(Event::Failed(Failure {
                 request: self.ivars().request.get(),
                 message: "WKWebView content process terminated".into(),
-            });
+            }));
         }
 
         // Preserve WRY's policy, script-queue, timing and download handling.
@@ -111,6 +111,10 @@ define_class!(
                     .original
                     .webView_didFinishNavigation(view, navigation);
             }
+            let (id, request) = self.ivars().latest.get();
+            if navigation_id(navigation) == id {
+                let _ = self.ivars().tx.try_send(Event::Ready(request));
+            }
         }
 
         #[unsafe(method(webView:navigationAction:didBecomeDownload:))]
@@ -148,10 +152,10 @@ impl NavigationDelegate {
         let (id, request) = self.ivars().latest.get();
         // NSURLErrorCancelled is expected when a newer navigation supersedes it.
         if error.code() != -999 && navigation_id(navigation) == id {
-            let _ = self.ivars().tx.try_send(Failure {
+            let _ = self.ivars().tx.try_send(Event::Failed(Failure {
                 request,
                 message: error.localizedDescription().to_string(),
-            });
+            }));
         }
     }
 }
@@ -163,7 +167,7 @@ fn navigation_id(navigation: Option<&WKNavigation>) -> usize {
 pub(super) fn install(
     webview: &wry::WebView,
     request: Rc<Cell<u64>>,
-    tx: smol::channel::Sender<Failure>,
+    tx: smol::channel::Sender<Event>,
 ) -> anyhow::Result<Retained<NavigationDelegate>> {
     use wry::WebViewExtMacOS as _;
     let mtm = MainThreadMarker::new()
