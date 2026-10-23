@@ -1045,6 +1045,8 @@ pub struct AgentEvent {
     pub session_id: Option<String>,
     pub message: Option<String>,
     pub cwd: Option<std::path::PathBuf>,
+    /// Session-start reason, including Codex's `/new` (`clear`).
+    pub source: Option<String>,
     /// What the user typed, on a `PromptSubmit` — already clamped to a label's
     /// worth of text by the hook that sent it, since this rides an OSC payload
     /// the tokenizer abandons rather than truncates past 8 KiB.
@@ -1057,8 +1059,11 @@ pub struct AgentEvent {
 pub fn parse_agent_event(payload: &[u8]) -> Option<AgentEvent> {
     let rest = payload.strip_prefix(b"777;notify;")?;
     let rest = rest.strip_prefix(AGENT_EVENT_SENTINEL.as_bytes())?;
-    let json = rest.strip_prefix(b";")?;
+    parse_agent_event_body(rest.strip_prefix(b";")?)
+}
 
+/// An agent report received over the daemon socket, without its OSC wrapper.
+pub fn parse_agent_event_body(json: &[u8]) -> Option<AgentEvent> {
     #[derive(Deserialize)]
     struct Wire {
         #[serde(default)]
@@ -1074,6 +1079,8 @@ pub fn parse_agent_event(payload: &[u8]) -> Option<AgentEvent> {
         #[serde(default)]
         cwd: Option<String>,
         #[serde(default)]
+        source: Option<String>,
+        #[serde(default)]
         prompt: Option<String>,
     }
 
@@ -1086,6 +1093,7 @@ pub fn parse_agent_event(payload: &[u8]) -> Option<AgentEvent> {
         session_id: nonempty(w.session_id),
         message: nonempty(w.message),
         cwd: nonempty(w.cwd).map(std::path::PathBuf::from),
+        source: nonempty(w.source),
         prompt: nonempty(w.prompt),
     })
 }
@@ -1574,6 +1582,7 @@ mod tests {
             message: msg.map(String::from),
             cwd: None,
             prompt: None,
+            source: None,
         };
 
         s.apply_event(&ev(AgentEventKind::SessionStart, None, Some("sid-1")));
@@ -1630,6 +1639,7 @@ mod tests {
             message: None,
             cwd: None,
             prompt: None,
+            source: None,
         };
 
         let mut s = AgentSessionState::default();
@@ -1666,6 +1676,7 @@ mod tests {
             message: None,
             cwd: cwd.map(PathBuf::from),
             prompt: None,
+            source: None,
         };
 
         let mut s = AgentSessionState::default();

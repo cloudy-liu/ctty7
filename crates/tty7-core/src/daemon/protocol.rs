@@ -759,6 +759,12 @@ pub enum ClientMsg {
         pane_id: u64,
         bytes: Vec<u8>,
     },
+    /// A hook report, acknowledged only after the owning pane accepts it.
+    AgentEvent {
+        pane_id: u64,
+        pid: u32,
+        event: String,
+    },
     Resize(WinSize),
     Detach,
     Kill {
@@ -919,6 +925,7 @@ mod kind {
     pub const SEND_INPUT: u8 = 55;
     pub const HANDOFF: u8 = 56;
     pub const RESUME_AGENT: u8 = 57;
+    pub const AGENT_EVENT: u8 = 58;
 
     pub const SPAWNED: u8 = 1;
     pub const SNAPSHOT: u8 = 2;
@@ -1109,6 +1116,11 @@ impl ClientMsg {
             ClientMsg::SendInput { pane_id, bytes } => {
                 write_frame(w, kind::SEND_INPUT, &to_json(&(pane_id, bytes))?)
             }
+            ClientMsg::AgentEvent {
+                pane_id,
+                pid,
+                event,
+            } => write_frame(w, kind::AGENT_EVENT, &to_json(&(pane_id, pid, event))?),
             ClientMsg::Resize(size) => write_frame(w, kind::RESIZE, &to_json(size)?),
             ClientMsg::Detach => write_frame(w, kind::DETACH, &[]),
             ClientMsg::Kill { pane_id } => write_frame(w, kind::KILL, &to_json(pane_id)?),
@@ -1218,6 +1230,14 @@ impl ClientMsg {
             kind::SEND_INPUT => {
                 let (pane_id, bytes) = from_json(&payload)?;
                 ClientMsg::SendInput { pane_id, bytes }
+            }
+            kind::AGENT_EVENT => {
+                let (pane_id, pid, event) = from_json(&payload)?;
+                ClientMsg::AgentEvent {
+                    pane_id,
+                    pid,
+                    event,
+                }
             }
             kind::RESIZE => ClientMsg::Resize(from_json(&payload)?),
             kind::DETACH => ClientMsg::Detach,
@@ -1448,6 +1468,12 @@ mod tests {
                 owner: None,
                 workspace: None,
                 restore: None,
+            },
+            ClientMsg::AgentEvent {
+                pane_id: 7,
+                pid: 4242,
+                event: r#"{"agent":"codex","event":"session-start","session_id":"new-session"}"#
+                    .into(),
             },
             ClientMsg::Resize(SIZE),
             ClientMsg::Input(vec![b'l', b's', b'\r']),
