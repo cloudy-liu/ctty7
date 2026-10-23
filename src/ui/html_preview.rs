@@ -167,10 +167,14 @@ impl HtmlPreview {
     }
 
     pub(crate) fn capture_scroll(&self, cx: &App) -> Option<smol::channel::Receiver<String>> {
+        // Same-document anchors change the URL without changing its owner.
         self.ready()
             .then(|| {
-                self.evaluate("({url:location.href,x:scrollX,y:scrollY})", cx)
-                    .ok()
+                self.evaluate(
+                    "({url:location.href.split('#')[0],x:scrollX,y:scrollY})",
+                    cx,
+                )
+                .ok()
             })
             .flatten()
     }
@@ -181,7 +185,7 @@ impl HtmlPreview {
         cx: &App,
     ) -> anyhow::Result<smol::channel::Receiver<String>> {
         let url = serde_json::to_string(&self.file_url())?;
-        self.evaluate(&format!("(() => {{ if(location.href !== {url}) return false; window.scrollTo({{left:{},top:{},behavior:'instant'}}); return true; }})()", position[0], position[1]), cx)
+        self.evaluate(&format!("(() => {{ if(location.href.split('#')[0] !== {url}) return false; window.scrollTo({{left:{},top:{},behavior:'instant'}}); return true; }})()", position[0], position[1]), cx)
     }
 
     fn evaluate(&self, script: &str, cx: &App) -> anyhow::Result<smol::channel::Receiver<String>> {

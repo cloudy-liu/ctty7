@@ -12,6 +12,8 @@ use std::{
 use super::*;
 use crate::core::config::Config;
 
+const FOLLOW_FRAGMENT: &str = "(() => { const target = document.createElement('span'); target.id = 'reading-position'; target.style = 'position:absolute;top:600px;left:0;width:1px;height:1px'; const link = document.createElement('a'); link.href = '#reading-position'; document.body.append(target, link); link.click(); return location.hash; })()";
+
 #[derive(Deserialize)]
 struct Options {
     source: PathBuf,
@@ -104,6 +106,11 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     assert!(Instant::now() < deadline, "refresh did not reset the page");
                 }
                 let refresh_ms = refresh_started.elapsed().as_secs_f64() * 1000.;
+                wait_for_scroll(&app, 0., cx).await;
+                let rx = view.read_with(cx, |view, cx| view.inspect(
+                    FOLLOW_FRAGMENT, cx)).unwrap();
+                assert_eq!(rx.recv().await.unwrap(), "\"#reading-position\"",
+                    "same-document links must retain the HTML preview");
                 let started = Instant::now();
                 loop {
                     let rx = view.read_with(cx, |view, cx| view.inspect(
@@ -138,6 +145,12 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     assert!(started.elapsed() < Duration::from_secs(5), "HTML reading position was lost across file tabs");
                     cx.background_executor().timer(Duration::from_millis(50)).await;
                 }
+                let rx = view.read_with(cx, |view, cx| view.inspect(FOLLOW_FRAGMENT, cx)).unwrap();
+                assert_eq!(rx.recv().await.unwrap(), "\"#reading-position\"");
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    app.editor_refresh_html(window, cx);
+                })).unwrap();
+                wait_for_scroll(&app, 0., cx).await;
                 // Exercise the same panel boundary when the singleton is
                 // released, rather than only navigating an existing browser.
                 let mut markdown = tempfile::Builder::new().suffix(".md").tempfile().unwrap();
@@ -229,7 +242,8 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     "cold_load_poll_ms": cold_load_ms, "refresh_poll_ms": refresh_ms,
                     "switch_poll_ms": switch_ms, "samples": samples,
                     "script_click": true, "refresh": true,
-                    "html_tab_scroll": true, "markdown_and_source_scroll": true,
+                    "html_tab_scroll": true, "fragment_scroll_and_refresh": true,
+                    "markdown_and_source_scroll": true,
                     "session_scroll_ownership": true, "rapid_switch_and_reopen": true,
                     "note": "DOM polling includes resource readiness; it does not measure first visible paint. Screenshot must be inspected separately."
                 });
