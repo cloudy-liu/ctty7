@@ -16,6 +16,7 @@ use merman::render::{
     HeadlessRenderer, HostThemeAppearance, HostThemeOutput, HostThemeProfile, HostThemeRoles,
     HostThemeRootBackground,
 };
+use std::sync::{Arc, Mutex};
 
 pub(super) fn aspect_ratio(svg: &str) -> f32 {
     let ratio = || {
@@ -31,6 +32,34 @@ pub(super) fn aspect_ratio(svg: &str) -> f32 {
         (width > 0. && height > 0. && ratio.is_finite() && ratio > 0.).then_some(ratio)
     };
     ratio().unwrap_or(2.)
+}
+
+fn dpi_scaled_svg(image: &ImageSource) -> ImageSource {
+    let ImageSource::Image(svg) = image else {
+        return image.clone();
+    };
+    if svg.format != gpui::ImageFormat::Svg {
+        return image.clone();
+    }
+
+    let bytes: Arc<[u8]> = svg.bytes.clone().into();
+    let cached = Arc::new(Mutex::new(None::<(u32, Arc<gpui::RenderImage>)>));
+    ImageSource::Custom(Arc::new(move |window, cx| {
+        let scale = window.scale_factor();
+        let key = scale.to_bits();
+        let mut cached = cached.lock().unwrap();
+        if let Some((cached_key, image)) = cached.as_ref()
+            && *cached_key == key
+        {
+            return Some(Ok(image.clone()));
+        }
+        let image = match cx.svg_renderer().render_single_frame(&bytes, scale) {
+            Ok(image) => image,
+            Err(error) => return Some(Err(gpui::ImageCacheError::from(error))),
+        };
+        *cached = Some((key, image.clone()));
+        Some(Ok(image))
+    }))
 }
 
 pub(crate) fn open_diagram(
@@ -61,6 +90,7 @@ pub(crate) fn open_diagram(
 
 pub(crate) struct DiagramViewer {
     image: ImageSource,
+    display_image: ImageSource,
     code: SharedString,
     aspect: f32,
     expanded: bool,
@@ -84,8 +114,10 @@ pub(crate) struct DiagramViewer {
 
 impl DiagramViewer {
     pub(super) fn new(image: ImageSource, code: SharedString, aspect: f32, expanded: bool) -> Self {
+        let display_image = dpi_scaled_svg(&image);
         Self {
             image,
+            display_image,
             code,
             aspect,
             expanded,
@@ -505,7 +537,7 @@ impl Render for DiagramViewer {
             .w(scaled_width)
             .h(image_height)
             .child(
-                img(self.image.clone())
+                img(self.display_image.clone())
                     .id("diagram-image")
                     .debug_selector(|| "diagram-image".into())
                     .absolute()
@@ -713,7 +745,7 @@ pub fn render_mermaid(source: &str, theme: &Theme, dark: bool) -> Result<String,
             .map_err(|err| err.to_string())?
             .is_some_and(|meta| meta.diagram_type.starts_with("flowchart"))
     {
-        renderer = renderer.with_text_measurer(std::sync::Arc::new(GithubFlowchartText::default()));
+        renderer = renderer.with_text_measurer(Arc::new(GithubFlowchartText::default()));
     }
     renderer
         .render_svg_with_host_theme_sync(source, &build_theme_profile(theme, dark))
@@ -721,10 +753,10 @@ pub fn render_mermaid(source: &str, theme: &Theme, dark: bool) -> Result<String,
         .ok_or_else(|| "not a recognized Mermaid diagram".to_string())
 }
 
-/// GitHub's ordinary HTML flowchart labels use nowrap in a capped box.
-/// Markdown labels use the renderer's raw measurement path and still wrap.
+/// Match GitHub's single-line labels until the label would escape its capped
+/// box, then use the renderer's normal wrapping metrics for long labels.
 #[derive(Default)]
-struct GithubFlowchartText(merman::render::VendoredFontMetricsTextMeasurer);
+struct GithubFlowchartText(merman_render::text::VendoredFontMetricsTextMeasurer);
 
 impl merman::render::TextMeasurer for GithubFlowchartText {
     fn measure(
@@ -742,13 +774,19 @@ impl merman::render::TextMeasurer for GithubFlowchartText {
         max_width: Option<f64>,
         mode: merman_render::text::WrapMode,
     ) -> merman_render::text::TextMetrics {
-        if mode == merman_render::text::WrapMode::HtmlLike {
-            let mut metrics = self.0.measure_wrapped(text, style, None, mode);
-            metrics.width = metrics.width.min(max_width.unwrap_or(200.));
-            metrics
-        } else {
-            self.0.measure_wrapped(text, style, max_width, mode)
+        if mode != merman_render::text::WrapMode::HtmlLike {
+            return self.0.measure_wrapped(text, style, max_width, mode);
         }
+        let natural = self.0.measure_wrapped(text, style, None, mode);
+        // Mermaid adds 30px of horizontal padding on each side of flowchart nodes.
+        if max_width.is_some_and(|max_width| natural.width > max_width + 60.) {
+            return self.0.measure_wrapped(text, style, max_width, mode);
+        }
+        let mut metrics = natural;
+        if let Some(max_width) = max_width {
+            metrics.width = metrics.width.min(max_width);
+        }
+        metrics
     }
 
     fn measure_wrapped_raw(
@@ -829,6 +867,90 @@ fn color_to_hex(color: &Color) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn mermaid_node_labels_stay_inside_their_shapes() {
+        use resvg::usvg::{Group, Node};
+        fn text_bounds(group: &Group, bounds: &mut Vec<resvg::usvg::tiny_skia_path::Rect>) {
+            for node in group.children() {
+                match node {
+                    Node::Group(group) => text_bounds(group, bounds),
+                    Node::Text(text) => bounds.push(text.abs_bounding_box()),
+                    _ => {}
+                }
+            }
+        }
+        fn shape_bounds(group: &Group) -> Option<resvg::usvg::tiny_skia_path::Rect> {
+            group.children().iter().find_map(|node| match node {
+                Node::Path(path) => Some(path.abs_bounding_box()),
+                Node::Group(group) => shape_bounds(group),
+                _ => None,
+            })
+        }
+        let mut fonts = resvg::usvg::fontdb::Database::new();
+        fonts.load_system_fonts();
+        let options = resvg::usvg::Options {
+            fontdb: std::sync::Arc::new(fonts),
+            ..Default::default()
+        };
+        for label in [
+            "Review the complete installation instructions and verify the device configuration before continuing",
+            "设备工程师：绑定或校准基本资料并完成设备信息核对",
+            "service-to-do-apk 远端构建、install-apk 安装、日志归档",
+            "设备工程师：绑定或校准<br/>基本资料并完成设备信息核对",
+            "`Review **installation instructions** and verify the complete device configuration before continuing`",
+        ] {
+            for (open, close) in [("[", "]"), ("(", ")"), ("{", "}")] {
+                let source = format!("flowchart TD\n A{open}\"{label}\"{close} --> B[End]");
+                let svg = render_mermaid(&source, &crate::core::markdown_theme::builtin(), false)
+                    .unwrap();
+                let doc = resvg::usvg::roxmltree::Document::parse(&svg).unwrap();
+                let id = doc
+                    .descendants()
+                    .find_map(|node| {
+                        node.attribute("id")
+                            .filter(|id| id.contains("flowchart-A-"))
+                    })
+                    .unwrap();
+                let tree = resvg::usvg::Tree::from_str(&svg, &options).unwrap();
+                let Node::Group(node) = tree.node_by_id(id).unwrap() else {
+                    panic!("node A must be a group")
+                };
+                let shape = shape_bounds(node).expect("node shape");
+                let mut labels = Vec::new();
+                text_bounds(tree.root(), &mut labels);
+                let labels = labels
+                    .into_iter()
+                    .filter(|text| {
+                        text.left() < shape.right()
+                            && text.right() > shape.left()
+                            && text.top() < shape.bottom()
+                            && text.bottom() > shape.top()
+                    })
+                    .collect::<Vec<_>>();
+                assert!(!labels.is_empty(), "node A must contain rendered text");
+                for text in labels {
+                    assert!(
+                        text.left() >= shape.left() - 1.
+                            && text.right() <= shape.right() + 1.
+                            && text.top() >= shape.top() - 1.
+                            && text.bottom() <= shape.bottom() + 1.,
+                        "label {label:?} must stay inside {open}{close}: text={text:?}, shape={shape:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn mermaid_svg_raster_size_tracks_the_display_scale_factor() {
+        let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40" viewBox="0 0 120 40"><rect width="120" height="40"/></svg>"#;
+        let renderer = gpui::SvgRenderer::new(Arc::new(()));
+        let one = renderer.render_single_frame(svg, 1.).unwrap();
+        let two = renderer.render_single_frame(svg, 2.).unwrap();
+        assert_eq!(two.size(0).width.0, one.size(0).width.0 * 2);
+        assert_eq!(two.size(0).height.0, one.size(0).height.0 * 2);
+    }
+
     #[gpui::test]
     fn expanded_tall_diagram_opens_at_readable_size_and_scrolls_to_its_end(
         cx: &mut gpui::TestAppContext,
@@ -861,6 +983,36 @@ mod tests {
             "opening a tall diagram must retain its readable size instead of fitting its height"
         );
         assert!(image.size.height > viewport.size.height * 4.);
+        let drag_start = viewport.center();
+        let drag_end = drag_start - point(px(0.), px(96.));
+        vcx.simulate_event(gpui::MouseDownEvent {
+            position: drag_start,
+            button: MouseButton::Left,
+            modifiers: gpui::Modifiers::none(),
+            click_count: 1,
+            first_mouse: false,
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        vcx.simulate_event(gpui::MouseMoveEvent {
+            position: drag_end,
+            pressed_button: Some(MouseButton::Left),
+            modifiers: gpui::Modifiers::none(),
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(
+            vcx.debug_bounds("diagram-image").unwrap().origin.y < image.origin.y,
+            "dragging up must pan the expanded diagram toward its bottom"
+        );
+        vcx.simulate_event(gpui::MouseUpEvent {
+            position: drag_end,
+            button: MouseButton::Left,
+            modifiers: gpui::Modifiers::none(),
+            click_count: 1,
+        });
         vcx.simulate_event(ScrollWheelEvent {
             position: viewport.center(),
             delta: ScrollDelta::Pixels(point(px(0.), px(-100_000.))),
