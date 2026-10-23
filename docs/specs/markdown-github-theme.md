@@ -81,6 +81,8 @@ GitHub 是一个主题包，ID 为 github，显示名为 GitHub，包含 Light d
 | diff 变更文字／背景 | #953800 / #ffd8b5 | #ffdfb6 / #5a1e02 |
 | diff 区段头 | #8250df | #d2a8ff |
 
+2026-10-21 用户确认 One Light 的代码块需要更明显的背景区分。仅当应用使用 One Light 且阅读主题为内置 GitHub 时，代码块与语法高亮画布在运行时采用应用的 popover 背景色；切换应用主题或取消主题预览后恢复当前主题应有的颜色。此例外不改变 GitHub 源调色板，Light、深色模式和自定义 Markdown 主题继续使用原代码块背景。
+
 五种提示块分别采用 NOTE、TIP、IMPORTANT、WARNING、CAUTION 的源样式边线、标题色和图标；边线色与标题色独立，不能用同一颜色近似。其余语法颜色沿用固定快照的语义映射。diff 背景覆盖对应文本范围，不额外铺满整行。
 
 ### 3.3 字体与布局
