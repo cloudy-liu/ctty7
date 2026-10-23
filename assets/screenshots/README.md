@@ -1,54 +1,90 @@
 # README screenshots
 
-The README's current feature images use the newer native captures in
-`docs/testing/images/` and `docs/specs/images/`. The older WebP files below are
-kept for history and remain available to links in earlier release notes.
+Captured on Windows on 2026-10-23 from the v0.8.0 application renderers at
+`b0b573163c0fc3f30b34f57500511d2ef9aa2ad6`, the fork's current `main` at capture
+time. This PR extends the opt-in document fixture with a README sample workspace
+and gives both visual fixtures the same titlebar options as the production app.
+No application renderer was changed to produce these images.
 
-The historical WebP captures were made on Windows on 2026-10-07 with the
-computer-use plugin's native window capture, using the production `tty7-app`
-executable built from `b4f7b086` plus the local v0.2.0 version change. They are
-application screenshots, not mockups.
+| Image | Native pixels | Contents |
+| --- | --- | --- |
+| [workspace-light.webp](workspace-light.webp) | 2419 x 1332 | Light workspace with all four lowercase agent tags, a pinned project, a folded group, three file tabs, Markdown and Mermaid preview, and the file tree. |
+| [workspace-dark.webp](workspace-dark.webp) | 2419 x 1332 | The same workspace in dark appearance. |
+| [editor-light.webp](editor-light.webp) | 2419 x 1332 | Source editing with file tabs, project breadcrumbs, and GitHub Light syntax colors. |
+| [html-preview-light.webp](html-preview-light.webp) | 2419 x 1332 | A local HTML page rendered by WebView2, with Preview / HTML, external-browser and refresh controls beside the breadcrumb. |
+| [remote-top.webp](remote-top.webp) | 2104 x 1157 | SSH top tabs with blue Remote badges and connection/directory names. |
+| [remote-sidebar.webp](remote-sidebar.webp) | 2104 x 1157 | The same SSH sessions in the sidebar, including the connection below task and manual titles. |
 
-| Image | Contents |
-| --- | --- |
-| [agents-light-dark.webp](agents-light-dark.webp) | Historical combined light and dark capture from the 0.2.0 README. |
-| [source-light.webp](source-light.webp) | Historical source-editor capture from the 0.2.0 README. |
+[Capture metadata](captures.json) records the production revision, executable
+hash, capture times, dimensions, and native/encoded image hashes.
+[assets/hero.webp](../hero.webp) and [docs/images/hero.webp](../../docs/images/hero.webp)
+are byte-identical copies of `workspace-light.webp` for existing documentation links.
 
-The current README uses these higher-resolution captures:
+## Capture method
 
-| Image | Contents |
-| --- | --- |
-| [sidebar-status-uppercase-light.png](../../docs/testing/images/sidebar-status-uppercase-light.png) | Light native window at 1684 × 912 with agent status tags, avatars, branches, and diff counts. |
-| [sidebar-status-uppercase-dark.png](../../docs/testing/images/sidebar-status-uppercase-dark.png) | Dark native window at 1684 × 912 with the same status-focused layout. |
-| [remote-badge-windows-top.png](../../docs/testing/images/remote-badge-windows-top.png) | Native SSH sessions at 1202 × 691 with the Remote badge in top tabs. |
-| [remote-badge-windows-sidebar.png](../../docs/testing/images/remote-badge-windows-sidebar.png) | Native SSH sessions at 1202 × 691 with the Remote badge in sidebar rows. |
-| [editor-github-light-native.png](../../docs/specs/images/editor-github-light-native.png) | Native source editor and file tree capture at 1463 × 867. |
+The document fixture opens the full production `Tty7App`. Its sample pane data
+travels through the normal daemon message reader. Codex is idle, Claude Code is
+working, Gemini needs input, and Cursor has an unread result. These states use
+controlled events; no agent CLI runs and no model request is sent. Branch names
+and the `+2` counts come from an actual throwaway Git repository prepared by the
+script. The nested Playground repository is folded and the main project is pinned.
 
-The status captures were refreshed on 2026-10-09 from the status-tag work. The
-remote captures were refreshed on 2026-10-12 from the Remote badge work. Both
-sets are native application screenshots, not mockups.
+The SSH fixture uses `auto_names: true` and controlled remote context messages.
+It exercises the real tab and sidebar renderers without opening a network SSH
+connection. These screenshots do not establish live remote-agent detection.
 
-The agent hero used an isolated `.tty7-dev-readme-agent` configuration and a
-1280 by 540 logical-pixel window at the machine's existing Windows display scale.
-The two captures include the window border and are 1282 by 541 pixels. They are
-stacked with Light and Dark captions outside the application pixels. The combined
-WebP is lossless; each screenshot region was checked against its original PNG.
-The source-editor capture used `.tty7-dev-release` at 1280 by 800 logical pixels.
+Local Computer Use selected each fixture window and sent Alt+PrintScreen.
+The original Windows clipboard bitmap was saved as PNG at the existing 175%
+display scale. Document viewports are 1380 x 760 logical pixels; SSH viewports
+are 1200 x 660. The images include the native window border. The HTML capture
+includes its native child WebView, which is absent from GPUI GPU-only captures.
 
-Claude Code and Codex are real installed CLIs, launched to their ready prompts
-without sending a model request. Claude Code is the selected central terminal.
-The remaining sidebar sessions use controlled sample hook events to display
-agent states. The application draws all avatars, tags, metadata, and terminal
-contents. Git branch names and diff counts reflect the local working tree at
-capture time. No application pixels were redrawn.
+All six PNGs were encoded as lossless WebP without resizing, cropping, compositing,
+retouching, or generated UI. Decoded RGBA bytes matched their original native PNGs
+exactly. No mouse highlight, tooltip, or extra system titlebar covers the UI.
 
-The screenshot processes started without `NO_COLOR`, which the automation
-environment otherwise supplies. Claude Code emits its normal orange mascot
-and colored terminal content in both captures; colors were not edited into
-the images after capture.
+## Reproduce
 
-The source-editor document is [workbench-tour.md](../../docs/examples/workbench-tour.md).
-To refresh the hero, build the current app, use a separate configuration directory,
-open an agent terminal, and capture the same layout in both appearances. Combine
-those native screenshots into one image. Keep filenames stable and update this
-capture record.
+Build the opt-in visual fixtures and prepare a new scratch directory outside the
+checkout. The preparation script uses only Python's standard library and Git;
+it refuses to reuse an existing output directory.
+
+```powershell
+cargo build --locked --features markdown-visual-tests --bin tty7-app
+python scripts/prepare-readme-captures.py D:/gh-prj/ctty7-readme-capture
+```
+
+Launch one case at a time with a separate configuration directory. For example:
+
+```powershell
+.\target\debug\tty7-app.exe --config-dir D:/gh-prj/ctty7-readme-capture/light-config --document-visual D:/gh-prj/ctty7-readme-capture/workspace-light.json
+```
+
+The other document options are `workspace-dark.json`, `editor-light.json`, and
+`html-preview-light.json`. Wait for `NATIVE_DOCUMENT_READY_FOR_CAPTURE` and
+`"ready": true` in the case's readiness JSON before capturing the window.
+The fixture checks agent identities, states and the selected mode; readiness JSON records the open document count.
+
+Use `--ssh-tab-visual` instead of `--document-visual` for `remote-top.json` and
+`remote-sidebar.json`; wait for `NATIVE_SSH_TABS_READY`. Each fixture holds its
+window for up to ten minutes. On Windows, select the returned native window,
+capture it with Alt+PrintScreen and save the clipboard image as PNG. Preserve
+the original size when encoding WebP and compare decoded pixels before replacing
+an asset. See [document evidence](../../docs/testing/document-tabs-native.md)
+for the underlying fixture and [SSH naming evidence](../../docs/testing/ssh-tab-auto-name.md)
+for the remote sample cases.
+
+The capture matrix covers Windows light/dark workspaces, source editing, local
+HTML, and both SSH tab layouts. macOS and Linux images were not recaptured.
+
+## Historical images
+
+[agents-light-dark.webp](agents-light-dark.webp) and [source-light.webp](source-light.webp)
+remain available for earlier release-note links. They were captured on Windows
+on 2026-10-07 from `b4f7b086` plus the v0.2.0 version change.
+
+The old images under `docs/testing/images/` and `docs/specs/images/` remain
+unchanged as their original acceptance evidence. In particular,
+`sidebar-status-uppercase-light.png` and `sidebar-status-uppercase-dark.png`
+are the pre-change baseline from the lowercase-tag comparison, not the current
+application UI. Neither README references those baseline screenshots now.
