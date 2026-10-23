@@ -16,13 +16,16 @@ PRs #180, #181, #186, #187, #189, #190 and #191 are merged into fork main.
 The integrated main CI and v0.8.0 release workflow both passed. Query GitHub
 again before preparing another release.
 
-Issue #175 remains open for broader HTML preview performance and platform
-acceptance. PR #178 implements native macOS preview; both architecture-specific
-native CI artifacts were inspected during the open-issue audit. Linux retains
-source editing and external opening. Issue #182's document tabs and HTML scroll
-preservation are implemented by PRs #186 and #191; this follow-up fixes the
-same-document HTML fragment regression found in the audit. Issue #188's icon
-correction is merged through PR #189 and still needs interactive Explorer acceptance. See the
+Issue #175 is closed for the delivered native HTML preview implementation.
+PR #178 implements macOS preview; both architecture-specific native CI artifacts
+were inspected. Unverified device/performance/package cases remain recorded
+limits. Linux retains source editing and external opening. Issue #182's tabs
+and HTML scroll preservation are implemented by PRs #186 and #191; PR #193
+fixes the fragment regression and links the parent for closure on merge. Its
+code commit passed all ten CI checks, including both native macOS HTML runners.
+Issue #188's upper-right artwork is merged through PR #189. Continued Explorer
+acceptance found a stale icon after clearing; PR #194 fixes class-icon
+restoration and links #188 for closure. See the
 [issue audit](../testing/open-issue-audit-2026-10-23.md) for the closing-reference
 history and remaining checks.
 
