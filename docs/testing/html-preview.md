@@ -50,6 +50,12 @@ HTML preview releases the singleton after capture. The three-second evaluation
 deadline recovers from a hung renderer; ordinary transitions wait for native
 callbacks and do not use layout delays. Refresh starts the saved page at the top.
 
+On 2026-10-23 the Windows native acceptance reproduced lost scroll after browser
+recreation. The hidden gpui-wry child skipped layout, so restoration ran against
+a zero-size viewport. Sizing the hidden viewport before restoration passed the
+same acceptance, including independent sessions, rapid switches, close/reopen,
+browser release and deleted-file recovery at 175% display scale.
+
 The macOS artifact includes a desktop screenshot taken with `screencapture`.
 GPUI's GPU-only capture cannot prove a native child view is visible. Inspect
 the screenshot separately from the DOM results; successful evaluation or a

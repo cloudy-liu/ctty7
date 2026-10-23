@@ -26,6 +26,7 @@ pub(crate) struct HtmlPreview {
     pub(crate) owner: gpui::EntityId,
     loaded: bool,
     restore_pending: bool,
+    laid_out: bool,
     pub(crate) failed: bool,
     view: Entity<gpui_wry::WebView>,
     started: Rc<Cell<Instant>>,
@@ -98,6 +99,7 @@ impl HtmlPreview {
             owner,
             loaded: false,
             restore_pending: true,
+            laid_out: false,
             failed: false,
             view,
             started,
@@ -149,7 +151,7 @@ impl HtmlPreview {
     }
 
     pub(crate) fn needs_restore(&self) -> bool {
-        self.loaded && self.restore_pending
+        self.loaded && self.laid_out && self.restore_pending
     }
 
     pub(crate) fn restored(&mut self) {
@@ -260,11 +262,45 @@ impl Focusable for HtmlPreview {
 
 impl Render for HtmlPreview {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl gpui::IntoElement {
+        let this = cx.entity();
+        let view = self.view.clone();
         gpui::div()
+            .relative()
             .size_full()
             .on_mouse_down(
                 gpui::MouseButton::Left,
                 cx.listener(|this, _, window, cx| this.focus(window, cx)),
+            )
+            // gpui-wry skips layout while hidden. Size the native viewport
+            // before restoring scroll, without briefly showing it at the top.
+            .child(
+                gpui::canvas(
+                    move |bounds, _, cx| {
+                        if !view.read(cx).visible() {
+                            let _ = view.read(cx).raw().set_bounds(wry::Rect {
+                                size: wry::dpi::LogicalSize::new(
+                                    f64::from(bounds.size.width),
+                                    f64::from(bounds.size.height),
+                                )
+                                .into(),
+                                position: wry::dpi::LogicalPosition::new(
+                                    f64::from(bounds.origin.x),
+                                    f64::from(bounds.origin.y),
+                                )
+                                .into(),
+                            });
+                        }
+                        this.update(cx, |this, cx| {
+                            if !this.laid_out {
+                                this.laid_out = true;
+                                cx.notify();
+                            }
+                        });
+                    },
+                    |_, _, _, _| {},
+                )
+                .absolute()
+                .size_full(),
             )
             .child(self.view.clone())
     }
