@@ -34,8 +34,10 @@ caret, line numbers and active-line colors retain the website CodeMirror control
 tokens where the file viewer has no equivalent editable control.
 These are Tree-sitter role adaptations, not a browser editor runtime.
 
-The palettes retain the authored editor backgrounds, text, line numbers,
-selections, cursor and syntax colors. GitHub Light uses the website border token
+The palette JSON retains the authored editor backgrounds, text, line numbers,
+selections, cursor and syntax colors. At runtime, editor and gutter backgrounds
+use the active application theme's opaque base color. Syntax and editing control
+colors still come from the bundled palette. GitHub Light uses the website border token
 for invisible characters and borders, and the foreground for active line numbers.
 Auxiliary diagnostic colors use Atom syntax roles in dark mode and GitHub's
 danger, attention, accent, success and muted tokens in light mode. Their backgrounds
@@ -75,8 +77,11 @@ The themes are embedded at compile time. No theme download occurs at runtime.
 
 The application's resolved light/dark appearance selects GitHub Light or
 Atom One Dark for every source editor. The One Dark Pro application preset
-uses Atom One Dark, just like other dark presets. Each source palette owns the
-complete opaque editor and gutter background, syntax, selection and caret.
+uses Atom One Dark syntax, just like other dark presets. Editor and gutter
+backgrounds follow the selected application preset, including theme previews,
+canceling a preview, system appearance changes and configuration reloads. The
+solid theme base remains opaque over wallpaper, gradients and window transparency.
+The source palette supplies syntax, selection and caret colors.
 There are no independent fixed-mode editor choices. The retired `editor_theme`
 configuration key is ignored on load and omitted on save.
 Font family, font size and line height remain independent user preferences;

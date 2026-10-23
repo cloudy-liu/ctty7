@@ -52,9 +52,13 @@ controls were drawn over the screenshots.
 
 The Before application uses production commit `e06271fb` with only fixture
 commits `89176e54` and `8de7b3f5` applied. The After application uses the file-tab
-UI with the content-matched document chrome color pass. In source mode, the
-active tab and breadcrumb row share the editor background, while inactive tabs
-use a darker blend. Markdown and HTML previews retain the window background.
+UI with theme-following document surfaces. Source content, the gutter, the
+active tab and breadcrumb row use the application theme's opaque base color.
+Inactive tabs, the empty tab rail and document header actions use the window
+hover surface, including the window controls beside a filled document.
+Tabs start flush at the document's left edge; only macOS traffic lights reserve
+leading space when they occupy the same header. Markdown and HTML previews
+retain the window background.
 The breadcrumb row has no bottom divider, so it joins the document content.
 Markdown cases open the two maintenance documents and
 `settings.rs`; the HTML case additionally opens `overview.html`.
@@ -74,18 +78,22 @@ Markdown cases open the two maintenance documents and
 Native input also verified clicking Markdown to enter source, switching to
 `release.md` in its independent Preview mode, returning to `migration.md` with
 source mode retained, and closing inactive `settings.rs` without changing the
-current document. The refreshed source After image was captured by selecting
-Markdown in the preview fixture, with all three files still open.
+current document. The refreshed source After image starts the fixture with
+`active: 0, preview: false`, with all three files still open.
 
-The color pass passed `cargo fmt --all -- --check`, all six tests selected by
-`cargo test --bin tty7-app document_tabs --no-fail-fast`, and
-`cargo build --bin tty7-app --features markdown-visual-tests` on Windows. The
-three refreshed After images were inspected in the native application and again
-after export.
+The theme-following surfaces passed these checks on Windows:
 
-The divider-only follow-up passed formatting and the fixture build. Its updated
-Markdown preview and source captures were checked in the native window and after
-export; the HTML capture remains from the preceding color pass.
+- `cargo fmt --all -- --check`.
+- `cargo test --bin tty7-app editor_ --no-fail-fast`: 18 passed.
+- `cargo test --bin tty7-app document_tabs --no-fail-fast`: 6 passed.
+- `cargo test --bin tty7-app source_palette_follows_system --no-fail-fast`: 1 passed.
+- `cargo build --bin tty7-app --features markdown-visual-tests`.
+
+The preset regression covers black, One Dark Pro, Dracula, Nord, light and
+custom backgrounds, preserving unsaved edits, cursor, selection, scrolling and
+undo. It failed against the fixed Atom One Dark background before the fix.
+Search contrast and authored syntax-color checks also pass. All three After
+images were recaptured from this build and inspected before and after export.
 
 ## Capture limits
 

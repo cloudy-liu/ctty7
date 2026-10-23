@@ -50,6 +50,7 @@ Provide a document workspace within each terminal session. A horizontal file tab
 - Preserve existing HTML availability, resource loading and dirty-buffer save requirements. Linux and remote HTML retain existing source fallback behavior.
 - When the last file closes, hide the code panel; an independently open diff view follows the existing document-front selection rules.
 - Use existing theme tokens, file icons, localization and accessible button conventions. Handle long paths and narrow columns without overflowing mode controls or window chrome.
+- Use the application theme's opaque base for source content, its gutter, the active file tab and breadcrumbs. Use the window hover surface for inactive tabs, the empty tab rail and header actions. Start tabs flush with the document edge, reserving space only for macOS traffic lights when they share the header. Keep syntax palettes selected by the application's light/dark appearance.
 
 ## Testing Decisions
 

@@ -1,4 +1,4 @@
-//! Source editor colors are independent of the terminal and Markdown reader.
+//! Source syntax uses bundled palettes over the active application background.
 
 use crate::core::config::{
     Config, EDITOR_FONT_SIZE_DEFAULT, EDITOR_FONT_SIZE_MAX, EDITOR_FONT_SIZE_MIN,
@@ -62,14 +62,16 @@ pub(crate) fn current(cx: &App) -> Arc<CodeEditorStyle> {
         let color = crate::terminal::palette::hsla_to_rgb(color);
         (color.r as u32) << 16 | (color.g as u32) << 8 | color.b as u32
     };
-    let colors = &style.highlight_theme.style;
-    let background = pack(colors.editor_background.expect("bundled editor background"));
+    let resolved = Arc::make_mut(&mut style);
+    let colors = &mut Arc::make_mut(&mut resolved.highlight_theme).style;
+    let background = cx.global::<crate::ui::presets::Surfaces>().window.base;
+    colors.editor_background = Some(rgb(background).into());
+    colors.editor_gutter_background = Some(rgb(background).into());
     let foreground = pack(colors.editor_foreground.expect("bundled editor foreground"));
     let (hit_target, active_target) = match_wash_targets(background, foreground);
     let accent = cx.global::<ActiveAccent>().0;
-    // Use the editor's contrast budget even when its appearance differs from the app.
+    // Recalculate search contrast against the actual application background.
     // Opaque fills keep the current match independent of the ordinary hit below it.
-    let resolved = Arc::make_mut(&mut style);
     resolved.search_match = rgb(wash(background, foreground, hit_target)).into();
     resolved.search_match_active = rgb(wash(background, accent, active_target)).into();
     style

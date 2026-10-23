@@ -2,6 +2,12 @@
 
 Tracking issue: [cloudy-liu/ctty7#89](https://github.com/cloudy-liu/ctty7/issues/89).
 
+Background update in [cloudy-liu/ctty7#186](https://github.com/cloudy-liu/ctty7/pull/186):
+the editor and gutter now use the selected application theme's opaque base color.
+This supersedes the fixed editor-background requirements below. GitHub Light
+and Atom One Dark still supply syntax and editing control colors according to
+the application's resolved appearance.
+
 ## Problem Statement
 
 The source editor previously used Atom One Light in every light application

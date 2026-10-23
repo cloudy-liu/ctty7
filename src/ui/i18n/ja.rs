@@ -181,7 +181,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsMarkdownTheme => "Markdown の閲覧テーマ",
         L10nKey::SettingsEditorTheme => "コードエディタの配色",
         L10nKey::SettingsEditorThemeDesc => {
-            "アプリがライトモードなら GitHub Light、ダークモードなら Atom One Dark を自動で使用し、背景も同じ配色にします。フォント設定は個別に保存します。"
+            "構文の配色はライトモードで GitHub Light、ダークモードで Atom One Dark を使用します。エディタと行番号欄の背景はアプリのテーマに従います。フォント設定は個別に保存します。"
         }
         L10nKey::SettingsEditorThemeResolved => "現在の配色：{active}。",
         L10nKey::SettingsEditorFont => "エディタのフォント",

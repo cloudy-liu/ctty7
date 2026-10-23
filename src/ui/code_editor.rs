@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, App, Context, Entity, Focusable as _, PromptLevel, SharedString, Subscription,
-    Window, div, px,
+    AnyElement, Context, Entity, Focusable as _, PromptLevel, SharedString, Subscription, Window,
+    div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState, Position, TabSize};
@@ -28,21 +28,6 @@ const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 pub(crate) mod native_html;
 
 const RELOAD_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(200);
-
-fn document_chrome_background(active: Option<&OpenFile>, cx: &App) -> u32 {
-    let surface = cx.global::<crate::ui::presets::Surfaces>().window;
-    if active.is_none_or(|file| file.preview) {
-        return surface.base;
-    }
-    let color = crate::terminal::palette::hsla_to_rgb(
-        crate::ui::editor_theme::current(cx)
-            .highlight_theme
-            .style
-            .editor_background
-            .expect("bundled editor background"),
-    );
-    (color.r as u32) << 16 | (color.g as u32) << 8 | color.b as u32
-}
 
 pub(crate) struct OpenFile {
     pub(crate) path: PathBuf,
@@ -1725,15 +1710,17 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
-        // `TITLE_BAR_LEAD` is the room macOS's traffic lights need. Only a
-        // header that starts at the left edge of the window has them to clear,
-        // and a docked column never does.
-        let lead = if self.left_panel_open(cx) || chrome.is_dock() {
-            crate::ui::app::CONTENT_INSET
-        } else {
-            crate::ui::app::TITLE_BAR_LEAD
-        };
         let below_chrome = !chrome.is_dock() && self.document_header_below_chrome(window, cx);
+        // Reserve space only when macOS traffic lights share this header.
+        let lead = if cfg!(target_os = "macos")
+            && !self.left_panel_open(cx)
+            && !chrome.is_dock()
+            && !below_chrome
+        {
+            crate::ui::app::TITLE_BAR_LEAD
+        } else {
+            0.
+        };
         let row = h_flex().id("editor-header");
         let row = if chrome.header_is_title_strip() && !below_chrome {
             crate::ui::app::title_bar_drag(row, "editor-header", window, cx)
@@ -1742,15 +1729,15 @@ impl Tty7App {
         };
         let menu_app = cx.entity().downgrade();
         let surface = cx.global::<crate::ui::presets::Surfaces>().window;
-        let active = self.tab_code().and_then(|code| code.active_file());
-        let content_background = document_chrome_background(active, cx);
-        let inactive_tab = crate::ui::presets::mix(content_background, surface.base, 0.36);
+        let content_background = surface.base;
+        let inactive_tab = surface.hover;
         let font = gpui::font(cx.theme().font_family.clone());
         let rem = window.rem_size().as_f32();
         row.flex_none()
             .min_w_0()
             .h(px(crate::ui::app::TITLE_BAR_HEIGHT))
             .items_center()
+            .bg(gpui::rgb(inactive_tab))
             .gap_1p5()
             .pl(px(lead))
             .pr(px(crate::ui::app::tile_trailing_inset()))
@@ -1770,7 +1757,7 @@ impl Tty7App {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .bg(gpui::rgb(content_background))
+                    .bg(gpui::rgb(inactive_tab))
                     .overflow_x_scroll()
                     .when_some(self.tab_code(), |strip, code| {
                         strip.track_scroll(&code.tab_scroll).children(
@@ -1960,7 +1947,9 @@ impl Tty7App {
             .items_center()
             .gap_1()
             .px_2()
-            .bg(gpui::rgb(document_chrome_background(active, cx)))
+            .bg(gpui::rgb(
+                cx.global::<crate::ui::presets::Surfaces>().window.base,
+            ))
             .child(
                 div()
                     .id("editor-document-path")
@@ -3529,19 +3518,9 @@ mod tests {
                 let colors = &style.highlight_theme.style;
                 for (actual, key, github_key) in [
                     (
-                        colors.editor_background.unwrap(),
-                        "editor.background",
-                        "codeMirror-bgColor",
-                    ),
-                    (
                         colors.editor_foreground.unwrap(),
                         "editor.foreground",
                         "codeMirror-fgColor",
-                    ),
-                    (
-                        colors.editor_gutter_background.unwrap(),
-                        "editor.background",
-                        "codeMirror-gutters-bgColor",
                     ),
                     (
                         colors.editor_active_line.unwrap(),
@@ -3697,7 +3676,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn editor_theme_switches_with_app_appearance_and_preserves_edits(cx: &mut TestAppContext) {
+    fn editor_theme_background_follows_presets_and_preserves_edits(cx: &mut TestAppContext) {
         use crate::core::config::Config;
         use crate::ui::editor_theme;
         let (app, mut vcx) = markdown_window(cx);
@@ -3751,15 +3730,15 @@ mod tests {
         assert!(scroll.y < px(0.));
         for (legacy, preset, background) in [
             ("auto", "light", 0xffffff),
-            ("auto", "dark", 0x282c34),
+            ("auto", "dark", 0x000000),
             ("atom_one_dark", "light", 0xffffff),
-            ("atom_one_light", "dark", 0x282c34),
+            ("atom_one_light", "dark", 0x000000),
             ("one_dark_pro", "light", 0xffffff),
             ("one_dark_pro", "one_dark_pro", 0x282c34),
-            ("future-theme", "dracula", 0x282c34),
-            ("auto", "nord", 0x282c34),
-            ("atom_one_dark", "custom-dark-name", 0xffffff),
-            ("atom_one_light", "custom-light-name", 0x282c34),
+            ("future-theme", "dracula", 0x282a36),
+            ("auto", "nord", 0x2e3440),
+            ("atom_one_dark", "custom-dark-name", 0xf1ede1),
+            ("atom_one_light", "custom-light-name", 0x121827),
         ] {
             app.update_in(&mut vcx, |app, window, cx| {
                 let mut saved = serde_json::to_value(&cx.global::<Config>().0).unwrap();
@@ -3895,7 +3874,7 @@ mod tests {
                     .highlight_theme
                     .style
                     .editor_background,
-                Some(gpui::rgb(0x282c34).into())
+                Some(gpui::rgb(0x000000).into())
             );
             app.cancel_preset_preview(window, cx);
             assert_eq!(

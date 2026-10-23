@@ -7882,6 +7882,11 @@ impl Render for Tty7App {
                         .h(px(TITLE_BAR_HEIGHT))
                         .pl_0()
                         .bg(crate::ui::theme::workspace_surface_color(cx))
+                        .when(self.document_front() == Some(OverlayTop::Code), |bar| {
+                            bar.bg(gpui::rgb(
+                                cx.global::<crate::ui::presets::Surfaces>().window.hover,
+                            ))
+                        })
                         .border_color(cx.theme().transparent)
                         .child(self.window_chrome(window, cx)),
                 )
