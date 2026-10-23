@@ -501,6 +501,37 @@ mod tests {
     crate::host_conformance_suite!(local, sandbox);
 
     #[test]
+    fn watch_reports_new_files_in_an_expanded_subdirectory() {
+        let (h, tmp) = sandbox();
+        let root = tmp.path().to_path_buf();
+        let docs = root.join("docs");
+        fs::create_dir(&docs).unwrap();
+        fs::write(docs.join("old.html"), "").unwrap();
+        let sub = h.watch(&[root.clone()]).unwrap();
+        sub.set_dirs(&[root.clone(), docs.clone()]).unwrap();
+        assert_eq!(h.read_dir(&docs, Some(&root)).unwrap().len(), 1);
+
+        let added = docs.join("new.md");
+        fs::write(&added, "new file").unwrap();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Ok(batch) = sub.events().try_recv()
+                && batch.contains(&added)
+            {
+                break;
+            }
+            assert!(Instant::now() < deadline, "no event for {added:?}");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(
+            h.read_dir(&docs, Some(&root))
+                .unwrap()
+                .iter()
+                .any(|entry| entry.name == "new.md")
+        );
+    }
+
+    #[test]
     fn sort_matches_the_file_trees_order() {
         let mut v: Vec<(Entry, PathBuf)> = ["main.rs", "Cargo.toml", ".gitignore", "src", "Zeta"]
             .iter()

@@ -286,6 +286,7 @@ impl FileTreeState {
     fn sync_watch(&mut self, host: SharedHost, dirs: HashSet<PathBuf>, cx: &mut Context<Tty7App>) {
         self.watched = dirs;
         let want: Vec<PathBuf> = self.watched.iter().cloned().collect();
+        let host_id = host.id();
         if !self
             .watch_host
             .as_ref()
@@ -305,11 +306,16 @@ impl FileTreeState {
             HostOps::run(
                 host,
                 cx,
-                move |_| sub.set_dirs(&want),
-                |app: &mut Tty7App, result: std::io::Result<()>, cx| {
+                {
+                    let want = want.clone();
+                    move |_| sub.set_dirs(&want)
+                },
+                move |app: &mut Tty7App, result: std::io::Result<()>, cx| {
                     app.file_tree.watch_busy = false;
                     if let Err(e) = result {
                         log::warn!("file tree: could not update the watched set: {e}");
+                    } else {
+                        app.file_tree_watch_ready(host_id, &want, cx);
                     }
                     if std::mem::take(&mut app.file_tree.watch_dirty) {
                         let want = app.file_tree.watched.clone();
@@ -326,7 +332,6 @@ impl FileTreeState {
             return;
         }
         self.watch_opening = true;
-        let host_id = host.id();
         let opened_host = Arc::clone(&host);
         let opened_with = self.watched.clone();
         HostOps::run(
@@ -348,6 +353,7 @@ impl FileTreeState {
                 let events = sub.events().clone();
                 app.file_tree.watch = Some(sub);
                 app.file_tree.watch_host = Some(opened_host);
+                app.file_tree_watch_ready(host_id, &want, cx);
                 cx.spawn(async move |app, cx| {
                     while let Ok(batch) = events.recv().await {
                         let ok = app.update(cx, |app, _cx| {
@@ -849,6 +855,18 @@ impl Tty7App {
             .collect();
         if union != self.file_tree.watched {
             self.file_tree.sync_watch(host, union, cx);
+        }
+    }
+
+    fn file_tree_watch_ready(&mut self, host: HostId, dirs: &[PathBuf], cx: &mut Context<Self>) {
+        // A listing can finish before its asynchronous watch is registered.
+        // Revalidate it after registration to catch changes in that gap.
+        let mut touched = false;
+        for dir in dirs {
+            touched |= self.file_tree.invalidate_dir(host, dir);
+        }
+        if touched && self.file_tree_listings_on_screen(cx) {
+            cx.notify();
         }
     }
 
@@ -2442,6 +2460,96 @@ mod tests {
             app.active = app.tabs.len() - 1;
         });
         (app, vcx)
+    }
+
+    #[gpui::test]
+    fn files_created_before_watch_registration_reach_cached_listings(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        for expanding in [false, true] {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let root = tmp.path().to_path_buf();
+            let docs = root.join("docs");
+            std::fs::create_dir(&docs).unwrap();
+            std::fs::write(docs.join("old.html"), "").unwrap();
+            let (app, mut vcx) = tree_app(cx);
+            app.update_in(&mut vcx, |app, _, cx| {
+                app.right_panel_visible = false;
+                let code = app.tab_code_mut_or_init().unwrap();
+                code.roots = vec![root.clone()];
+                code.expanded.insert(docs.clone());
+                if expanding {
+                    let host = app.active_host(cx).unwrap();
+                    app.file_tree
+                        .sync_watch(host, HashSet::from([root.clone()]), cx);
+                }
+                // Pin a read-before-watch ordering without relying on a race.
+                app.file_tree.children.insert(
+                    HostId::LOCAL,
+                    docs.clone(),
+                    vec![TreeEntry {
+                        name: "old.html".into(),
+                        path: docs.join("old.html"),
+                        is_dir: false,
+                        ignored: false,
+                    }],
+                );
+            });
+            if expanding {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+                loop {
+                    vcx.background_executor.run_until_parked();
+                    if app.update_in(&mut vcx, |app, _, _| app.file_tree.watch.is_some()) {
+                        break;
+                    }
+                    assert!(std::time::Instant::now() < deadline, "watch never opened");
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+            std::fs::write(docs.join("new.md"), "new file").unwrap();
+            app.update_in(&mut vcx, |app, _, cx| {
+                app.file_tree_sync_watch(app.active_host(cx).unwrap(), cx);
+            });
+
+            for name in ["new.md", "after-watch.md"] {
+                if name == "after-watch.md" {
+                    std::fs::write(docs.join(name), "created after registration").unwrap();
+                }
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+                loop {
+                    vcx.executor().advance_clock(REFRESH_DEBOUNCE);
+                    vcx.background_executor.run_until_parked();
+                    let visible = app.update_in(&mut vcx, |app, _, cx| {
+                        let host = app.active_host(cx).unwrap();
+                        app.file_tree.request_loads(
+                            &host,
+                            &[root.clone()],
+                            &HashSet::from([docs.clone()]),
+                            cx,
+                        );
+                        let code = app.tab_code().unwrap();
+                        app.file_tree
+                            .visible_rows(
+                                host.id(),
+                                &code.roots,
+                                &code.expanded,
+                                &code.collapsed_roots,
+                            )
+                            .iter()
+                            .any(|row| row.entry.path == docs.join(name))
+                    });
+                    if visible {
+                        break;
+                    }
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "{name} never appeared in the cached listing for {}",
+                        if expanding { "set_dirs" } else { "watch" }
+                    );
+                    std::thread::sleep(std::time::Duration::from_millis(10));
+                }
+            }
+        }
     }
 
     #[gpui::test]
