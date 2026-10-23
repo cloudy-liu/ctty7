@@ -30,9 +30,14 @@ pub(super) fn render() -> Option<RgbaImage> {
 
 #[cfg(not(target_os = "macos"))]
 pub(super) fn render(attention: bool) -> Option<RgbaImage> {
+    render_sized(attention, SIZE)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(super) fn render_sized(attention: bool, size: u32) -> Option<RgbaImage> {
     let tree = usvg::Tree::from_data(GLYPH_SVG, &usvg::Options::default()).ok()?;
-    let mut pixmap = tiny_skia::Pixmap::new(SIZE, SIZE)?;
-    resvg::render(&tree, fit_center(&tree, SIZE), &mut pixmap.as_mut());
+    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
+    resvg::render(&tree, fit_center(&tree, size), &mut pixmap.as_mut());
 
     if attention {
         badge(&mut pixmap);
@@ -183,7 +188,7 @@ fn recolor(pixmap: &mut tiny_skia::Pixmap, rgb: (u8, u8, u8)) {
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
 fn badge(pixmap: &mut tiny_skia::Pixmap) {
-    let s = SIZE as f32;
+    let s = pixmap.width() as f32;
     let (cx, cy) = (s * 0.78, s * 0.22);
     let r = s * 0.20;
     let circle = |radius: f32| {
@@ -243,16 +248,8 @@ fn paint_attention(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, radius: f32) 
 
 #[cfg(target_os = "windows")]
 fn badge(pixmap: &mut tiny_skia::Pixmap) {
-    let s = SIZE as f32;
+    let s = pixmap.width() as f32;
     paint_attention(pixmap, s * 0.78, s * 0.22, s * 0.20);
-}
-
-#[cfg(target_os = "windows")]
-pub(super) fn attention_mark(size: u32) -> Option<RgbaImage> {
-    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
-    let s = size as f32;
-    paint_attention(&mut pixmap, s * 0.5, s * 0.5, s * 0.48);
-    Some(to_rgba(&pixmap))
 }
 
 #[cfg(target_os = "linux")]
@@ -272,12 +269,32 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn windows_attention_mark_is_a_dark_circle_with_a_white_dot() {
-        let image = attention_mark(32).unwrap();
-        let pixel = |x: usize, y: usize| &image.data[(y * 32 + x) * 4..(y * 32 + x + 1) * 4];
-        assert_eq!(pixel(16, 16), &[255, 255, 255, 255]);
-        assert_eq!(pixel(16, 6), &[52, 52, 52, 255]);
-        assert_eq!(pixel(0, 0), &[0, 0, 0, 0]);
+    fn windows_attention_artwork_keeps_the_mark_upper_right_at_every_size() {
+        for size in [16, 32, 48, 64, 256] {
+            let normal = render_sized(false, size).unwrap();
+            let image = render_sized(true, size).unwrap();
+            let pixel = |image: &RgbaImage, x: u32, y: u32| {
+                let offset = ((y * size + x) * 4) as usize;
+                <[u8; 4]>::try_from(&image.data[offset..offset + 4]).unwrap()
+            };
+            let x = (size as f32 * 0.78) as u32;
+            let y = (size as f32 * 0.22) as u32;
+            assert_eq!(pixel(&image, x, y), [255, 255, 255, 255], "size {size}");
+            assert_eq!(
+                pixel(&image, x, (size as f32 * 0.34) as u32),
+                [52, 52, 52, 255]
+            );
+            assert_eq!(pixel(&image, 0, 0), [0, 0, 0, 0]);
+            for y in size / 2..size {
+                for x in 0..size {
+                    assert_eq!(
+                        pixel(&image, x, y),
+                        pixel(&normal, x, y),
+                        "lower half changed at size {size}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
