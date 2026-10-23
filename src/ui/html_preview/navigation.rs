@@ -1,4 +1,4 @@
-//! Native main-frame failure events. Each event keeps the request that started
+//! Native main-frame load events. Each event keeps the request that started
 //! its navigation, so an older page cannot reset a newly selected document.
 
 use std::{cell::Cell, rc::Rc};
@@ -12,9 +12,14 @@ pub(crate) struct Failure {
     pub(crate) message: String,
 }
 
+pub(crate) enum Event {
+    Ready(u64),
+    Failed(Failure),
+}
+
 pub(super) struct Observer {
     request: Rc<Cell<u64>>,
-    pub(super) failures: smol::channel::Receiver<Failure>,
+    pub(super) events: smol::channel::Receiver<Event>,
     #[cfg(target_os = "macos")]
     _delegate: objc2::rc::Retained<macos::NavigationDelegate>,
 }
@@ -22,14 +27,14 @@ pub(super) struct Observer {
 impl Observer {
     pub(super) fn install(webview: &wry::WebView) -> anyhow::Result<Self> {
         let request = Rc::new(Cell::new(1));
-        let (tx, failures) = smol::channel::unbounded();
+        let (tx, events) = smol::channel::unbounded();
         #[cfg(windows)]
         windows(webview, request.clone(), tx)?;
         Ok(Self {
             #[cfg(target_os = "macos")]
             _delegate: macos::install(webview, request.clone(), tx)?,
             request,
-            failures,
+            events,
         })
     }
 
@@ -40,13 +45,17 @@ impl Observer {
     pub(super) fn is_current(&self, failure: &Failure) -> bool {
         self.request.get() == failure.request
     }
+
+    pub(super) fn is_current_ready(&self, request: u64) -> bool {
+        self.request.get() == request
+    }
 }
 
 #[cfg(windows)]
 fn windows(
     webview: &wry::WebView,
     request: Rc<Cell<u64>>,
-    tx: smol::channel::Sender<Failure>,
+    tx: smol::channel::Sender<Event>,
 ) -> anyhow::Result<()> {
     use webview2_com::{
         NavigationCompletedEventHandler, NavigationStartingEventHandler, ProcessFailedEventHandler,
@@ -84,10 +93,13 @@ fn windows(
                     args.NavigationId(&mut id)?;
                     args.IsSuccess(&mut success)?;
                     args.WebErrorStatus(&mut status)?;
+                    if success.as_bool() && id == latest.get().0 {
+                        let _ = tx.try_send(Event::Ready(latest.get().1));
+                    }
                     // Aborted navigation is normal when switching files.
                     if !success.as_bool() && status != webview2_com::Microsoft::Web::WebView2::Win32::COREWEBVIEW2_WEB_ERROR_STATUS_OPERATION_CANCELED && id == latest.get().0 {
-                        let _ = tx.try_send(Failure { request: latest.get().1,
-                            message: format!("WebView2 navigation failed ({status:?})") });
+                        let _ = tx.try_send(Event::Failed(Failure { request: latest.get().1,
+                            message: format!("WebView2 navigation failed ({status:?})") }));
                     }
                 }
                 Ok(())
@@ -95,10 +107,10 @@ fn windows(
         })), &mut token)?;
         view.add_ProcessFailed(
             &ProcessFailedEventHandler::create(Box::new(move |_, _| {
-                let _ = tx.try_send(Failure {
+                let _ = tx.try_send(Event::Failed(Failure {
                     request: request.get(),
                     message: "WebView2 browser process failed".into(),
-                });
+                }));
                 Ok(())
             })),
             &mut token,

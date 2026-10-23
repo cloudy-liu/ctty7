@@ -104,6 +104,14 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     assert!(Instant::now() < deadline, "refresh did not reset the page");
                 }
                 let refresh_ms = refresh_started.elapsed().as_secs_f64() * 1000.;
+                let started = Instant::now();
+                loop {
+                    let rx = view.read_with(cx, |view, cx| view.inspect(
+                        "window.scrollTo(0, 600); window.scrollY", cx)).unwrap();
+                    if rx.recv().await.unwrap() == "600" { break; }
+                    assert!(started.elapsed() < Duration::from_secs(5), "fixture must have a readable scroll position");
+                    cx.background_executor().timer(Duration::from_millis(50)).await;
+                }
                 let mut switch_ms = Vec::new();
                 for (path, title) in [
                     (options.source.parent().unwrap().join("next.htm"), "\"Second HTML preview\""),
@@ -123,6 +131,89 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                         "switching files must reuse the browser");
                     switch_ms.push(started.elapsed().as_secs_f64() * 1000.);
                 }
+                let started = Instant::now();
+                loop {
+                    let rx = view.read_with(cx, |view, cx| view.inspect("window.scrollY", cx)).unwrap();
+                    if rx.recv().await.unwrap() == "600" { break; }
+                    assert!(started.elapsed() < Duration::from_secs(5), "HTML reading position was lost across file tabs");
+                    cx.background_executor().timer(Duration::from_millis(50)).await;
+                }
+                // Exercise the same panel boundary when the singleton is
+                // released, rather than only navigating an existing browser.
+                let mut markdown = tempfile::Builder::new().suffix(".md").tempfile().unwrap();
+                use std::io::Write as _;
+                markdown.write_all(b"# Another document\nReading Markdown between HTML files.").unwrap();
+                let rx = view.read_with(cx, |view, cx| view.inspect("window.scrollTo(0,850); scrollY", cx)).unwrap();
+                assert!((serde_json::from_str::<f64>(&rx.recv().await.unwrap()).unwrap() - 850.).abs() < 1.);
+                let released = view.downgrade();
+                drop(view);
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    app.editor_open_on_host(tty7_core::host::local::LocalHost::new(), markdown.path(), window, cx);
+                })).unwrap();
+                wait_for_release(released, cx).await;
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    app.editor_open_on_host(tty7_core::host::local::LocalHost::new(), &options.source, window, cx);
+                })).unwrap();
+                let view = wait_for_scroll(&app, 850., cx).await;
+                let released = view.downgrade();
+                drop(view);
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    app.editor_toggle_preview(window, cx);
+                    assert!(!app.tab_code().unwrap().active_file().unwrap().preview);
+                    assert!(app.editor.html.is_none());
+                })).unwrap();
+                wait_for_release(released, cx).await;
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    app.editor_toggle_preview(window, cx);
+                })).unwrap();
+                let view = wait_for_scroll(&app, 850., cx).await;
+                let singleton = view.entity_id();
+                let original_tab = app.read_with(cx, |app, _| app.active);
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    app.tabs.push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+                    app.active = app.tabs.len() - 1;
+                    app.editor_open_on_host(tty7_core::host::local::LocalHost::new(), &options.source, window, cx);
+                })).unwrap();
+                let second = wait_for_scroll(&app, 0., cx).await;
+                assert_eq!(second.entity_id(), singleton, "same-path session changes still reuse one browser");
+                let rx = second.read_with(cx, |view, cx| view.inspect("window.scrollTo(0,250); scrollY", cx)).unwrap();
+                assert!((serde_json::from_str::<f64>(&rx.recv().await.unwrap()).unwrap() - 250.).abs() < 1.);
+                drop(second);
+                let second_tab = app.read_with(cx, |app, _| app.active);
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    app.active = original_tab;
+                    app.editor_sync_html_preview(true, window, cx);
+                })).unwrap();
+                wait_for_scroll(&app, 850., cx).await;
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    app.active = second_tab;
+                    app.editor_sync_html_preview(true, window, cx);
+                })).unwrap();
+                wait_for_scroll(&app, 250., cx).await;
+                // Both selections happen before the outgoing script callback.
+                // Only the latest owner should be activated after capture.
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    app.active = original_tab;
+                    app.editor_sync_html_preview(true, window, cx);
+                    app.active = second_tab;
+                    app.editor_sync_html_preview(true, window, cx);
+                })).unwrap();
+                assert_eq!(wait_for_scroll(&app, 250., cx).await.entity_id(), singleton);
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    let ix = app.tab_code().unwrap().active;
+                    app.editor_close_file(ix, window, cx);
+                    app.editor_open_on_host(tty7_core::host::local::LocalHost::new(), &options.source, window, cx);
+                })).unwrap();
+                wait_for_scroll(&app, 0., cx).await;
+                drop(view);
+                cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
+                    app.tabs.remove(second_tab);
+                    app.active = original_tab;
+                    app.editor_sync_html_preview(true, window, cx);
+                })).unwrap();
+                let view = wait_for_scroll(&app, 850., cx).await;
+                let rx = view.read_with(cx, |view, cx| view.inspect("window.scrollTo(0,0); scrollY", cx)).unwrap();
+                assert_eq!(rx.recv().await.unwrap(), "0");
                 cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
                     app.open_palette("theme", window, cx);
                     app.editor_sync_html_preview(false, window, cx);
@@ -138,6 +229,8 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     "cold_load_poll_ms": cold_load_ms, "refresh_poll_ms": refresh_ms,
                     "switch_poll_ms": switch_ms, "samples": samples,
                     "script_click": true, "refresh": true,
+                    "html_tab_scroll": true, "markdown_and_source_scroll": true,
+                    "session_scroll_ownership": true, "rapid_switch_and_reopen": true,
                     "note": "DOM polling includes resource readiness; it does not measure first visible paint. Screenshot must be inspected separately."
                 });
                 eprintln!("NATIVE_HTML_READY_FOR_CAPTURE");
@@ -151,7 +244,6 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 // Delete only a fixture-owned temporary file, never the input
                 // document. Navigation begins successfully and fails later.
                 let mut fault = tempfile::Builder::new().suffix(".html").tempfile().unwrap();
-                use std::io::Write as _;
                 let saved = "<!doctype html><title>Failure recovery</title><p>Saved buffer</p>";
                 fault.write_all(saved.as_bytes()).unwrap();
                 cx.update_window(handle.into(), |_, window, cx| app.update(cx, |app, cx| {
@@ -189,4 +281,53 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 cx.update(|cx| cx.quit());
             }).detach();
         });
+}
+
+async fn wait_for_scroll(
+    app: &Entity<Tty7App>,
+    expected: f64,
+    cx: &mut AsyncApp,
+) -> Entity<crate::ui::html_preview::HtmlPreview> {
+    let started = Instant::now();
+    loop {
+        if let Some(view) = app.read_with(cx, |app, _| app.editor.html.clone())
+            && view.read_with(cx, |view, _| view.ready())
+        {
+            let rx = view
+                .read_with(cx, |view, cx| view.inspect("scrollY", cx))
+                .unwrap();
+            if rx
+                .recv()
+                .await
+                .ok()
+                .and_then(|value| serde_json::from_str::<f64>(&value).ok())
+                .is_some_and(|actual| (actual - expected).abs() < 1.)
+            {
+                return view;
+            }
+        }
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "HTML reading position {expected} was not restored"
+        );
+        cx.background_executor()
+            .timer(Duration::from_millis(50))
+            .await;
+    }
+}
+
+async fn wait_for_release(
+    view: WeakEntity<crate::ui::html_preview::HtmlPreview>,
+    cx: &mut AsyncApp,
+) {
+    let started = Instant::now();
+    while view.upgrade().is_some() {
+        assert!(
+            started.elapsed() < Duration::from_secs(15),
+            "leaving preview retained its browser"
+        );
+        cx.background_executor()
+            .timer(Duration::from_millis(50))
+            .await;
+    }
 }

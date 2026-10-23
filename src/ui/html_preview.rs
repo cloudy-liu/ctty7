@@ -12,7 +12,7 @@ use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Render, Win
 use raw_window_handle::{RawWindowHandle, WindowHandle};
 
 mod navigation;
-pub(crate) use navigation::Failure;
+pub(crate) use navigation::{Event, Failure};
 
 pub(crate) struct PendingHtmlPreview {
     path: PathBuf,
@@ -23,6 +23,10 @@ pub(crate) struct PendingHtmlPreview {
 
 pub(crate) struct HtmlPreview {
     pub(crate) path: PathBuf,
+    pub(crate) owner: gpui::EntityId,
+    loaded: bool,
+    restore_pending: bool,
+    pub(crate) failed: bool,
     view: Entity<gpui_wry::WebView>,
     started: Rc<Cell<Instant>>,
     observer: navigation::Observer,
@@ -73,7 +77,12 @@ impl HtmlPreview {
         })
     }
 
-    pub(crate) fn attach(pending: PendingHtmlPreview, window: &mut Window, cx: &mut App) -> Self {
+    pub(crate) fn attach(
+        pending: PendingHtmlPreview,
+        owner: gpui::EntityId,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> Self {
         let PendingHtmlPreview {
             path,
             webview,
@@ -86,18 +95,29 @@ impl HtmlPreview {
         view.update(cx, |view, _| view.hide());
         Self {
             path,
+            owner,
+            loaded: false,
+            restore_pending: true,
+            failed: false,
             view,
             started,
             observer,
         }
     }
 
-    pub(crate) fn navigate(&mut self, path: &Path, cx: &mut App) -> anyhow::Result<()> {
-        if self.path == path {
+    pub(crate) fn navigate(
+        &mut self,
+        owner: gpui::EntityId,
+        path: &Path,
+        cx: &mut App,
+    ) -> anyhow::Result<()> {
+        if self.path == path && self.owner == owner {
             return Ok(());
         }
         let url = url::Url::from_file_path(path)
             .map_err(|_| anyhow::anyhow!("HTML preview requires an absolute local file path"))?;
+        self.loaded = false;
+        self.restore_pending = true;
         self.started.set(Instant::now());
         self.observer.begin();
         #[cfg(windows)]
@@ -105,18 +125,72 @@ impl HtmlPreview {
         #[cfg(target_os = "macos")]
         load_file_url(self.view.read(cx).raw(), &url)?;
         self.path = path.to_path_buf();
+        self.owner = owner;
         Ok(())
     }
 
-    pub(crate) fn reload(&self, cx: &App) -> anyhow::Result<()> {
+    pub(crate) fn reload(&mut self, cx: &App) -> anyhow::Result<()> {
+        self.loaded = false;
+        self.restore_pending = true;
         self.started.set(Instant::now());
         self.observer.begin();
         self.view.read(cx).raw().reload()?;
         Ok(())
     }
 
-    pub(crate) fn failures(&self) -> smol::channel::Receiver<Failure> {
-        self.observer.failures.clone()
+    pub(crate) fn events(&self) -> smol::channel::Receiver<Event> {
+        self.observer.events.clone()
+    }
+
+    pub(crate) fn mark_loaded(&mut self, request: u64) {
+        if self.observer.is_current_ready(request) {
+            self.loaded = true;
+        }
+    }
+
+    pub(crate) fn needs_restore(&self) -> bool {
+        self.loaded && self.restore_pending
+    }
+
+    pub(crate) fn restored(&mut self) {
+        self.restore_pending = false;
+    }
+
+    pub(crate) fn ready(&self) -> bool {
+        self.loaded && !self.restore_pending && !self.failed
+    }
+
+    pub(crate) fn file_url(&self) -> String {
+        url::Url::from_file_path(&self.path).unwrap().to_string()
+    }
+
+    pub(crate) fn capture_scroll(&self, cx: &App) -> Option<smol::channel::Receiver<String>> {
+        self.ready()
+            .then(|| {
+                self.evaluate("({url:location.href,x:scrollX,y:scrollY})", cx)
+                    .ok()
+            })
+            .flatten()
+    }
+
+    pub(crate) fn restore_scroll(
+        &self,
+        position: [f64; 2],
+        cx: &App,
+    ) -> anyhow::Result<smol::channel::Receiver<String>> {
+        let url = serde_json::to_string(&self.file_url())?;
+        self.evaluate(&format!("(() => {{ if(location.href !== {url}) return false; window.scrollTo({{left:{},top:{},behavior:'instant'}}); return true; }})()", position[0], position[1]), cx)
+    }
+
+    fn evaluate(&self, script: &str, cx: &App) -> anyhow::Result<smol::channel::Receiver<String>> {
+        let (tx, rx) = smol::channel::bounded(1);
+        self.view
+            .read(cx)
+            .raw()
+            .evaluate_script_with_callback(script, move |json| {
+                let _ = tx.try_send(json);
+            })?;
+        Ok(rx)
     }
 
     pub(crate) fn is_current_failure(&self, failure: &Failure) -> bool {
@@ -129,14 +203,7 @@ impl HtmlPreview {
         script: &str,
         cx: &App,
     ) -> anyhow::Result<smol::channel::Receiver<String>> {
-        let (tx, rx) = smol::channel::bounded(1);
-        self.view
-            .read(cx)
-            .raw()
-            .evaluate_script_with_callback(script, move |json| {
-                let _ = tx.try_send(json);
-            })?;
-        Ok(rx)
+        self.evaluate(script, cx)
     }
 
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut App) {
