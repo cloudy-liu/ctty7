@@ -24,7 +24,25 @@ pub fn run_agent_hook(agent: &str, event: &str) {
     let Some(event) = effective_event(agent, event, &input) else {
         return;
     };
-    write_to_controlling_tty(&build_hook_sequence(agent, event, &input));
+    let body = build_hook_body(agent, event, &input);
+    if !report_to_daemon(&body) {
+        write_to_controlling_tty(&hook_sequence(&body));
+    }
+}
+
+fn report_to_daemon(body: &str) -> bool {
+    // Resolve the inherited pane only against its explicitly named daemon.
+    std::env::var_os("TTY7_CONFIG_DIR")
+        .filter(|dir| !dir.is_empty())
+        .is_some()
+        && std::env::var("TTY7_PANE")
+            .ok()
+            .and_then(|pane| pane.trim().parse().ok())
+            .is_some_and(|pane| {
+                crate::client::PaneClient::local()
+                    .report_agent_event(pane, std::process::id(), body)
+                    .is_ok()
+            })
 }
 
 #[cfg(not(unix))]
@@ -54,7 +72,16 @@ fn effective_event<'a>(agent: &str, event: &'a str, stdin_json: &str) -> Option<
     Some(event)
 }
 
+#[cfg(test)]
 pub(crate) fn build_hook_sequence(agent: &str, event: &str, stdin_json: &str) -> Vec<u8> {
+    hook_sequence(&build_hook_body(agent, event, stdin_json))
+}
+
+pub(crate) fn hook_sequence(body: &str) -> Vec<u8> {
+    format!("\x1b]777;notify;{AGENT_EVENT_SENTINEL};{body}\x07").into_bytes()
+}
+
+fn build_hook_body(agent: &str, event: &str, stdin_json: &str) -> String {
     // Windows PowerShell prefixes UTF8-encoded native stdin with a BOM.
     // Preserve the payload's caller/session fields instead of falling back
     // to the command's agent name when serde_json rejects that prefix.
@@ -84,6 +111,7 @@ pub(crate) fn build_hook_sequence(agent: &str, event: &str, stdin_json: &str) ->
         ("cwd", "cwd"),
         // Goose spells the working directory its own way.
         ("cwd", "working_dir"),
+        ("source", "source"),
     ] {
         if let Some(v) = payload
             .get(key)
@@ -102,7 +130,7 @@ pub(crate) fn build_hook_sequence(agent: &str, event: &str, stdin_json: &str) ->
     {
         body["prompt"] = serde_json::Value::String(prompt);
     }
-    format!("\x1b]777;notify;{AGENT_EVENT_SENTINEL};{body}\x07").into_bytes()
+    body.to_string()
 }
 
 /// How much of a prompt rides back to the terminal.
@@ -2529,5 +2557,19 @@ mod tests {
                 .any(|(hook_event, _)| *hook_event == "Notification"),
             "Notification fires for background-task chatter and would strand the pane on waiting"
         );
+    }
+
+    #[test]
+    fn socket_and_terminal_reports_keep_codex_new_session_metadata() {
+        let input = r#"{"session_id":"new-session","cwd":"C:/work/ctty7","source":"clear","prompt":"first message"}"#;
+        let body = build_hook_body("codex", "session-start", input);
+        let event = crate::core::cli_agent::parse_agent_event_body(body.as_bytes()).unwrap();
+        let sequence = hook_sequence(&body);
+        let terminal =
+            crate::core::cli_agent::parse_agent_event(&sequence[2..sequence.len() - 1]).unwrap();
+        assert_eq!(event, terminal);
+        assert_eq!(event.source.as_deref(), Some("clear"));
+        assert_eq!(event.prompt.as_deref(), Some("first message"));
+        assert_eq!(event.cwd.as_deref(), Some(Path::new("C:/work/ctty7")));
     }
 }

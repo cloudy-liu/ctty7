@@ -109,6 +109,28 @@ impl crate::host::server::PaneDirectory for Registry {
     }
 }
 
+/// Shared Codex hooks name the app-server's first pane, not their own.
+fn report_agent_event(registry: &Registry, named: u64, pid: u32, body: &str) -> Result<(), String> {
+    let event = crate::core::cli_agent::parse_agent_event_body(body.as_bytes())
+        .ok_or_else(|| "not an agent event".to_string())?;
+    if event.agent == Some(crate::core::cli_agent::CLIAgent::Codex) {
+        let panes = registry.all();
+        let candidates: Vec<_> = panes.iter().map(|pane| pane.codex_candidate()).collect();
+        if let Some(target) = crate::daemon::pane::codex_report_target(&candidates, &event)
+            && let Some(pane) = panes.into_iter().find(|pane| pane.id == target)
+        {
+            return pane.apply_reported_agent_event(body);
+        }
+        // Acknowledge unresolved Codex hooks without applying them. Returning
+        // an error would replay them into the app-server's inherited terminal.
+        return Ok(());
+    }
+    registry
+        .get(named)
+        .ok_or_else(|| format!("no such pane {named}"))?
+        .report_agent_event(pid, body)
+}
+
 const ORPHAN_SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_secs(600);
 
 fn spawn_orphan_sweep(registry: Arc<Registry>) {
@@ -991,6 +1013,20 @@ fn handle_conn(stream: Stream, registry: Arc<Registry>) -> anyhow::Result<()> {
             let mut w = write_stream;
             let list = crate::daemon::ssh::SshManager::global().remove_forward(pane_id, forward_id);
             DaemonMsg::ForwardList(list).encode(&mut w)?;
+            Ok(())
+        }
+
+        ClientMsg::AgentEvent {
+            pane_id,
+            pid,
+            event,
+        } => {
+            let mut w = write_stream;
+            let applied = report_agent_event(&registry, pane_id, pid, &event);
+            match applied {
+                Ok(()) => DaemonMsg::InputAck { pane_id }.encode(&mut w)?,
+                Err(message) => DaemonMsg::Error(message).encode(&mut w)?,
+            }
             Ok(())
         }
 

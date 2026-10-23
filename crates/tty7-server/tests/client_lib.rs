@@ -374,3 +374,157 @@ fn input_reaches_the_shell_and_a_reattach_replays_it() {
         std::thread::sleep(Duration::from_millis(50));
     }
 }
+
+/// Codex's shared app-server can retain the first pane's environment. Exercise
+/// the real Windows hook executable and daemon, before any prompt is submitted.
+#[cfg(windows)]
+#[test]
+fn codex_hooks_from_a_shared_app_server_reach_their_own_pane() {
+    check_codex_hook_routing(false);
+}
+
+#[cfg(windows)]
+#[test]
+fn ambiguous_codex_hooks_leave_existing_sessions_untouched() {
+    check_codex_hook_routing(true);
+}
+
+#[cfg(windows)]
+fn check_codex_hook_routing(shared_directory: bool) {
+    use std::io::Write as _;
+    use std::os::windows::process::CommandExt as _;
+    use tty7_core::core::cli_agent::AgentStatus;
+
+    fn wait_for_session(
+        session: &mut tty7_core::client::PaneSession,
+        id: Option<&str>,
+        status: AgentStatus,
+    ) {
+        let mut seen = Vec::new();
+        loop {
+            match session.recv() {
+                Ok(DaemonMsg::AgentStatus(Some(state)))
+                    if state.session_id.as_deref() == id && state.status == status =>
+                {
+                    return;
+                }
+                Ok(message) => {
+                    if seen.len() < 20 {
+                        seen.push(message);
+                    }
+                }
+                Err(error) => panic!("waiting for {id:?}/{status:?}: {error}; saw {seen:?}"),
+            }
+        }
+    }
+
+    let daemon = Daemon::start();
+    let panes = daemon.panes();
+    let first_dir = daemon.dir.path().join("ctty7");
+    let second_dir = if shared_directory {
+        first_dir.clone()
+    } else {
+        daemon.dir.path().join("plain-folder")
+    };
+    std::fs::create_dir(&first_dir).unwrap();
+    std::fs::create_dir_all(&second_dir).unwrap();
+    let mut sessions = Vec::new();
+    for (cwd, id) in [(&first_dir, "session-a"), (&second_dir, "")] {
+        // Emit the process-detection hook from the pane's own output, then
+        // leave the shell alive without starting a real Codex subscription.
+        let cwd_text = cwd.to_str().unwrap().replace('\\', "/");
+        let startup = format!(
+            "@echo off\r\necho \x1b]777;notify;tty7://cli-agent;{{\"agent\":\"codex\",\"event\":\"session-start\",\"session_id\":\"{id}\",\"cwd\":\"{cwd_text}\"}}\x07\r\nping -n 61 127.0.0.1 > nul\r\n"
+        );
+        let fixture = daemon
+            .dir
+            .path()
+            .join(format!("pane-{}.cmd", sessions.len()));
+        std::fs::write(&fixture, startup).unwrap();
+        let mut session = panes
+            .spawn(
+                Some(cwd.clone()),
+                size(),
+                Some(one_shot_shell(fixture.to_str().unwrap())),
+                None,
+                None,
+            )
+            .unwrap();
+        session.set_recv_timeout(Some(STREAM_WITHIN)).unwrap();
+        wait_for_session(
+            &mut session,
+            (!id.is_empty()).then_some(id),
+            AgentStatus::Idle,
+        );
+        sessions.push(session);
+    }
+
+    let inherited_pane = sessions[0].pane_id();
+    let cwd = second_dir.to_str().unwrap().replace('\\', "/");
+    for (event, status) in [
+        ("session-start", AgentStatus::Idle),
+        ("prompt-submit", AgentStatus::Working),
+    ] {
+        let mut hook = Command::new(env!("CARGO_BIN_EXE_tty7-server"))
+            .args(["agent-hook", "codex", event])
+            .env("TTY7", "routing-test")
+            .env("TTY7_CONFIG_DIR", daemon.dir.path())
+            .env("TTY7_PANE", inherited_pane.to_string())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .creation_flags(0x08000000) // CREATE_NO_WINDOW
+            .spawn()
+            .unwrap();
+        let payload =
+            format!(r#"{{"session_id":"session-b","cwd":"{cwd}","prompt":"first message"}}"#);
+        hook.stdin
+            .take()
+            .unwrap()
+            .write_all(payload.as_bytes())
+            .unwrap();
+        assert!(hook.wait().unwrap().success());
+        wait_for_session(&mut sessions[1], Some("session-b"), status);
+    }
+    if shared_directory {
+        let control = daemon.control("ambiguous-hooks");
+        let before = control.request(ControlRequest::AgentStates).unwrap();
+        let ambiguous = format!(
+            r#"{{"agent":"codex","event":"session-start","source":"clear","session_id":"unknown-new-session","cwd":"{cwd}"}}"#
+        );
+        for named in [inherited_pane, u64::MAX] {
+            panes
+                .report_agent_event(named, std::process::id(), &ambiguous)
+                .expect("acknowledge an unresolved Codex event without terminal fallback");
+            assert_eq!(
+                control.request(ControlRequest::AgentStates).unwrap(),
+                before,
+                "an ambiguous /new must not overwrite either existing session"
+            );
+        }
+    }
+    sessions[0]
+        .set_recv_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    loop {
+        match sessions[0].recv() {
+            Ok(DaemonMsg::AgentStatus(Some(state))) => {
+                assert_eq!(state.session_id.as_deref(), Some("session-a"));
+                assert_eq!(state.cwd.as_deref(), Some(first_dir.as_path()));
+            }
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+                ) =>
+            {
+                break;
+            }
+            Err(error) => panic!("first pane stream: {error}"),
+        }
+    }
+    for session in sessions {
+        session.kill().unwrap();
+    }
+}

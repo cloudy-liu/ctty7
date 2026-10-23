@@ -10,6 +10,7 @@ use crate::daemon::router::{RouteAction, RouteChannel, RouteHeader, RouteTarget,
 use crate::daemon::transport;
 
 const OPEN_REPLY_WAIT: Duration = Duration::from_secs(15);
+const AGENT_EVENT_REPLY_WAIT: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug, Default)]
 enum PaneEndpoint {
@@ -125,6 +126,25 @@ impl PaneClient {
             DaemonMsg::InputAck { .. } => Ok(()),
             DaemonMsg::Error(message) => Err(io::Error::other(message)),
             other => Err(unexpected_reply("SendInput", &other)),
+        }
+    }
+
+    /// Report a hook over the socket. Older daemons refuse the new message,
+    /// allowing the hook to fall back to its controlling terminal.
+    pub fn report_agent_event(&self, pane_id: u64, pid: u32, event: &str) -> io::Result<()> {
+        let mut stream = self.open()?;
+        stream.set_read_timeout(Some(AGENT_EVENT_REPLY_WAIT))?;
+        stream.set_write_timeout(Some(AGENT_EVENT_REPLY_WAIT))?;
+        ClientMsg::AgentEvent {
+            pane_id,
+            pid,
+            event: event.to_string(),
+        }
+        .encode(&mut stream)?;
+        match DaemonMsg::read(&mut stream)? {
+            DaemonMsg::InputAck { .. } => Ok(()),
+            DaemonMsg::Error(message) => Err(io::Error::other(message)),
+            other => Err(unexpected_reply("AgentEvent", &other)),
         }
     }
 
