@@ -733,7 +733,7 @@ mod gpui_tests {
                         preview_loading: None,
                         scroll: ScrollHandle::new(),
                         epoch: None,
-                        file_view: None,
+                        file_views: Default::default(),
                         geometry: Default::default(),
                         anchor: Default::default(),
                     });
@@ -958,7 +958,7 @@ mod gpui_tests {
                         preview_loading: None,
                         scroll: scroll.clone(),
                         epoch: None,
-                        file_view: None,
+                        file_views: Default::default(),
                         geometry: Default::default(),
                         anchor: Default::default(),
                     });

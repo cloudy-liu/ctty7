@@ -617,12 +617,15 @@ impl Tty7App {
             cx,
             move |h| -> Result<(PathBuf, String, Option<MTime>), String> {
                 let path = h.canonicalize(&p).unwrap_or(p);
+                let display_path = crate::ui::path_display::readable_path(&path, host_id)
+                    .display()
+                    .to_string();
                 let meta = match h.stat(&path) {
                     Ok(m) => m,
                     Err(e) => {
                         return Err(t_fmt(
                             L10nKey::EditorCantOpen,
-                            &[("path", &path.display().to_string()), ("e", &e.to_string())],
+                            &[("path", &display_path), ("e", &e.to_string())],
                         ));
                     }
                 };
@@ -630,7 +633,7 @@ impl Tty7App {
                     return Err(t_fmt(
                         L10nKey::EditorFileTooLarge,
                         &[
-                            ("path", &path.display().to_string()),
+                            ("path", &display_path),
                             ("size", &(meta.len / (1024 * 1024)).to_string()),
                         ],
                     ));
@@ -640,22 +643,15 @@ impl Tty7App {
                     Err(e) => {
                         return Err(t_fmt(
                             L10nKey::EditorCantRead,
-                            &[("path", &path.display().to_string()), ("e", &e.to_string())],
+                            &[("path", &display_path), ("e", &e.to_string())],
                         ));
                     }
                 };
                 if looks_binary(&bytes) {
-                    return Err(t_fmt(
-                        L10nKey::EditorBinaryFile,
-                        &[("path", &path.display().to_string())],
-                    ));
+                    return Err(t_fmt(L10nKey::EditorBinaryFile, &[("path", &display_path)]));
                 }
-                let text = String::from_utf8(bytes).map_err(|_| {
-                    t_fmt(
-                        L10nKey::EditorNotUtf8,
-                        &[("path", &path.display().to_string())],
-                    )
-                })?;
+                let text = String::from_utf8(bytes)
+                    .map_err(|_| t_fmt(L10nKey::EditorNotUtf8, &[("path", &display_path)]))?;
                 Ok((path, text, meta.mtime))
             },
             move |app, opened, window, cx| {

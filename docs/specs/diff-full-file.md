@@ -6,10 +6,11 @@ deletions still highlighted.
 - Use icon buttons in the file title and focused toolbar, with localized
   tooltips, rather than persistent text controls. Use distinct unfold/fold
   glyphs for context and keep the existing layout icon.
-- A file-level unfold action focuses that file and reveals its full context.
-  Fold returns to changed regions. Keep the source line at the same screen
-  position when possible; if folding removes it, retain the nearest available
-  line instead of jumping to the file's start.
+- A file-level unfold action expands that file in place and reveals its full
+  context without changing overlay focus or hiding the other file cards. Fold
+  returns to changed regions. Keep the source line at the same screen position
+  when possible; if folding removes it, retain the nearest available line
+  instead of jumping to the file's start.
 - Unified/split layout is independent of context. Provide previous/next
   change arrows in the focused toolbar and 20-line expansion at gap edges.
 - Fetch through HostOps and the existing DiffSource Git arguments, including
