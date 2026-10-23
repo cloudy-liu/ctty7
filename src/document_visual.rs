@@ -11,12 +11,15 @@ use std::{
 
 use crate::{
     core::{
-        config::{Config, DocumentLayout},
+        cli_agent::{AgentSessionState, AgentStatus, CLIAgent},
+        config::{Config, DocumentLayout, RightPanelTab, SidebarGrouping},
         session::{Session, WorkspaceStore},
     },
+    daemon::{protocol::DaemonMsg, transport::Stream},
+    terminal::view::{TerminalView, quiet_test_pane},
     ui::{
         app::{Tab, Tty7App},
-        pane::Pane,
+        pane::{Pane, PaneSlot},
         windows::WindowRegistry,
     },
 };
@@ -40,8 +43,17 @@ struct Options {
     dark: bool,
     #[serde(default)]
     dock: bool,
+    #[serde(default)]
+    readme: bool,
     #[serde(default = "default_hold_seconds")]
     hold_seconds: u64,
+}
+
+struct ReadmePane {
+    view: Entity<TerminalView>,
+    _stream: Stream,
+    agent: Option<CLIAgent>,
+    status: Option<AgentStatus>,
 }
 
 fn default_width() -> f32 {
@@ -64,6 +76,13 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
     assert!((480. ..=2400.).contains(&options.width));
     assert!((400. ..=1600.).contains(&options.height));
     options.root = std::fs::canonicalize(&options.root).unwrap();
+    if options.readme {
+        options.root = crate::ui::path_display::readable_path(
+            &options.root,
+            crate::ui::host_ops::HostId::LOCAL,
+        )
+        .into_owned();
+    }
     let files: Vec<_> = options
         .files
         .iter()
@@ -86,6 +105,28 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             } else {
                 DocumentLayout::Fill
             };
+            if options.readme {
+                config.sidebar_width = 278.;
+                config.sidebar_grouping = SidebarGrouping::RepoOrDirectory;
+                config.right_panel_visible = true;
+                config.right_panel_tab = RightPanelTab::Files;
+                config.right_panel_width = 240.;
+                // Git reports Windows repository roots with forward slashes.
+                let root = options.root.to_string_lossy().replace('\\', "/");
+                let archive = options
+                    .root
+                    .join("archive")
+                    .to_string_lossy()
+                    .replace('\\', "/");
+                config
+                    .sidebar_group_names
+                    .insert(root.clone(), "ctty7".into());
+                config
+                    .sidebar_group_names
+                    .insert(archive.clone(), "Playground".into());
+                config.sidebar_pinned_groups.push(root);
+                config.sidebar_collapsed_groups.insert(archive);
+            }
             cx.set_global(config);
             WorkspaceStore::init(cx);
             WindowRegistry::init(cx);
@@ -93,6 +134,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             crate::ui::keymap::init(cx);
             crate::ui::markdown_preview::init(Default::default(), cx);
             let mut owner = None;
+            let mut readme_panes = Vec::new();
             let handle = cx
                 .open_window(
                     WindowOptions {
@@ -103,7 +145,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                         ))),
                         titlebar: Some(TitlebarOptions {
                             title: Some("ctty7 document acceptance".into()),
-                            ..Default::default()
+                            ..gpui_component::TitleBar::title_bar_options()
                         }),
                         show: true,
                         focus: true,
@@ -115,8 +157,12 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                             Tty7App::with_session(None, Some(Session::default()), window, cx)
                         });
                         app.update(cx, |app, cx| {
-                            app.tabs.push(Tab::new(Pane::Empty));
-                            app.active = app.tabs.len() - 1;
+                            if options.readme {
+                                readme_panes = install_readme_tabs(app, &options.root, window, cx);
+                            } else {
+                                app.tabs.push(Tab::new(Pane::Empty));
+                                app.active = app.tabs.len() - 1;
+                            }
                             app.tab_code_mut_or_init()
                                 .unwrap()
                                 .roots
@@ -134,6 +180,24 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             // windows and the tray is disabled, even if a native window exists.
             WindowRegistry::register(cx, app.read(cx).workspace, handle.into(), app.downgrade());
             cx.spawn(async move |cx| {
+                let deadline = Instant::now() + Duration::from_secs(20);
+                for pane in &readme_panes {
+                    while !pane.view.read_with(cx, |view, _| {
+                        view.agent() == pane.agent
+                            && view.agent_status() == pane.status
+                            && view.git_status_cwd().is_some()
+                    }) {
+                        assert!(
+                            Instant::now() < deadline,
+                            "README sample pane did not settle: {:?} {:?}",
+                            pane.agent,
+                            pane.status
+                        );
+                        cx.background_executor()
+                            .timer(Duration::from_millis(100))
+                            .await;
+                    }
+                }
                 // Production open requests cancel older requests. Await each
                 // installation before opening the next fixture document.
                 for path in files.iter().chain(std::iter::once(&files[options.active])) {
@@ -293,6 +357,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                             "height": f32::from(window.viewport_size().height),
                             "dark": options.dark,
                             "dock": options.dock,
+                            "readme": options.readme,
                             "files": files,
                             "active": file.path,
                             "preview": file.preview,
@@ -313,8 +378,78 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 cx.background_executor()
                     .timer(Duration::from_secs(options.hold_seconds.min(600)))
                     .await;
+                drop(readme_panes);
                 cx.update(|cx| cx.quit());
             })
             .detach();
         });
+}
+
+/// Sample daemon events exercise the normal renderers without agent requests.
+fn install_readme_tabs(
+    app: &mut Tty7App,
+    root: &std::path::Path,
+    window: &mut Window,
+    cx: &mut Context<Tty7App>,
+) -> Vec<ReadmePane> {
+    let cases = [
+        ("Read the project", None, None),
+        (
+            "Plan the next change",
+            Some(CLIAgent::Codex),
+            Some(AgentStatus::Idle),
+        ),
+        (
+            "Implement file tabs",
+            Some(CLIAgent::Claude),
+            Some(AgentStatus::Working),
+        ),
+        (
+            "Review permissions",
+            Some(CLIAgent::Gemini),
+            Some(AgentStatus::Waiting),
+        ),
+        (
+            "Read the results",
+            Some(CLIAgent::Cursor),
+            Some(AgentStatus::Done),
+        ),
+        ("Explore a prototype", None, None),
+    ];
+    let mut panes = Vec::new();
+    for (index, (name, agent, status)) in cases.into_iter().enumerate() {
+        let (view, mut stream) = quiet_test_pane(index as u64 + 1, window, cx);
+        let cwd = if index == 5 {
+            root.join("archive")
+        } else {
+            root.to_path_buf()
+        };
+        DaemonMsg::Cwd(cwd.clone()).encode(&mut stream).unwrap();
+        DaemonMsg::Output(format!("\x1b]0;{name}\x07").into_bytes())
+            .encode(&mut stream)
+            .unwrap();
+        DaemonMsg::Agent(agent).encode(&mut stream).unwrap();
+        if let Some(status) = status {
+            DaemonMsg::AgentStatus(Some(AgentSessionState {
+                status,
+                rich: true,
+                ..Default::default()
+            }))
+            .encode(&mut stream)
+            .unwrap();
+        }
+        let mut tab = Tab::new(Pane::leaf(PaneSlot::Ready(view.clone())));
+        tab.name = Some(name.into());
+        *tab.sidebar_group.borrow_mut() = Some(cwd);
+        app.tabs.push(tab);
+        panes.push(ReadmePane {
+            view,
+            _stream: stream,
+            agent,
+            status,
+        });
+    }
+    app.active = 0;
+    app.focus_active(window, cx);
+    panes
 }
