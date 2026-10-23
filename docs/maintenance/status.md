@@ -1,29 +1,36 @@
 # Project status
 
-Checked on 2026-10-21 against GitHub and the local checkout.
+Checked on 2026-10-23 against GitHub and the local checkout.
 This is a dated snapshot; query GitHub again before merging or preparing a release.
 
 ## Open work
 
-The v0.7.0 baseline includes Windows HTML preview, unread Agent indicators,
-sidebar reliability, and document-path fixes from PRs #165, #166, and #169
-through #174. The v0.7.1 preparation in PR #176 restores omitted default HTML
-preview and terminal block-fill changes. See its
-[release notes](../releases/v0.7.1.md) and the
-[preserved-change audit](../testing/local-change-audit-v0.7.1.md).
+The latest published release is v0.7.1. The v0.8.0 candidate adds independent
+file tabs and explicit preview controls, macOS native HTML preview, in-place
+diff context, and fixes for Codex hook routing, Markdown code backgrounds,
+attention indicators, file-tree refresh and HTML reading positions. See its
+[release notes](../releases/v0.8.0.md) and
+[preserved-change audit](../testing/local-change-audit-v0.8.0.md).
 
-Issue #175 remains open for macOS HTML preview, platform boundaries, and
-further performance work. PR #176 addresses its Windows default-opening
-requirement without completing the broader spec. Query GitHub for current
-publication and CI status; this document is a dated source snapshot.
-The component fork `cloudy-liu/gpui-component` now has a `ctty7` stable
-integration branch. The application pins its exact commit; see
+PRs #180, #181, #186 and #187 have been squash-merged into fork main. PRs #189,
+#190 and #191 are being validated with the integrated release candidate.
+Publication requires successful candidate CI, all platform packages and
+verification of every downloaded release asset and checksum. Query GitHub for
+the final merge and publication state.
+
+Issue #175 remains open for broader HTML preview performance and platform
+acceptance. PR #178 implements native macOS preview; Linux retains source
+editing and external opening. Issue #182 tracks the multi-file document spec;
+implementation and native evidence are included through PR #186.
+The component fork `cloudy-liu/gpui-component` has a `ctty7` stable integration
+branch. The application pins its exact commit; see
 [gpui-component maintenance](gpui-component.md).
 
 ## Completed work
 
 | Work | Completion |
 | --- | --- |
+| v0.7.1 publication | Published on 2026-10-21. Default Windows HTML preview and terminal block-fill corrections are included through PR #176. |
 | v0.6.0 publication | Published on 2026-10-18 and set Latest. Sidebar groups, full-file diffs, rendering improvements, and the stable component pin are included. |
 | v0.3.0 publication | Published on 2026-10-11 and set Latest after all nine frozen source CI jobs, all ten Release jobs, downloaded assets and checksums, package contents, embedded audio, and public endpoints passed verification. |
 | v0.2.2 publication | Published on 2026-10-10 and set Latest after all nine frozen source CI jobs, all ten Release jobs, downloaded assets and checksums, package contents, and public endpoints passed verification. |
@@ -59,6 +66,8 @@ been checked. macOS/Linux native source-editor screenshots remain unverified;
 these are verification gaps, not additional open GitHub tickets.
 
 ## Source and release state
+
+- Published tag `v0.7.1` is the current release baseline. Its [English notes](../releases/v0.7.1.md) and [local-change audit](../testing/local-change-audit-v0.7.1.md) record the recovered fixes and verification limits.
 
 - Published tag `v0.7.0` points to `f8adef01`. [English notes](../releases/v0.7.0.md) record its changes and verification limits. It includes manual HTML preview but omitted the locally validated default-opening changes recovered in PR #176.
 - Published tag `v0.6.0` points to `edf1339d`, including GPUI integration #160, sidebar groups #161, and release preparation #163 and #164. [English notes](../releases/v0.6.0.md) record its changes and verification limits.
