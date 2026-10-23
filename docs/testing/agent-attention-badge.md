@@ -18,10 +18,10 @@ window size, display scaling and Agent status sequence.
 | Taskbar | ![No taskbar completion badge](images/agent-attention/before-taskbar.png) | ![Native dark taskbar badge with white dot](images/agent-attention/after-taskbar.png) | ![Native taskbar badge cleared](images/agent-attention/read-taskbar.png) |
 | Tray | ![No tray completion badge](images/agent-attention/before-tray.png) | ![Native dark tray badge with white dot](images/agent-attention/after-tray.png) | Windows returned the inactive icon to its overflow area after the result was viewed. |
 
-On the Windows 11 system used for these captures, `ITaskbarList3::SetOverlayIcon`
-places the mark at the upper-right. Windows controls placement and scaling;
-older taskbars can position overlays differently. The app supplies the same
-circle-and-dot artwork used by the tray. No taskbar setting is changed.
+These historical captures used `ITaskbarList3::SetOverlayIcon`. Windows controls
+overlay placement; the reported vertical taskbar placed it at the lower-right.
+The correction below composes the mark into the window icon instead. No taskbar
+setting is changed.
 
 ## Reproduce
 
@@ -132,7 +132,7 @@ fixture state, with no user session content.
 
 The following are lossless crops of full-screen captures made through the
 Windows Screenshot Tool during the LCU run. They show the actual taskbar icon,
-not a rendered mockup. Windows controls icon order and overlay placement.
+not a rendered mockup. They predate the composed-icon correction below.
 
 | Configuration | Unread result | After viewing |
 | --- | --- | --- |
@@ -164,3 +164,40 @@ The system tray overflow icon itself was not visually re-captured in this
 follow-up; its aggregate attention state was checked. Explorer restart,
 other Windows versions and macOS/Linux native interaction remain unverified.
 The original screenshots earlier in this document describe the earlier run.
+
+## Vertical taskbar correction on 2026-10-23
+
+`ITaskbarList3::SetOverlayIcon` does not accept a position. Its documented
+placement is the lower-right, matching the reported vertical-taskbar symptom.
+The app now draws the tray's dark circle and white dot directly into the
+upper-right of its logo and supplies that full icon through `WM_SETICON`.
+The same 256-pixel artwork fills both window icon slots so Explorer can scale
+it for high-DPI taskbars and Alt+Tab. The reminder therefore also appears in
+Alt+Tab while attention is active.
+
+Every registered window receives the existing aggregate attention state.
+Clearing attention restores each window's previous small and large icons,
+including the null handles that select GPUI's class icon. Repeated polling
+does not overwrite those originals. The icon handles remain alive until
+detached from the windows; no shortcut or taskbar preference is rewritten.
+
+Run the focused regression suite on Windows:
+
+```powershell
+cargo test --locked --bin tty7-app ui::tray:: -- --nocapture
+```
+
+The native-window regression failed against the old overlay delivery and
+passed after the change. It checks delivery to two real hidden Win32 windows,
+repeated polling, clearing one window without disturbing the other, and
+restoring both null and non-null original handles before icon destruction.
+Artwork assertions check the white center and dark circle at the upper-right
+at 16, 32, 48, 64 and 256 pixels, with the entire lower half unchanged.
+These checks verify the window handles and pixels; they do not capture Explorer.
+
+The Windows native fixture builds and reaches
+`NATIVE_ATTENTION_BADGE_UNREAD`. Fresh taskbar screenshots were not obtained:
+computer use failed to activate the captured test and Screenshot Tool windows.
+Vertical/horizontal shell placement, pinned/grouped-button rendering and
+Explorer restart remain pending interactive acceptance. The screenshots
+elsewhere in this document are historical evidence, not captures of this fix.
