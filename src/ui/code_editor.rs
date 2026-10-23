@@ -29,6 +29,19 @@ pub(crate) mod native_html;
 
 const RELOAD_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(200);
 
+#[cfg(any(windows, target_os = "macos"))]
+async fn html_evaluation(receiver: Option<smol::channel::Receiver<String>>) -> Option<String> {
+    use smol::future::FutureExt as _;
+    let receiver = receiver?;
+    async { receiver.recv().await.ok() }
+        .or(async {
+            // A hung renderer is not guaranteed to complete script evaluation.
+            smol::Timer::after(std::time::Duration::from_secs(3)).await;
+            None
+        })
+        .await
+}
+
 pub(crate) struct OpenFile {
     pub(crate) path: PathBuf,
     /// The machine `path` lives on, held rather than looked up. Saves,
@@ -49,6 +62,8 @@ pub(crate) struct OpenFile {
     pub(crate) preview: bool,
     pub(crate) wrap: bool,
     pub(crate) reading: Option<Entity<crate::ui::markdown_preview::MarkdownPreview>>,
+    #[cfg(any(windows, target_os = "macos"))]
+    html_scroll: Option<[f64; 2]>,
     source_highlighter_ready: std::cell::Cell<bool>,
     _sub: Subscription,
     _observe: Subscription,
@@ -135,6 +150,8 @@ pub(crate) struct EditorPanelState {
     pub(crate) html: Option<Entity<super::html_preview::HtmlPreview>>,
     #[cfg(any(windows, target_os = "macos"))]
     html_loading: bool,
+    #[cfg(any(windows, target_os = "macos"))]
+    html_busy: bool,
     /// Only the latest open request may install a file or move focus. Its
     /// navigation target travels with the request and is dropped on failure.
     open_seq: u64,
@@ -176,6 +193,8 @@ impl EditorPanelState {
             html: None,
             #[cfg(any(windows, target_os = "macos"))]
             html_loading: false,
+            #[cfg(any(windows, target_os = "macos"))]
+            html_busy: false,
             open_seq: 0,
             watch: None,
             watch_host: None,
@@ -793,6 +812,8 @@ impl Tty7App {
             preview,
             wrap: false,
             reading,
+            #[cfg(any(windows, target_os = "macos"))]
+            html_scroll: None,
             source_highlighter_ready: std::cell::Cell::new(language != "markdown"),
             _sub: sub,
             _observe: observe,
@@ -886,22 +907,11 @@ impl Tty7App {
                     window.push_notification(t(L10nKey::EditorHtmlSaveFirst), cx);
                     return;
                 }
-                let path = file.path.clone();
-                if let Some(html) = &self.editor.html
-                    && let Err(error) = html.update(cx, |html, cx| html.navigate(&path, cx))
-                {
-                    window.push_notification(
-                        t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
-                        cx,
-                    );
-                    return;
-                }
-            } else {
-                self.editor_release_html();
             }
             if let Some(code) = self.tab_code_mut() {
                 code.files[code.active].preview = preview;
             }
+            self.editor_sync_html_preview(false, window, cx);
             self.focus_editor(window, cx);
             cx.notify();
             return;
@@ -919,11 +929,12 @@ impl Tty7App {
     #[cfg(any(windows, target_os = "macos"))]
     fn editor_begin_html_preview(
         &mut self,
+        owner: gpui::EntityId,
         path: PathBuf,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.editor.html_loading {
+        if self.editor.html_loading || self.editor.html_busy {
             return;
         }
         let parent = match window.window_handle() {
@@ -954,7 +965,8 @@ impl Tty7App {
                         .tab_code()
                         .and_then(|code| code.active_file())
                         .is_some_and(|file| {
-                            file.path == path
+                            file.input.entity_id() == owner
+                                && file.path == path
                                 && file.preview
                                 && can_preview_html(file)
                                 && !file.dirty
@@ -962,45 +974,58 @@ impl Tty7App {
                 if requested {
                     match result {
                         Ok(pending) => {
-                            let html =
-                                super::html_preview::HtmlPreview::attach(pending, window, cx);
+                            let html = super::html_preview::HtmlPreview::attach(
+                                pending, owner, window, cx,
+                            );
                             this.editor.html = Some(cx.new(|_| html));
                             let html = this.editor.html.as_ref().unwrap();
-                            let failures = html.read(cx).failures();
+                            let events = html.read(cx).events();
                             let html = html.downgrade();
                             cx.spawn_in(window, async move |this, cx| {
-                                while let Ok(failure) = failures.recv().await {
+                                while let Ok(event) = events.recv().await {
                                     let _ = this.update_in(cx, |this, window, cx| {
-                                        let Some(current) =
-                                            this.editor.html.as_ref().filter(|current| {
-                                                current.downgrade() == html
-                                                    && current.read(cx).is_current_failure(&failure)
-                                            })
-                                        else {
+                                        let Some(current) = html.upgrade() else {
                                             return;
                                         };
-                                        let path = &current.read(cx).path;
-                                        if !this
-                                            .tab_code()
-                                            .and_then(|code| code.active_file())
-                                            .is_some_and(|file| {
-                                                file.preview
-                                                    && can_preview_html(file)
-                                                    && file.path == *path
-                                            })
-                                        {
-                                            return;
+                                        match event {
+                                            super::html_preview::Event::Ready(request) => {
+                                                current.update(cx, |html, _| {
+                                                    html.mark_loaded(request)
+                                                });
+                                                cx.notify();
+                                            }
+                                            super::html_preview::Event::Failed(failure) => {
+                                                if !current.read(cx).is_current_failure(&failure) {
+                                                    return;
+                                                }
+                                                let owner = current.read(cx).owner;
+                                                current.update(cx, |html, _| html.failed = true);
+                                                let owns_browser = this
+                                                    .editor
+                                                    .html
+                                                    .as_ref()
+                                                    .map_or(this.editor.html_busy, |html| {
+                                                        html == &current
+                                                    });
+                                                if !owns_browser
+                                                    || this
+                                                        .editor_desired_html()
+                                                        .is_none_or(|(desired, _)| desired != owner)
+                                                {
+                                                    return;
+                                                }
+                                                this.editor_fallback_html_source();
+                                                this.focus_editor(window, cx);
+                                                window.push_notification(
+                                                    t_fmt(
+                                                        L10nKey::EditorHtmlFailed,
+                                                        &[("error", &failure.message)],
+                                                    ),
+                                                    cx,
+                                                );
+                                                cx.notify();
+                                            }
                                         }
-                                        this.editor_fallback_html_source();
-                                        this.focus_editor(window, cx);
-                                        window.push_notification(
-                                            t_fmt(
-                                                L10nKey::EditorHtmlFailed,
-                                                &[("error", &failure.message)],
-                                            ),
-                                            cx,
-                                        );
-                                        cx.notify();
                                     });
                                 }
                             })
@@ -1080,14 +1105,16 @@ impl Tty7App {
 
     fn editor_refresh_html(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         #[cfg(any(windows, target_os = "macos"))]
-        if let Some(html) = &self.editor.html {
+        if !self.editor.html_busy
+            && let Some(html) = &self.editor.html
+        {
             if self
                 .tab_code()
                 .and_then(|code| code.active_file())
                 .is_some_and(|file| file.dirty)
             {
                 window.push_notification(t(L10nKey::EditorHtmlSaveFirst), cx);
-            } else if let Err(error) = html.read(cx).reload(cx) {
+            } else if let Err(error) = html.update(cx, |html, cx| html.reload(cx)) {
                 self.editor_fallback_html_source();
                 self.focus_editor(window, cx);
                 window.push_notification(
@@ -1095,6 +1122,8 @@ impl Tty7App {
                     cx,
                 );
                 cx.notify();
+            } else if let Some(code) = self.tab_code_mut() {
+                code.files[code.active].html_scroll = None;
             }
         }
         #[cfg(not(any(windows, target_os = "macos")))]
@@ -1120,6 +1149,15 @@ impl Tty7App {
     }
 
     #[cfg(any(windows, target_os = "macos"))]
+    fn editor_desired_html(&self) -> Option<(gpui::EntityId, PathBuf)> {
+        (self.document_front() == Some(super::app::OverlayTop::Code))
+            .then(|| self.tab_code().and_then(|code| code.active_file()))
+            .flatten()
+            .filter(|file| file.preview && can_preview_html(file) && !file.dirty)
+            .map(|file| (file.input.entity_id(), file.path.clone()))
+    }
+
+    #[cfg(any(windows, target_os = "macos"))]
     pub(crate) fn editor_needs_html_preview_sync(&self) -> bool {
         self.editor.html.is_some()
             || self
@@ -1140,37 +1178,135 @@ impl Tty7App {
             .and_then(|code| code.active_file())
             .is_some_and(|file| file.preview && can_preview_html(file) && file.dirty)
         {
-            self.editor_fallback_html_source();
+            if let Some(code) = self.tab_code_mut() {
+                code.files[code.active].preview = false;
+            }
             self.focus_editor(window, cx);
             window.push_notification(t(L10nKey::EditorHtmlSaveFirst), cx);
             cx.notify();
-            return;
         }
-        let path = (self.document_front() == Some(super::app::OverlayTop::Code))
-            .then(|| self.tab_code().and_then(|code| code.active_file()))
-            .flatten()
-            .filter(|file| file.preview && can_preview_html(file))
-            .map(|file| file.path.clone());
-        if self.editor.html.is_none() {
-            if unobstructed && let Some(path) = path {
-                self.editor_begin_html_preview(path, window, cx);
+        if self.editor.html_busy {
+            if let Some(html) = &self.editor.html {
+                html.update(cx, |html, cx| html.set_visible(false, window, cx));
             }
             return;
         }
-        let Some(path) = path else {
-            // Leaving HTML preview releases the browser instead of retaining
-            // an invisible renderer for every file or terminal tab.
-            self.editor_release_html();
+        let desired = self.editor_desired_html();
+        let Some(html) = self.editor.html.clone() else {
+            if unobstructed && let Some((owner, path)) = desired {
+                self.editor_begin_html_preview(owner, path, window, cx);
+            }
             return;
         };
-        let html = self.editor.html.as_ref().unwrap().clone();
-        if let Err(error) = html.update(cx, |html, cx| html.navigate(&path, cx)) {
-            self.editor_fallback_html_source();
-            self.focus_editor(window, cx);
-            window.push_notification(
-                t_fmt(L10nKey::EditorHtmlFailed, &[("error", &error.to_string())]),
-                cx,
-            );
+        let owner = html.read(cx).owner;
+        if desired
+            .as_ref()
+            .is_none_or(|(desired, _)| *desired != owner)
+        {
+            // The transition owns the single hidden browser until its callback
+            // completes. Later selections only update the desired document.
+            html.update(cx, |html, cx| html.set_visible(false, window, cx));
+            self.editor.html = None;
+            self.editor.html_busy = true;
+            let url = html.read(cx).file_url();
+            let capture_required = html.read(cx).ready();
+            let capture = html.read(cx).capture_scroll(cx);
+            let original_focus = window.focused(cx);
+            cx.spawn_in(window, async move |this, cx| {
+                let snapshot = html_evaluation(capture).await;
+                let responsive = !capture_required || snapshot.is_some();
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.editor.html_busy = false;
+                    if let Some(snapshot) = snapshot
+                        && let Ok(value) = serde_json::from_str::<serde_json::Value>(&snapshot)
+                        && value["url"].as_str() == Some(url.as_str())
+                        && let (Some(x), Some(y)) = (value["x"].as_f64(), value["y"].as_f64())
+                        && x.is_finite()
+                        && y.is_finite()
+                        && x >= 0.
+                        && y >= 0.
+                        && let Some(file) = this
+                            .tabs
+                            .iter_mut()
+                            .filter_map(|tab| tab.code.as_mut())
+                            .flat_map(|code| code.files.iter_mut())
+                            .find(|file| file.input.entity_id() == owner)
+                    {
+                        file.html_scroll = Some([x, y]);
+                    }
+                    if responsive
+                        && !html.read(cx).failed
+                        && let Some((owner, path)) = this.editor_desired_html()
+                    {
+                        match html.update(cx, |html, cx| html.navigate(owner, &path, cx)) {
+                            Ok(()) => {
+                                this.editor.html = Some(html.clone());
+                                if window.focused(cx) == original_focus {
+                                    this.focus_editor(window, cx);
+                                }
+                            }
+                            Err(error) => {
+                                this.editor_fallback_html_source();
+                                this.focus_editor(window, cx);
+                                window.push_notification(
+                                    t_fmt(
+                                        L10nKey::EditorHtmlFailed,
+                                        &[("error", &error.to_string())],
+                                    ),
+                                    cx,
+                                );
+                            }
+                        }
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
+            return;
+        }
+        if html.read(cx).needs_restore() {
+            html.update(cx, |html, cx| html.set_visible(false, window, cx));
+            let position = self
+                .tab_code()
+                .and_then(|code| code.active_file())
+                .and_then(|file| file.html_scroll)
+                .unwrap_or([0., 0.]);
+            let restore = html.read(cx).restore_scroll(position, cx).ok();
+            self.editor.html_busy = true;
+            cx.spawn_in(window, async move |this, cx| {
+                let restored = html_evaluation(restore).await.as_deref() == Some("true");
+                let _ = this.update_in(cx, |this, window, cx| {
+                    this.editor.html_busy = false;
+                    if this
+                        .editor
+                        .html
+                        .as_ref()
+                        .is_some_and(|current| current == &html)
+                    {
+                        if restored {
+                            html.update(cx, |html, _| html.restored());
+                        } else {
+                            this.editor_release_html();
+                            if this
+                                .editor_desired_html()
+                                .is_some_and(|(desired, _)| desired == owner)
+                            {
+                                this.editor_fallback_html_source();
+                                this.focus_editor(window, cx);
+                                window.push_notification(
+                                    t_fmt(
+                                        L10nKey::EditorHtmlFailed,
+                                        &[("error", "The browser did not restore the document")],
+                                    ),
+                                    cx,
+                                );
+                            }
+                        }
+                    }
+                    cx.notify();
+                });
+            })
+            .detach();
             return;
         }
         let focused = window.focused(cx);
@@ -1196,7 +1332,7 @@ impl Tty7App {
         // Popovers move GPUI focus to their own handle. Native child windows
         // otherwise sit above them, so hide the browser until focus returns.
         html.update(cx, |html, cx| {
-            html.set_visible(unobstructed && normal_focus, window, cx)
+            html.set_visible(unobstructed && normal_focus && html.ready(), window, cx)
         });
     }
 
