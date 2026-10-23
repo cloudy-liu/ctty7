@@ -72,6 +72,17 @@ have opened `vim` for.
 | <kbd>⌘ S</kbd> | Save |
 | <kbd>Esc</kbd> | Back to the terminal |
 
+Files stay open in tabs within the current terminal session. Each tab shows its
+file icon and filename, with a close button and an indicator for unsaved edits.
+Click a tab to return to that file; the tab order stays the same as you switch.
+The active file's path appears in a separate breadcrumb row below the tabs.
+
+Markdown opens in **Preview**. Use **Preview / Markdown** on the right of the
+breadcrumb row to switch between reading and editing the same file. Supported
+local HTML files use **Preview / HTML** in the same place. Each file keeps its
+selected mode. Preview hides the editor footer; source mode retains the line,
+column and wrap controls. Closing the last file returns to the terminal.
+
 Files are watched on disk: a change underneath you is picked up, and closing
 with unsaved edits asks before discarding them. Files over 4 MB and anything
 that looks binary are refused with a note rather than opened badly.

@@ -177,7 +177,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsMarkdownTheme => "Markdown reading theme",
         L10nKey::SettingsEditorTheme => "Code editor colors",
         L10nKey::SettingsEditorThemeDesc => {
-            "Automatically use GitHub Light in light mode and Atom One Dark in dark mode, including the editor background. Font settings stay independent."
+            "Syntax uses GitHub Light in light mode and Atom One Dark in dark mode. Editor and gutter backgrounds follow the application theme. Font settings stay independent."
         }
         L10nKey::SettingsEditorThemeResolved => "Currently using {active}.",
         L10nKey::SettingsEditorFont => "Editor font",

@@ -161,7 +161,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsMarkdownTheme => "Markdown 阅读主题",
         L10nKey::SettingsEditorTheme => "代码编辑区配色",
         L10nKey::SettingsEditorThemeDesc => {
-            "浅色模式自动使用 GitHub Light，深色模式使用 Atom One Dark，编辑区背景也采用对应配色。字体设置独立保存。"
+            "语法高亮在浅色模式使用 GitHub Light，深色模式使用 Atom One Dark。编辑区和行号栏背景跟随应用主题，字体设置独立保存。"
         }
         L10nKey::SettingsEditorThemeResolved => "当前使用 {active}。",
         L10nKey::SettingsEditorFont => "编辑器字体",
