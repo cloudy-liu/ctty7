@@ -46,11 +46,16 @@ Keep the captured images in the repository and embed them directly in the PR's E
 These are Local Computer Use captures of the real native application, using the
 same fixture files, dark theme, Fill layout, 1200 by 760 viewport and 1.75 scale
 factor. The exported JPEGs include the native frame and measure 1202 by 791
-pixels. No document controls were drawn over the screenshots.
+pixels. The refreshed After captures were copied with the active-window screenshot
+shortcut and scaled from physical pixels to the same export size. No document
+controls were drawn over the screenshots.
 
 The Before application uses production commit `e06271fb` with only fixture
 commits `89176e54` and `8de7b3f5` applied. The After application uses the file-tab
-UI at `63f2f5da`. Markdown cases open the two maintenance documents and
+UI with the content-matched document chrome color pass. In source mode, the
+active tab and breadcrumb row share the editor background, while inactive tabs
+use a darker blend. Markdown and HTML previews retain the window background.
+Markdown cases open the two maintenance documents and
 `settings.rs`; the HTML case additionally opens `overview.html`.
 
 | Markdown Preview before | Markdown Preview after |
@@ -68,8 +73,14 @@ UI at `63f2f5da`. Markdown cases open the two maintenance documents and
 Native input also verified clicking Markdown to enter source, switching to
 `release.md` in its independent Preview mode, returning to `migration.md` with
 source mode retained, and closing inactive `settings.rs` without changing the
-current document. The source After image was captured after that mode-preserving
-round trip and before the inactive file was closed.
+current document. The refreshed source After image was captured by selecting
+Markdown in the preview fixture, with all three files still open.
+
+The color pass passed `cargo fmt --all -- --check`, all six tests selected by
+`cargo test --bin tty7-app document_tabs --no-fail-fast`, and
+`cargo build --bin tty7-app --features markdown-visual-tests` on Windows. The
+three refreshed After images were inspected in the native application and again
+after export.
 
 ## Capture limits
 

@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, Entity, Focusable as _, PromptLevel, SharedString, Subscription, Window,
-    div, px,
+    AnyElement, App, Context, Entity, Focusable as _, PromptLevel, SharedString, Subscription,
+    Window, div, px,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState, Position, TabSize};
@@ -28,6 +28,21 @@ const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 pub(crate) mod native_html;
 
 const RELOAD_DEBOUNCE: std::time::Duration = std::time::Duration::from_millis(200);
+
+fn document_chrome_background(active: Option<&OpenFile>, cx: &App) -> u32 {
+    let surface = cx.global::<crate::ui::presets::Surfaces>().window;
+    if active.is_none_or(|file| file.preview) {
+        return surface.base;
+    }
+    let color = crate::terminal::palette::hsla_to_rgb(
+        crate::ui::editor_theme::current(cx)
+            .highlight_theme
+            .style
+            .editor_background
+            .expect("bundled editor background"),
+    );
+    (color.r as u32) << 16 | (color.g as u32) << 8 | color.b as u32
+}
 
 pub(crate) struct OpenFile {
     pub(crate) path: PathBuf,
@@ -1727,7 +1742,9 @@ impl Tty7App {
         };
         let menu_app = cx.entity().downgrade();
         let surface = cx.global::<crate::ui::presets::Surfaces>().window;
-        let inactive_tab = surface.hover;
+        let active = self.tab_code().and_then(|code| code.active_file());
+        let content_background = document_chrome_background(active, cx);
+        let inactive_tab = crate::ui::presets::mix(content_background, surface.base, 0.36);
         let font = gpui::font(cx.theme().font_family.clone());
         let rem = window.rem_size().as_f32();
         row.flex_none()
@@ -1753,7 +1770,7 @@ impl Tty7App {
                     .flex_1()
                     .min_w_0()
                     .h_full()
-                    .bg(gpui::rgb(inactive_tab))
+                    .bg(gpui::rgb(content_background))
                     .overflow_x_scroll()
                     .when_some(self.tab_code(), |strip, code| {
                         strip.track_scroll(&code.tab_scroll).children(
@@ -1794,7 +1811,7 @@ impl Tty7App {
                                     .text_sm()
                                     .cursor_pointer()
                                     .when(ix == code.active, |tab| {
-                                        tab.bg(gpui::rgb(surface.base))
+                                        tab.bg(gpui::rgb(content_background))
                                             .text_color(gpui::rgb(surface.text_selected))
                                     })
                                     .when(ix != code.active, |tab| {
@@ -1943,6 +1960,7 @@ impl Tty7App {
             .items_center()
             .gap_1()
             .px_2()
+            .bg(gpui::rgb(document_chrome_background(active, cx)))
             .border_b_1()
             .border_color(cx.theme().border)
             .child(
