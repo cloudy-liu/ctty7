@@ -55,6 +55,7 @@ commits `89176e54` and `8de7b3f5` applied. The After application uses the file-t
 UI with the content-matched document chrome color pass. In source mode, the
 active tab and breadcrumb row share the editor background, while inactive tabs
 use a darker blend. Markdown and HTML previews retain the window background.
+The breadcrumb row has no bottom divider, so it joins the document content.
 Markdown cases open the two maintenance documents and
 `settings.rs`; the HTML case additionally opens `overview.html`.
 
@@ -81,6 +82,10 @@ The color pass passed `cargo fmt --all -- --check`, all six tests selected by
 `cargo build --bin tty7-app --features markdown-visual-tests` on Windows. The
 three refreshed After images were inspected in the native application and again
 after export.
+
+The divider-only follow-up passed formatting and the fixture build. Its updated
+Markdown preview and source captures were checked in the native window and after
+export; the HTML capture remains from the preceding color pass.
 
 ## Capture limits
 

@@ -1961,8 +1961,6 @@ impl Tty7App {
             .gap_1()
             .px_2()
             .bg(gpui::rgb(document_chrome_background(active, cx)))
-            .border_b_1()
-            .border_color(cx.theme().border)
             .child(
                 div()
                     .id("editor-document-path")
