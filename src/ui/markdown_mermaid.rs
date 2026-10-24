@@ -34,7 +34,32 @@ pub(super) fn aspect_ratio(svg: &str) -> f32 {
     ratio().unwrap_or(2.)
 }
 
-fn dpi_scaled_svg(image: &ImageSource) -> ImageSource {
+// One retained RGBA raster per viewer: at most 64 MiB and 8192px on either axis.
+fn raster_scale(bytes: &[u8], requested: f32) -> f32 {
+    let dimensions = || {
+        let source = std::str::from_utf8(bytes).ok()?;
+        let doc = resvg::usvg::roxmltree::Document::parse(source).ok()?;
+        let mut values = doc
+            .root_element()
+            .attribute("viewBox")?
+            .split(|c: char| c.is_whitespace() || c == ',')
+            .filter(|s| !s.is_empty())
+            .skip(2);
+        let width: f32 = values.next()?.parse().ok()?;
+        let height: f32 = values.next()?.parse().ok()?;
+        (width > 0. && height > 0. && width.is_finite() && height.is_finite())
+            .then_some((width, height))
+    };
+    let Some((width, height)) = dimensions() else {
+        return requested;
+    };
+    let smooth = gpui::SMOOTH_SVG_SCALE_FACTOR;
+    requested
+        .min(8192. / width.max(height) / smooth)
+        .min((16_777_216. / (width * height)).sqrt() / smooth)
+}
+
+fn dpi_scaled_svg(image: &ImageSource, display_scale: f32) -> ImageSource {
     let ImageSource::Image(svg) = image else {
         return image.clone();
     };
@@ -43,9 +68,10 @@ fn dpi_scaled_svg(image: &ImageSource) -> ImageSource {
     }
 
     let bytes: Arc<[u8]> = svg.bytes.clone().into();
+    let scale_limit = raster_scale(&bytes, f32::MAX);
     let cached = Arc::new(Mutex::new(None::<(u32, Arc<gpui::RenderImage>)>));
     ImageSource::Custom(Arc::new(move |window, cx| {
-        let scale = window.scale_factor();
+        let scale = (window.scale_factor() * display_scale).min(scale_limit);
         let key = scale.to_bits();
         let mut cached = cached.lock().unwrap();
         if let Some((cached_key, image)) = cached.as_ref()
@@ -91,6 +117,7 @@ pub(crate) fn open_diagram(
 pub(crate) struct DiagramViewer {
     image: ImageSource,
     display_image: ImageSource,
+    raster_display_scale: f32,
     code: SharedString,
     aspect: f32,
     expanded: bool,
@@ -114,10 +141,11 @@ pub(crate) struct DiagramViewer {
 
 impl DiagramViewer {
     pub(super) fn new(image: ImageSource, code: SharedString, aspect: f32, expanded: bool) -> Self {
-        let display_image = dpi_scaled_svg(&image);
+        let display_image = dpi_scaled_svg(&image, 1.);
         Self {
             image,
             display_image,
+            raster_display_scale: 1.,
             code,
             aspect,
             expanded,
@@ -177,18 +205,14 @@ impl DiagramViewer {
 
     fn offset(&self) -> Point<Pixels> {
         if self.expanded {
-            self.scroll.offset()
+            self.scroll.offset() + self.pan
         } else {
             self.pan
         }
     }
 
     fn image_height(&self) -> Pixels {
-        if self.expanded {
-            self.image_width / self.aspect
-        } else {
-            self.height
-        }
+        self.image_width / self.aspect
     }
 
     fn scroll_limit(&self) -> Point<Pixels> {
@@ -198,8 +222,20 @@ impl DiagramViewer {
         )
     }
 
-    fn set_scroll_offset(&self, offset: Point<Pixels>) {
+    fn set_scroll_offset(&mut self, offset: Point<Pixels>) {
         let max = self.scroll_limit();
+        self.pan = point(
+            if max.x == px(0.) {
+                offset.x.clamp(-self.width / 2., self.width / 2.)
+            } else {
+                px(0.)
+            },
+            if max.y == px(0.) {
+                offset.y.clamp(-self.height / 2., self.height / 2.)
+            } else {
+                px(0.)
+            },
+        );
         self.scroll.set_offset(point(
             offset.x.clamp(-max.x, px(0.)),
             offset.y.clamp(-max.y, px(0.)),
@@ -208,9 +244,9 @@ impl DiagramViewer {
 
     fn pan_by(&mut self, delta: Point<Pixels>) -> bool {
         if self.expanded {
-            let old = self.scroll.offset();
+            let old = self.offset();
             self.set_scroll_offset(old + delta);
-            return self.scroll.offset() != old;
+            return self.offset() != old;
         }
         let old = self.pan;
         // Keep fitted diagrams movable without losing the zoomed edge limits.
@@ -239,6 +275,7 @@ impl DiagramViewer {
             / previous;
         self.zoom = (self.zoom * factor).clamp(0.25, 8.);
         if self.expanded {
+            self.pan = point(px(0.), px(0.));
             self.set_scroll_offset(
                 anchor
                     - image_point * self.zoom
@@ -260,6 +297,13 @@ impl DiagramViewer {
         self.scroll.set_offset(point(px(0.), px(0.)));
     }
 
+    fn fit_all(&mut self) {
+        self.reset();
+        self.zoom = (self.width / self.image_width)
+            .min(self.height / self.image_height())
+            .min(1.);
+    }
+
     fn on_key_down(&mut self, event: &gpui::KeyDownEvent, _: &mut Window, cx: &mut Context<Self>) {
         if event.keystroke.modifiers.control
             || event.keystroke.modifiers.platform
@@ -275,6 +319,7 @@ impl DiagramViewer {
                 .scroll
                 .set_offset(point(self.scroll.offset().x, px(0.))),
             "0" => self.reset(),
+            "f" if self.expanded => self.fit_all(),
             "home" if self.zoom != 1. => self.reset(),
             "up" if self.expanded || self.zoom > 1. => {
                 self.pan_by(point(px(0.), px(64.)));
@@ -308,9 +353,13 @@ impl DiagramViewer {
             ScrollDelta::Pixels(delta) => delta,
             ScrollDelta::Lines(delta) => point(px(delta.x * 20.), px(delta.y * 20.)),
         };
-        if delta.y != px(0.) && (event.modifiers.control || event.modifiers.platform) {
+        if delta.y != px(0.)
+            && ((self.expanded && !event.modifiers.shift)
+                || event.modifiers.control
+                || event.modifiers.platform)
+        {
             self.zoom_at(1.1_f32.powf(f32::from(delta.y) / 40.), event.position);
-        } else if self.expanded || self.zoom > 1. {
+        } else if self.expanded {
             let delta = if event.modifiers.shift && delta.x == px(0.) {
                 point(delta.y, px(0.))
             } else {
@@ -366,7 +415,7 @@ impl Render for DiagramViewer {
         let available =
             (width - px(if self.expanded { 32. } else { 120. } * scale)).max(px(64. * scale));
         let image_width = if self.natural_width > px(0.) {
-            available.min(self.natural_width * if self.expanded { scale } else { 1. })
+            available.min(self.natural_width * scale)
         } else {
             available
         };
@@ -381,7 +430,7 @@ impl Render for DiagramViewer {
                     .max(px(1.));
             (image_width / self.aspect).clamp(px(200. * scale).min(max_height), max_height)
         } else {
-            (image_width / self.aspect).clamp(px(200. * scale), px(600. * scale))
+            (image_width / self.aspect).max(px(200. * scale))
         };
         // Fit the copy button, three navigation rows and their insets without
         // clipping controls when a short window uses a large interface font.
@@ -479,6 +528,22 @@ impl Render for DiagramViewer {
         let toolbar = div()
             .flex()
             .gap_2()
+            .when(self.expanded, |el| {
+                el.child(
+                    Self::control(
+                        "diagram-fit",
+                        Icon::default().path("icons/diagram-expand.svg"),
+                        t(L10nKey::MarkdownFitDiagram),
+                        compact_size,
+                        cx,
+                    )
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.fit_all();
+                        cx.notify();
+                    })),
+                )
+            })
             .when(!self.expanded, |el| {
                 el.child(
                     Self::control(
@@ -520,19 +585,28 @@ impl Render for DiagramViewer {
         let expanded = self.expanded;
         let image_height = self.image_height() * self.zoom;
         let scaled_width = image_width * self.zoom;
+        let display_scale = if self.natural_width > px(0.) {
+            scaled_width / self.natural_width
+        } else {
+            1.
+        };
+        if self.raster_display_scale != display_scale {
+            self.raster_display_scale = display_scale;
+            self.display_image = dpi_scaled_svg(&self.image, display_scale);
+        }
         let content = div()
             .id("diagram-content")
             .debug_selector(|| "diagram-content".into())
             .absolute()
             .left(if expanded {
-                (width - scaled_width).max(px(0.)) / 2.
+                self.pan.x + (width - scaled_width).max(px(0.)) / 2.
             } else {
                 self.pan.x + (width - scaled_width) / 2.
             })
             .top(if expanded {
-                px(0.)
+                self.pan.y
             } else {
-                self.pan.y + self.height * (1. - self.zoom) / 2.
+                self.pan.y + (self.height - image_height) / 2.
             })
             .w(scaled_width)
             .h(image_height)
@@ -987,6 +1061,17 @@ mod tests {
         let two = renderer.render_single_frame(svg, 2.).unwrap();
         assert_eq!(two.size(0).width.0, one.size(0).width.0 * 2);
         assert_eq!(two.size(0).height.0, one.size(0).height.0 * 2);
+        let zoomed = renderer
+            .render_single_frame(svg, raster_scale(svg, 4.))
+            .unwrap();
+        assert_eq!(zoomed.size(0).width.0, one.size(0).width.0 * 4);
+        let huge = br#"<svg xmlns="http://www.w3.org/2000/svg" width="10000" height="20000" viewBox="0 0 10000 20000"><rect width="10000" height="20000"/></svg>"#;
+        let bounded = renderer
+            .render_single_frame(huge, raster_scale(huge, 16.))
+            .unwrap();
+        let size = bounded.size(0);
+        assert!(size.width.0 <= 8192 && size.height.0 <= 8192);
+        assert!(i64::from(size.width.0) * i64::from(size.height.0) <= 16_777_216);
     }
 
     #[gpui::test]
@@ -1051,21 +1136,13 @@ mod tests {
             modifiers: gpui::Modifiers::none(),
             click_count: 1,
         });
-        vcx.simulate_event(ScrollWheelEvent {
-            position: viewport.center(),
-            delta: ScrollDelta::Pixels(point(px(0.), px(-100_000.))),
-            modifiers: gpui::Modifiers::none(),
-            touch_phase: gpui::TouchPhase::Moved,
-        });
+        vcx.simulate_keystrokes("end");
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
         let last = vcx.debug_bounds("diagram-image").unwrap();
         let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
-        assert_eq!(
-            last.size, image.size,
-            "ordinary scrolling preserves the reading size"
-        );
+        assert_eq!(last.size, image.size, "End preserves the reading size");
         assert!((last.bottom() - viewport.bottom()).abs() <= px(1.));
         vcx.simulate_keystrokes("home");
         vcx.update(|window, cx| {
@@ -1110,6 +1187,20 @@ mod tests {
                 <= px(1.),
             "dragging the actual scrollbar must reach the last node"
         );
+        let fit = vcx.debug_bounds("diagram-fit").unwrap().center();
+        vcx.simulate_click(fit, gpui::Modifiers::none());
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let fitted = vcx.debug_bounds("diagram-image").unwrap();
+        let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
+        assert!(fitted.size.height <= viewport.size.height + px(1.));
+        let reset = vcx.debug_bounds("diagram-reset").unwrap().center();
+        vcx.simulate_click(reset, gpui::Modifiers::none());
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert_eq!(vcx.debug_bounds("diagram-image").unwrap().size, image.size);
         vcx.update(|_, cx| cx.global_mut::<crate::core::config::Config>().ui_font_size = 32.);
         vcx.simulate_resize(gpui::size(px(400.), px(300.)));
         vcx.update(|window, cx| {
@@ -1211,7 +1302,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn mermaid_unmodified_wheel_pans_a_tall_diagram_to_the_bottom(cx: &mut gpui::TestAppContext) {
+    fn mermaid_unmodified_wheel_zooms_a_tall_diagram_at_the_pointer(cx: &mut gpui::TestAppContext) {
         let (_, mut vcx) = crate::ui::app::test_window::harness(cx);
         vcx.simulate_resize(gpui::size(px(1000.), px(800.)));
         vcx.update(|window, cx| {
@@ -1245,7 +1336,7 @@ mod tests {
         let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
         vcx.simulate_event(ScrollWheelEvent {
             position: viewport.center(),
-            delta: ScrollDelta::Pixels(point(px(0.), px(-10000.))),
+            delta: ScrollDelta::Pixels(point(px(0.), px(-120.))),
             modifiers: gpui::Modifiers::none(),
             touch_phase: gpui::TouchPhase::Moved,
         });
@@ -1253,18 +1344,15 @@ mod tests {
             let _ = window.draw(cx);
         });
         let scrolled = vcx.debug_bounds("diagram-content").unwrap();
-        assert_eq!(
-            scrolled.size, zoomed.size,
-            "wheel down must navigate the enlarged diagram without shrinking it"
-        );
         assert!(
-            scrolled.origin.y < zoomed.origin.y,
-            "wheel down must move toward the diagram's bottom"
+            scrolled.size.width < zoomed.size.width,
+            "ordinary wheel down must zoom the expanded diagram out"
         );
-        let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
+        let before = (viewport.center().y - zoomed.top()) / zoomed.size.height;
+        let after = (viewport.center().y - scrolled.top()) / scrolled.size.height;
         assert!(
-            scrolled.bottom() <= viewport.bottom() + px(1.),
-            "the bottom of the enlarged diagram must be reachable"
+            (before - after).abs() < 0.01,
+            "wheel zoom must retain the pointer anchor"
         );
     }
 

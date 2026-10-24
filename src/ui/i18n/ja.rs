@@ -221,6 +221,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::EditorCopyCode => "コードをコピー",
         L10nKey::MarkdownAnchorMissing => "見出しが見つかりません",
         L10nKey::MarkdownExpandDiagram => "図を拡大",
+        L10nKey::MarkdownFitDiagram => "図全体を表示",
         L10nKey::MarkdownZoomIn => "拡大",
         L10nKey::MarkdownZoomOut => "縮小",
         L10nKey::MarkdownPanUp => "上に移動",

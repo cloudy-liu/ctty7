@@ -229,6 +229,7 @@ l10n_keys! {
     EditorCopyCode,
     MarkdownAnchorMissing,
     MarkdownExpandDiagram,
+    MarkdownFitDiagram,
     MarkdownZoomIn,
     MarkdownZoomOut,
     MarkdownPanUp,

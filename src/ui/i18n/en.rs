@@ -217,6 +217,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::EditorCopyCode => "Copy code",
         L10nKey::MarkdownAnchorMissing => "heading not found",
         L10nKey::MarkdownExpandDiagram => "Expand diagram",
+        L10nKey::MarkdownFitDiagram => "Fit whole diagram",
         L10nKey::MarkdownZoomIn => "Zoom in",
         L10nKey::MarkdownZoomOut => "Zoom out",
         L10nKey::MarkdownPanUp => "Pan up",

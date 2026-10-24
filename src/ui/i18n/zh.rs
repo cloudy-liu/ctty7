@@ -197,6 +197,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::EditorCopyCode => "复制代码",
         L10nKey::MarkdownAnchorMissing => "未找到该标题",
         L10nKey::MarkdownExpandDiagram => "展开图表",
+        L10nKey::MarkdownFitDiagram => "适应全图",
         L10nKey::MarkdownZoomIn => "放大",
         L10nKey::MarkdownZoomOut => "缩小",
         L10nKey::MarkdownPanUp => "向上平移",
