@@ -10933,6 +10933,78 @@ mod titlebar_action_tests {
     }
 
     #[gpui::test]
+    fn titlebar_hints_include_complete_shortcut_sequences(cx: &mut TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            let bindings = &mut cx.global_mut::<Config>().keybindings;
+            bindings.insert("TogglePalette".into(), "secondary-k secondary-p".into());
+            bindings.insert("OpenSettings".into(), "secondary-k secondary-s".into());
+            crate::ui::keymap::rebind(cx);
+            window.focus(&app.home_focus, cx);
+        });
+        vcx.run_until_parked();
+        vcx.update(|_, cx| {
+            for (action, label, expected) in [
+                (
+                    "TogglePalette",
+                    crate::ui::i18n::L10nKey::AppMenuCommandPalette,
+                    if cfg!(target_os = "macos") {
+                        "⌘K ⌘P"
+                    } else {
+                        "Ctrl+K Ctrl+P"
+                    },
+                ),
+                (
+                    "OpenSettings",
+                    crate::ui::i18n::L10nKey::AppMenuSettings,
+                    if cfg!(target_os = "macos") {
+                        "⌘K ⌘S"
+                    } else {
+                        "Ctrl+K Ctrl+S"
+                    },
+                ),
+            ] {
+                // This is the UI hint supplied to the managed tooltip; this
+                // pinned window harness does not expose rendered tooltip text.
+                assert_eq!(
+                    crate::ui::tab_strip::chord_hint(crate::ui::i18n::t(label), action, cx),
+                    format!("{}  {expected}", crate::ui::i18n::t(label)),
+                );
+            }
+        });
+        vcx.simulate_keystrokes("secondary-k");
+        vcx.run_until_parked();
+        assert!(app.read_with(&vcx, |app, _| app.palette.is_none()));
+        vcx.simulate_keystrokes("secondary-p");
+        vcx.run_until_parked();
+        assert!(app.read_with(&vcx, |app, _| app.palette.is_some()));
+        vcx.simulate_keystrokes("escape");
+        vcx.run_until_parked();
+        vcx.simulate_keystrokes("secondary-k secondary-s");
+        vcx.run_until_parked();
+        assert!(app.read_with(&vcx, |app, _| app.settings.is_some()));
+        vcx.simulate_keystrokes("escape");
+        vcx.run_until_parked();
+        vcx.update(|_, cx| {
+            for (action, label) in [
+                (
+                    "TogglePalette",
+                    crate::ui::i18n::L10nKey::AppMenuCommandPalette,
+                ),
+                ("OpenSettings", crate::ui::i18n::L10nKey::AppMenuSettings),
+            ] {
+                cx.global_mut::<Config>()
+                    .keybindings
+                    .insert(action.into(), String::new());
+                assert_eq!(
+                    crate::ui::tab_strip::chord_hint(crate::ui::i18n::t(label), action, cx),
+                    crate::ui::i18n::t(label),
+                );
+            }
+        });
+    }
+
+    #[gpui::test]
     fn titlebar_search_restores_source_editor_focus_in_dock_and_fill(cx: &mut TestAppContext) {
         let (app, mut vcx) = harness(cx);
         let fixture = tempfile::TempDir::new().unwrap();

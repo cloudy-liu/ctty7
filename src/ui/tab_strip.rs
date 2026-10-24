@@ -1033,6 +1033,9 @@ impl Tty7App {
                     .debug_selector(|| "titlebar-search".into())
                     .occlude()
                     .flex_shrink_0()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.toggle_palette(window, cx);
+                    }))
                     .child(
                         chrome_tile(
                             Button::new("titlebar-search").icon(IconName::Search),
@@ -1044,10 +1047,7 @@ impl Tty7App {
                             t(L10nKey::AppMenuCommandPalette),
                             "TogglePalette",
                             cx,
-                        ))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.toggle_palette(window, cx);
-                        })),
+                        )),
                     ),
             )
             .child(
@@ -1058,6 +1058,9 @@ impl Tty7App {
                     .debug_selector(|| "titlebar-settings".into())
                     .occlude()
                     .flex_shrink_0()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.toggle_settings(window, cx);
+                    }))
                     .child(
                         chrome_tile(
                             Button::new("titlebar-settings").icon(IconName::Settings),
@@ -1065,10 +1068,11 @@ impl Tty7App {
                             cx,
                         )
                         .rounded_lg()
-                        .tooltip(chord_hint(t(L10nKey::AppMenuSettings), "OpenSettings", cx))
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.toggle_settings(window, cx);
-                        })),
+                        .tooltip(chord_hint(
+                            t(L10nKey::AppMenuSettings),
+                            "OpenSettings",
+                            cx,
+                        )),
                     ),
             )
     }
