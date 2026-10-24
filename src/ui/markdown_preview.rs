@@ -2978,6 +2978,67 @@ mod tests {
         );
     }
     #[gpui::test]
+    fn inline_tall_mermaid_keeps_its_height_and_document_scrolling(cx: &mut TestAppContext) {
+        let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
+        let edges = (0..20)
+            .map(|n| format!("N{n}[Step {n}] --> N{}[Step {}]\n", n + 1, n + 1))
+            .collect::<String>();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tall.md");
+        std::fs::write(
+            &path,
+            format!("```mermaid\nflowchart TD\n{edges}```\n\nLast paragraph."),
+        )
+        .unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            init(Default::default(), cx);
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = app.tabs.len() - 1;
+            app.editor_open_on_host(tty7_core::host::local::LocalHost::new(), &path, window, cx);
+        });
+        vcx.simulate_resize(gpui::size(px(1000.), px(800.)));
+        settle(&mut vcx, |cx| {
+            cx.update(|window, cx| {
+                window.refresh();
+                let _ = window.draw(cx);
+            });
+            cx.debug_bounds("diagram-image").is_some()
+        });
+        let image = vcx.debug_bounds("diagram-image").unwrap();
+        assert!(
+            image.size.height > px(1000.),
+            "inline diagrams must not shrink to the former 600px height cap"
+        );
+        let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
+        let preview = app.read_with(&vcx, |app, _| {
+            app.tab_code()
+                .unwrap()
+                .active_file()
+                .unwrap()
+                .reading
+                .clone()
+                .unwrap()
+        });
+        let before = preview.read_with(&vcx, |reading, cx| reading.profile_scroll_offset(cx));
+        vcx.simulate_event(gpui::ScrollWheelEvent {
+            position: viewport.origin + point(px(40.), px(80.)),
+            delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-100_000.))),
+            modifiers: gpui::Modifiers::none(),
+            touch_phase: gpui::TouchPhase::Moved,
+        });
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        assert!(
+            preview
+                .read_with(&vcx, |reading, cx| reading.profile_scroll_offset(cx))
+                .y
+                < before.y
+        );
+    }
+
+    #[gpui::test]
     fn inline_mermaid_controls_zoom_pan_reset_and_copy(cx: &mut TestAppContext) {
         let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
         let code = "flowchart LR\n A --> B\n";

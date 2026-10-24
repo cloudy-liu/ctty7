@@ -13,25 +13,31 @@ graph TD
 ```
 ~~~
 
-The diagram renders as an SVG in the native reading view. Click its canvas or
-Expand to open a larger viewer. Like GitHub's diagram dialog, the expanded view
-keeps the SVG's natural width, caps it to the reading area's width, and preserves
-the full height. A tall diagram opens at the top with readable nodes and a
-visible vertical scrollbar. It is never shrunk just to fit its entire height.
-Copy preserves the original Mermaid source.
+The diagram renders in the native reading view. Inline diagrams follow reading
+zoom and preserve their full aspect ratio and height; a tall diagram stays at
+its reading width instead of shrinking to a height limit. Ordinary wheel input
+continues scrolling the document, including after inline diagram zoom.
+Click the canvas or Expand to open a larger viewer. A tall diagram opens at the
+top with readable nodes and a visible vertical scrollbar. Copy preserves the
+original Mermaid source.
 
-Use the zoom buttons or Ctrl+wheel (Command+wheel on macOS) to zoom around the
-pointer, from 25% to 800%. Ordinary wheel input scrolls an expanded diagram
-without changing its zoom; Shift+wheel scrolls horizontally. Dragging the canvas
-or either scrollbar moves through the same content. Zoom updates the full
-scroll range, so the last node remains reachable. At the initial inline size,
-ordinary wheel input scrolls the document. Reset restores the initial reading
+In the expanded viewer, ordinary wheel input zooms around the pointer. The zoom
+buttons and Ctrl+wheel (Command+wheel on macOS) also work, from 25% to 800%.
+Drag with the left button to pan short or tall diagrams; Shift+wheel scrolls
+horizontally, and the scrollbars and keyboard navigation reach the remaining
+content. **Fit whole diagram** (`F`) shows the complete diagram, including very
+tall diagrams below the normal 25% zoom limit. Reset restores its initial reading
 size and position.
 
+SVG rasters follow display DPI, reading scale and diagram zoom. Each viewer
+retains one raster of at most 16,777,216 RGBA pixels (64 MiB), with neither axis
+over 8192 pixels. Extremely long diagrams or high zoom can therefore become less
+sharp at that allocation limit. Moving between displays regenerates the raster
+for the current scale.
+
 Opening the larger viewer does not necessarily create horizontal overflow.
-Directional buttons are dimmed and disabled when their axis has no scrollable
-content. Zoom in until the diagram is wider than the reading area to use the
-left/right buttons or horizontal scrollbar.
+Directional buttons are dimmed when their axis has no scrollable content;
+left-button dragging can still reposition a fitted diagram.
 
 In the focused diagram, `+`/`-` zoom, arrows move, Page Up/Down or Space move by
 a viewport, and End reaches the bottom. Home scrolls the expanded diagram to its
