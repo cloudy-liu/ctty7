@@ -51,6 +51,7 @@ Provide a document workspace within each terminal session. A horizontal file tab
 - When the last file closes, hide the code panel; an independently open diff view follows the existing document-front selection rules.
 - Use existing theme tokens, file icons, localization and accessible button conventions. Handle long paths and narrow columns without overflowing mode controls or window chrome.
 - Use the application theme's opaque base for source content, its gutter, the active file tab and breadcrumbs. Use the window hover surface for inactive tabs, the empty tab rail and header actions. Start tabs flush with the document edge, reserving space only for macOS traffic lights when they share the header. Keep syntax palettes selected by the application's light/dark appearance.
+- Use the approved compact layout: a shared 32px window/document top strip with 28px chrome buttons, a 28px breadcrumb row and 24px panel-tab buttons. File-tab labels use 13/16 rem (13px at the default UI size), including the text measurement used to allocate tab widths. Keep sidebar/window backgrounds and transparent title-strip borders; align their heights and centers without adding horizontal separator lines. On Windows/Linux, the Files title row shares the breadcrumb row's 28px height.
 
 ## Testing Decisions
 

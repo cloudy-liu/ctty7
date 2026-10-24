@@ -1001,8 +1001,16 @@ impl Tty7App {
                 move |menu, _window, _cx| {
                     menu.min_w(px(200.))
                         .action_context(action_ctx.clone())
-                        .menu(t(L10nKey::AppMenuCommandPalette), Box::new(TogglePalette))
-                        .menu(t(L10nKey::AppMenuSettings), Box::new(OpenSettings))
+                        .menu_with_icon(
+                            t(L10nKey::AppMenuCommandPalette),
+                            IconName::Search,
+                            Box::new(TogglePalette),
+                        )
+                        .menu_with_icon(
+                            t(L10nKey::AppMenuSettings),
+                            IconName::Settings,
+                            Box::new(OpenSettings),
+                        )
                 },
             ),
         )
@@ -1059,7 +1067,7 @@ impl Tty7App {
             .child(self.app_menu_tile(window, cx))
     }
 
-    pub(crate) fn right_panel_tabs(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(crate) fn right_panel_tabs(&self, size: f32, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let active_tab = self.right_panel_tab;
         // The count the source control tile carries. It reads the same status
         // the panel draws, so the badge and the group headers can never
@@ -1095,8 +1103,10 @@ impl Tty7App {
                 .occlude()
                 .flex_shrink_0()
                 .child(
-                    chrome_tile(
+                    chrome_tile_sized(
                         Button::new(("right-panel-tab", tab as usize)).icon(icon),
+                        size,
+                        TILE_GLYPH,
                         active_tab == tab,
                         cx,
                     )

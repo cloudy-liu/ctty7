@@ -16,12 +16,12 @@ def main():
     output.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="ctty7-html-") as temporary:
         scratch = Path(temporary)
-        # Exercise Unicode, spaces and uppercase extensions with the same assets.
+        # A literal # in the filename must stay distinct from URL fragments.
         fixture = scratch / "HTML 页面 with spaces"
         shutil.copytree(Path(__file__).resolve().parents[1] / "tests/fixtures/html-preview", fixture)
         pages = fixture / "pages"
         pages.mkdir()
-        source = pages / "report.HTML"
+        source = pages / "report #1.HTML"
         # Keep the reference page's content, with resources in a parent folder.
         for original, target in [(fixture / "report.html", source),
                                  (fixture / "next.htm", pages / "next.htm")]:

@@ -35,14 +35,28 @@ pub(super) fn render(attention: bool) -> Option<RgbaImage> {
 
 #[cfg(not(target_os = "macos"))]
 pub(super) fn render_sized(attention: bool, size: u32) -> Option<RgbaImage> {
-    let tree = usvg::Tree::from_data(GLYPH_SVG, &usvg::Options::default()).ok()?;
-    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
-    resvg::render(&tree, fit_center(&tree, size), &mut pixmap.as_mut());
+    let mut pixmap = render_glyph(size)?;
 
     if attention {
         badge(&mut pixmap);
     }
 
+    Some(to_rgba(&pixmap))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn render_glyph(size: u32) -> Option<tiny_skia::Pixmap> {
+    let tree = usvg::Tree::from_data(GLYPH_SVG, &usvg::Options::default()).ok()?;
+    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
+    resvg::render(&tree, fit_center(&tree, size), &mut pixmap.as_mut());
+    Some(pixmap)
+}
+
+#[cfg(target_os = "windows")]
+pub(super) fn render_taskbar(size: u32) -> Option<RgbaImage> {
+    let mut pixmap = render_glyph(size)?;
+    let s = size as f32;
+    paint_attention(&mut pixmap, s * 0.68, s * 0.32, s * 0.30, 0.22);
     Some(to_rgba(&pixmap))
 }
 
@@ -225,8 +239,8 @@ fn badge(pixmap: &mut tiny_skia::Pixmap) {
 }
 
 #[cfg(target_os = "windows")]
-fn paint_attention(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, radius: f32) {
-    for (radius, color) in [(radius, 0x34), (radius * 0.22, 0xFF)] {
+fn paint_attention(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, radius: f32, dot_scale: f32) {
+    for (radius, color) in [(radius, 0x34), (radius * dot_scale, 0xFF)] {
         let mut path = tiny_skia::PathBuilder::new();
         path.push_circle(x, y, radius);
         let mut paint = tiny_skia::Paint {
@@ -249,7 +263,7 @@ fn paint_attention(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, radius: f32) 
 #[cfg(target_os = "windows")]
 fn badge(pixmap: &mut tiny_skia::Pixmap) {
     let s = pixmap.width() as f32;
-    paint_attention(pixmap, s * 0.78, s * 0.22, s * 0.20);
+    paint_attention(pixmap, s * 0.73, s * 0.27, s * 0.24, 0.26);
 }
 
 #[cfg(target_os = "linux")]
@@ -269,6 +283,44 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
+    fn taskbar_attention_restores_overlay_size_and_the_tray_badge_is_enlarged() {
+        for size in [24, 32, 48, 64, 256] {
+            let taskbar = render_taskbar(size).unwrap();
+            let tray = render_sized(true, size).unwrap();
+            let normal = render_sized(false, size).unwrap();
+            let pixel = |image: &RgbaImage, x: f32, y: f32| {
+                let px = ((size as f32 * x).round() as u32).min(size - 1);
+                let py = ((size as f32 * y).round() as u32).min(size - 1);
+                let offset = ((py * size + px) * 4) as usize;
+                <[u8; 4]>::try_from(&image.data[offset..offset + 4]).unwrap()
+            };
+            // This lies inside the taskbar disc, outside the tray disc.
+            assert_eq!(
+                pixel(&taskbar, 0.40, 0.34),
+                [52, 52, 52, 255],
+                "size {size}"
+            );
+            assert_eq!(pixel(&tray, 0.40, 0.34), pixel(&normal, 0.40, 0.34));
+            assert_eq!(pixel(&taskbar, 0.66, 0.34), [255, 255, 255, 255]);
+            assert_eq!(pixel(&tray, 0.73, 0.27), [255, 255, 255, 255]);
+            assert_eq!(pixel(&tray, 0.52, 0.26), [52, 52, 52, 255]);
+            assert_ne!(pixel(&tray, 0.52, 0.26), pixel(&normal, 0.52, 0.26));
+            assert_eq!(pixel(&taskbar, 0., 0.), [0, 0, 0, 0]);
+            // The circle retains a small margin instead of being clipped at the edge.
+            assert!(pixel(&taskbar, 0.99, 0.34)[3] < 255, "size {size}");
+            for y in (size as f32 * 0.67).ceil() as u32..size {
+                let offset = (y * size * 4) as usize;
+                assert_eq!(
+                    &taskbar.data[offset..offset + (size * 4) as usize],
+                    &normal.data[offset..offset + (size * 4) as usize],
+                    "lower artwork changed at size {size}"
+                );
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
     fn windows_attention_artwork_keeps_the_mark_upper_right_at_every_size() {
         for size in [16, 32, 48, 64, 256] {
             let normal = render_sized(false, size).unwrap();
@@ -277,15 +329,15 @@ mod tests {
                 let offset = ((y * size + x) * 4) as usize;
                 <[u8; 4]>::try_from(&image.data[offset..offset + 4]).unwrap()
             };
-            let x = (size as f32 * 0.78) as u32;
-            let y = (size as f32 * 0.22) as u32;
+            let x = (size as f32 * 0.73) as u32;
+            let y = (size as f32 * 0.27) as u32;
             assert_eq!(pixel(&image, x, y), [255, 255, 255, 255], "size {size}");
             assert_eq!(
-                pixel(&image, x, (size as f32 * 0.34) as u32),
+                pixel(&image, x, (size as f32 * 0.46).round() as u32),
                 [52, 52, 52, 255]
             );
             assert_eq!(pixel(&image, 0, 0), [0, 0, 0, 0]);
-            for y in size / 2..size {
+            for y in (size as f32 * 0.55).ceil() as u32..size {
                 for x in 0..size {
                     assert_eq!(
                         pixel(&image, x, y),

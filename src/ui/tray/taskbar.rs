@@ -7,8 +7,8 @@ use std::collections::HashMap;
 use windows::Win32::{
     Foundation::{HWND, LPARAM, WPARAM},
     UI::WindowsAndMessaging::{
-        CreateIconFromResourceEx, DestroyIcon, HICON, ICON_BIG, ICON_SMALL, IsWindow,
-        LR_DEFAULTCOLOR, SendMessageW, WM_GETICON, WM_SETICON,
+        CreateIconFromResourceEx, DestroyIcon, GCLP_HICON, GCLP_HICONSM, GetClassLongPtrW, HICON,
+        ICON_BIG, ICON_SMALL, IsWindow, LR_DEFAULTCOLOR, SendMessageW, WM_GETICON, WM_SETICON,
     },
 };
 
@@ -18,7 +18,7 @@ struct Icon(HICON);
 
 impl Icon {
     fn new(size: u32) -> anyhow::Result<Self> {
-        let image = icon::render_sized(true, size).context("could not render attention icon")?;
+        let image = icon::render_taskbar(size).context("could not render attention icon")?;
         let mut png = std::io::Cursor::new(Vec::new());
         image::RgbaImage::from_raw(image.width, image.height, image.data)
             .context("invalid attention icon")?
@@ -63,12 +63,28 @@ impl Taskbar {
     fn apply(&mut self, hwnd: HWND, attention: bool) {
         if attention {
             let current = KINDS.map(|kind| unsafe {
-                HICON(SendMessageW(hwnd, WM_GETICON, WPARAM(kind as usize), LPARAM(0)).0 as *mut _)
+                let icon = SendMessageW(hwnd, WM_GETICON, WPARAM(kind as usize), LPARAM(0)).0;
+                if icon != 0 {
+                    return HICON(icon as *mut _);
+                }
+                // Null selects a class icon, but sending null later does not
+                // refresh Explorer. Preserve the borrowed class handle itself.
+                let index = if kind == ICON_SMALL {
+                    GCLP_HICONSM
+                } else {
+                    GCLP_HICON
+                };
+                let icon = GetClassLongPtrW(hwnd, index);
+                HICON(if icon == 0 {
+                    GetClassLongPtrW(hwnd, GCLP_HICON)
+                } else {
+                    icon
+                } as *mut _)
             });
             if current == [self.icon.0; 2] {
                 return;
             }
-            // Preserve GPUI's icons (including null, which uses the class icon).
+            // Preserve GPUI's effective icons, including its class fallback.
             // Repeated polls must never save our own artwork as the original.
             let original = self.originals.entry(hwnd.0 as isize).or_insert(current);
             for (original, current) in original.iter_mut().zip(current) {
@@ -158,8 +174,10 @@ mod tests {
         Win32::{
             Foundation::{LPARAM, WPARAM},
             UI::WindowsAndMessaging::{
-                CreateWindowExW, DestroyWindow, ICON_BIG, ICON_SMALL, IDI_APPLICATION, LoadIconW,
-                SendMessageW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_GETICON, WM_SETICON,
+                CreateWindowExW, DefWindowProcW, DestroyWindow, GCLP_HICON, GCLP_HICONSM,
+                GetClassLongPtrW, ICON_BIG, ICON_SMALL, IDI_APPLICATION, LoadIconW, RegisterClassW,
+                SendMessageW, UnregisterClassW, WINDOW_EX_STYLE, WINDOW_STYLE, WM_GETICON,
+                WM_SETICON, WNDCLASSW,
             },
         },
         core::w,
@@ -169,10 +187,14 @@ mod tests {
 
     impl TestWindow {
         fn new() -> Self {
+            Self::for_class(w!("STATIC"))
+        }
+
+        fn for_class(class: windows::core::PCWSTR) -> Self {
             Self(unsafe {
                 CreateWindowExW(
                     WINDOW_EX_STYLE::default(),
-                    w!("STATIC"),
+                    class,
                     w!("attention test"),
                     WINDOW_STYLE::default(),
                     0,
@@ -193,6 +215,60 @@ mod tests {
                 SendMessageW(self.0, WM_GETICON, WPARAM(kind as usize), LPARAM(0)).0
             })
         }
+    }
+
+    #[test]
+    fn clearing_attention_supplies_the_class_icon_to_explorer() {
+        unsafe extern "system" fn window_proc(
+            hwnd: HWND,
+            message: u32,
+            wparam: WPARAM,
+            lparam: LPARAM,
+        ) -> windows::Win32::Foundation::LRESULT {
+            unsafe { DefWindowProcW(hwnd, message, wparam, lparam) }
+        }
+        let class = w!("ctty7-taskbar-class-icon-test");
+        let icon = unsafe { LoadIconW(None, IDI_APPLICATION).unwrap() };
+        assert_ne!(
+            unsafe {
+                RegisterClassW(&WNDCLASSW {
+                    lpfnWndProc: Some(window_proc),
+                    hIcon: icon,
+                    lpszClassName: class,
+                    ..Default::default()
+                })
+            },
+            0
+        );
+        {
+            let window = TestWindow::for_class(class);
+            assert_eq!(
+                window.icons(),
+                [0, 0],
+                "class icons are not window overrides"
+            );
+            let expected = [GCLP_HICONSM, GCLP_HICON]
+                .map(|kind| unsafe { GetClassLongPtrW(window.0, kind) as isize });
+            assert!(expected.iter().all(|icon| *icon != 0));
+            let mut taskbar = Taskbar::new().unwrap();
+            for _ in 0..3 {
+                taskbar.apply(window.0, true);
+                taskbar.apply(window.0, false);
+                assert_eq!(
+                    window.icons(),
+                    expected,
+                    "Explorer keeps the attention artwork when WM_SETICON restores a null handle"
+                );
+            }
+            taskbar.apply(window.0, true);
+            drop(taskbar);
+            assert_eq!(
+                window.icons(),
+                expected,
+                "the restored class icons remain borrowed"
+            );
+        }
+        unsafe { UnregisterClassW(class, None).unwrap() };
     }
 
     impl Drop for TestWindow {

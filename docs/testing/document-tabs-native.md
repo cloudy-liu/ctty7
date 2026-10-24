@@ -21,6 +21,7 @@ Example options, saved as an absolute JSON file outside the checkout:
   "height": 900,
   "dark": true,
   "dock": false,
+  "right_panel": true,
   "output": "D:/gh-prj/document-preview-ready.json",
   "image": "D:/gh-prj/document-preview.png",
   "hold_seconds": 120
@@ -34,6 +35,11 @@ Start-Process -WindowStyle Normal -FilePath D:/gh-prj/ctty7-tabs-after.exe -Argu
 Remove any previous readiness output before launching. Wait for `NATIVE_DOCUMENT_READY_FOR_CAPTURE` in stderr and `"ready": true` in the output JSON, then capture the fixture's native window. The JSON records the actual viewport, OS scaling, opened documents, selected file and mode. Its `capture` field states whether the requested GPU image was saved or a native screenshot is needed. The fixture holds for the requested duration, capped at 600 seconds, then exits.
 
 For Markdown source use `active: 0, preview: false`; for ordinary source use `active: 2, preview: false`; for HTML use `active: 3, preview: true`. Omitting `preview` retains the production first-open default. Use `dock: true` to inspect the docked document layout. Keep the files, active document, mode, theme, viewport, OS scaling and screenshot method identical in each Before/After pair.
+
+Set `right_panel: true` to include the production Files panel and verify its title
+row against the document breadcrumbs. The default is false, preserving existing
+fixture scenes. Readiness metadata records this choice alongside the viewport and
+display scale.
 
 ## Baseline reproduction
 

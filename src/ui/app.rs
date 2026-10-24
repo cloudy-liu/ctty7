@@ -215,9 +215,11 @@ pub(crate) fn document_column_px(body: f32, ratio: f32) -> Option<f32> {
     Some((body * ratio).clamp(DOCUMENT_MIN_W, body - TERMINAL_MIN_W))
 }
 
-pub(crate) const TITLE_BAR_HEIGHT: f32 = 40.;
+pub(crate) const TITLE_BAR_HEIGHT: f32 = 32.;
+/// Shared pitch for document breadcrumbs and panel title rows below the chrome.
+pub(crate) const SECONDARY_BAR_HEIGHT: f32 = 28.;
 
-pub(crate) const TILE_SIZE: f32 = 32.;
+pub(crate) const TILE_SIZE: f32 = 28.;
 pub(crate) const TILE_GLYPH: f32 = 13.;
 /// A tile that sits in a body row rather than in chrome: the box shrinks to
 /// the minimum hit target, but the glyph keeps the chrome size. An 11px glyph

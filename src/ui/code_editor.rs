@@ -7,7 +7,7 @@ use std::sync::Arc;
 use gpui::prelude::*;
 use gpui::{
     AnyElement, Context, Entity, Focusable as _, PromptLevel, SharedString, Subscription, Window,
-    div, px,
+    div, px, rems,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState, Position, TabSize};
@@ -23,6 +23,9 @@ use crate::ui::i18n::{L10nKey, t, t_fmt};
 use crate::ui::rounding::RoundedCorners as _;
 
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
+
+/// File-tab labels follow the UI scale: 13px at the default 16px rem.
+const FILE_TAB_TEXT: f32 = 13. / 16.;
 
 #[cfg(all(feature = "markdown-visual-tests", any(windows, target_os = "macos")))]
 pub(crate) mod native_html;
@@ -1899,7 +1902,7 @@ impl Tty7App {
                                 let text_width = crate::ui::tab_strip::measure_text(
                                     window.text_system(),
                                     &font,
-                                    rem * 0.875,
+                                    rem * FILE_TAB_TEXT,
                                     &name,
                                 );
                                 // Match the row's padding, gaps, icon, close target and border.
@@ -1927,7 +1930,7 @@ impl Tty7App {
                                     .gap_1p5()
                                     .border_r_1()
                                     .border_color(cx.theme().border)
-                                    .text_sm()
+                                    .text_size(rems(FILE_TAB_TEXT))
                                     .cursor_pointer()
                                     .when(ix == code.active, |tab| {
                                         tab.bg(gpui::rgb(content_background))
@@ -2075,7 +2078,7 @@ impl Tty7App {
             .debug_selector(|| "editor-breadcrumb-row".into())
             .flex_none()
             .min_w_0()
-            .h(px(34.))
+            .h(px(crate::ui::app::SECONDARY_BAR_HEIGHT))
             .items_center()
             .gap_1()
             .px_2()
@@ -2563,7 +2566,7 @@ mod tests {
                 crate::ui::tab_strip::measure_text(
                     window.text_system(),
                     &gpui::font(cx.theme().font_family.clone()),
-                    window.rem_size().as_f32() * 0.875,
+                    window.rem_size().as_f32() * FILE_TAB_TEXT,
                     filename,
                 )
             });
@@ -3287,6 +3290,7 @@ mod tests {
                 assert!(modes.size.height >= px(24.));
                 let row = vcx.debug_bounds("editor-breadcrumb-row").unwrap();
                 assert!(modes.left() >= path.right() && modes.right() <= row.right());
+                assert!(modes.top() >= row.top() && modes.bottom() <= row.bottom());
                 // Pick the already selected segment first. It must not toggle.
                 let selected_x = if expected_preview {
                     modes.right() - px(12.)
