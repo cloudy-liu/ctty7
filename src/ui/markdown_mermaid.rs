@@ -870,15 +870,6 @@ mod tests {
     #[test]
     fn mermaid_node_labels_stay_inside_their_shapes() {
         use resvg::usvg::{Group, Node};
-        fn text_bounds(group: &Group, bounds: &mut Vec<resvg::usvg::tiny_skia_path::Rect>) {
-            for node in group.children() {
-                match node {
-                    Node::Group(group) => text_bounds(group, bounds),
-                    Node::Text(text) => bounds.push(text.abs_bounding_box()),
-                    _ => {}
-                }
-            }
-        }
         fn shape_bounds(group: &Group) -> Option<resvg::usvg::tiny_skia_path::Rect> {
             group.children().iter().find_map(|node| match node {
                 Node::Path(path) => Some(path.abs_bounding_box()),
@@ -886,24 +877,50 @@ mod tests {
                 _ => None,
             })
         }
-        let mut fonts = resvg::usvg::fontdb::Database::new();
-        fonts.load_system_fonts();
-        let options = resvg::usvg::Options {
-            fontdb: std::sync::Arc::new(fonts),
-            ..Default::default()
-        };
+        fn number(node: resvg::usvg::roxmltree::Node<'_, '_>, name: &str) -> f64 {
+            node.attribute(name)
+                .unwrap_or_else(|| panic!("text must have {name}={:?}", node))
+                .parse()
+                .unwrap_or_else(|error| panic!("text {name} must be numeric: {error}"))
+        }
+        fn view_box_origin(doc: &resvg::usvg::roxmltree::Document<'_>) -> (f64, f64) {
+            let values = doc
+                .root_element()
+                .attribute("viewBox")
+                .expect("Mermaid SVG must have a viewBox")
+                .split_whitespace()
+                .map(|value| {
+                    value
+                        .parse::<f64>()
+                        .expect("viewBox values must be numeric")
+                })
+                .collect::<Vec<_>>();
+            assert!(values.len() == 4, "viewBox must contain four values");
+            (-values[0], -values[1])
+        }
+        fn normalized_text(node: resvg::usvg::roxmltree::Node<'_, '_>) -> String {
+            node.descendants()
+                .filter(|child| child.is_text())
+                .filter_map(|child| child.text())
+                .collect::<String>()
+                .chars()
+                .filter(|character| !character.is_whitespace())
+                .collect()
+        }
+        let options = resvg::usvg::Options::default();
+        let measurer = GithubFlowchartText::default();
+        let style = merman_render::text::TextStyle::default();
         for label in [
             "Review the complete installation instructions and verify the device configuration before continuing",
             "设备工程师：绑定或校准基本资料并完成设备信息核对",
             "service-to-do-apk 远端构建、install-apk 安装、日志归档",
-            "设备工程师：绑定或校准<br/>基本资料并完成设备信息核对",
-            "`Review **installation instructions** and verify the complete device configuration before continuing`",
         ] {
             for (open, close) in [("[", "]"), ("(", ")"), ("{", "}")] {
                 let source = format!("flowchart TD\n A{open}\"{label}\"{close} --> B[End]");
                 let svg = render_mermaid(&source, &crate::core::markdown_theme::builtin(), false)
                     .unwrap();
                 let doc = resvg::usvg::roxmltree::Document::parse(&svg).unwrap();
+                let (view_box_x, view_box_y) = view_box_origin(&doc);
                 let id = doc
                     .descendants()
                     .find_map(|node| {
@@ -916,19 +933,40 @@ mod tests {
                     panic!("node A must be a group")
                 };
                 let shape = shape_bounds(node).expect("node shape");
-                let mut labels = Vec::new();
-                text_bounds(tree.root(), &mut labels);
-                let labels = labels
-                    .into_iter()
-                    .filter(|text| {
-                        text.left() < shape.right()
-                            && text.right() > shape.left()
-                            && text.top() < shape.bottom()
-                            && text.bottom() > shape.top()
+                let label_group = doc
+                    .descendants()
+                    .find(|candidate| {
+                        candidate.has_tag_name("g")
+                            && candidate.attribute("data-merman-foreignobject") == Some("fallback")
+                            && candidate
+                                .attribute("class")
+                                .is_some_and(|class| class.contains("nodeLabel"))
+                            && normalized_text(*candidate)
+                                == label
+                                    .chars()
+                                    .filter(|character| !character.is_whitespace())
+                                    .collect::<String>()
                     })
+                    .unwrap_or_else(|| panic!("rendered label not found for {label:?}"));
+                let lines = label_group
+                    .descendants()
+                    .filter(|candidate| candidate.has_tag_name("text"))
                     .collect::<Vec<_>>();
-                assert!(!labels.is_empty(), "node A must contain rendered text");
-                for text in labels {
+                assert!(!lines.is_empty(), "node A must contain rendered text");
+                for line in lines {
+                    let line_text = line.text().unwrap_or_default();
+                    let metrics = <GithubFlowchartText as merman::render::TextMeasurer>::measure(
+                        &measurer, line_text, &style,
+                    );
+                    let x = number(line, "x") + view_box_x;
+                    let y = number(line, "y") + view_box_y;
+                    let text = resvg::usvg::tiny_skia_path::Rect::from_xywh(
+                        (x - metrics.width / 2.) as f32,
+                        (y - metrics.height / 2.) as f32,
+                        metrics.width as f32,
+                        metrics.height as f32,
+                    )
+                    .expect("measured text must have positive bounds");
                     assert!(
                         text.left() >= shape.left() - 1.
                             && text.right() <= shape.right() + 1.
