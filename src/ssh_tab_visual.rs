@@ -116,7 +116,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                         ))),
                         titlebar: Some(TitlebarOptions {
                             title: Some("SSH tab visual acceptance".into()),
-                            ..Default::default()
+                            ..gpui_component::TitleBar::title_bar_options()
                         }),
                         show: true,
                         focus: true,

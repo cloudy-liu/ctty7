@@ -17,18 +17,12 @@ cloudy 的 tty7 定制版：窗口关掉、工作继续的终端工作台，为�
 
 </div>
 
-<table>
-  <tr>
-    <td><img src="docs/testing/images/sidebar-status-uppercase-light.png" alt="ctty7 浅色界面，侧栏显示 Agent 状态标签" width="100%" /></td>
-    <td><img src="docs/testing/images/sidebar-status-uppercase-dark.png" alt="ctty7 深色界面，侧栏显示 Agent 状态标签" width="100%" /></td>
-  </tr>
-  <tr>
-    <td align="center">浅色</td>
-    <td align="center">深色</td>
-  </tr>
-</table>
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/screenshots/workspace-dark.webp" />
+  <img src="assets/screenshots/workspace-light.webp" alt="ctty7 工作台，展示 Agent 状态、分组置顶与折叠、多文件标签和 Markdown 预览" width="100%" />
+</picture>
 
-*Windows 原生截图，分辨率 1684 × 912。侧栏展示 Agent 头像、状态符号、分支信息和工作区 `+N −M` 变更统计。[截图说明](assets/screenshots/README.md)。*
+*Windows 原生截图，展示当前工作台的 Agent 状态、分组置顶与折叠、多文件标签和 Markdown 预览，随深浅模式切换。[浅色](assets/screenshots/workspace-light.webp) · [深色](assets/screenshots/workspace-dark.webp) · [截图说明](assets/screenshots/README.md)。*
 
 ## 这是什么
 
@@ -40,18 +34,27 @@ ctty7 完整保留这些，把重心放在日常使用真正需要的地方：Wi
 
 **Windows shell 是一等公民。** 原生 CMD 和 Cmder/Clink 获得提示符边界、工作目录上报、补全、灰色建议和行内编辑；Up/Down 保留 shell 原生历史，模糊搜索读取 PSReadLine 与 Clink 历史文件。Windows 路径可以作为整体选中；带修饰的 Enter 会送达请求 ConPTY win32-input-mode 的程序，而不是直接提交整行。[Shell 集成](docs/reference/shell-integration.mdx)
 
-**一眼看清哪个 Agent 需要你。** 侧栏行用紧凑的 `idle`、`run`、`input`、`done` 标签、状态符号、分支名和实时 `+N −M` 工作区变更统计标出状态。命令面板可以把当前选区或仓库 diff 发送给正在运行的 Agent，`tty7 wait` 可以让脚本等待 Agent 状态变化。桌面通知、托盘提醒和内置 Agent 声音可以分别设置。已知对话在重启和 daemon 替换后仍能恢复：Claude Code 和 Codex 续上原会话；身份无法识别时，恢复流程留下可用的 shell，而不是弹出会话选择器。Agent 识别沿 Windows 进程树进行，提示符助手和 MCP 子进程不会被误认成前台 Agent；头像跟随主题。[Agent 状态](docs/agents/status.mdx) · [会话恢复](docs/agents/sessions.mdx) · [Agent 编排](docs/agents/orchestration.mdx)
+**一眼看清哪个 Agent 需要你。** 侧栏行用紧凑的 `idle`、`run`、`input`、`done` 标签、状态符号、分支名和实时 `+N −M` 工作区变更统计标出状态。分组可以置顶、折叠，并记住布局。命令面板可以把当前选区或仓库 diff 发送给正在运行的 Agent，`tty7 wait` 可以让脚本等待 Agent 状态变化。桌面通知、托盘提醒和内置 Agent 声音可以分别设置。已知对话在重启和 daemon 替换后仍能恢复：Claude Code 和 Codex 续上原会话；身份无法识别时，恢复流程留下可用的 shell，而不是弹出会话选择器。Agent 识别沿 Windows 进程树进行，提示符助手和 MCP 子进程不会被误认成前台 Agent；头像跟随主题。[Agent 状态](docs/agents/status.mdx) · [会话恢复](docs/agents/sessions.mdx) · [Agent 编排](docs/agents/orchestration.mdx)
 
-**在同一个窗口里阅读和编辑。** Markdown 以 GitHub 风格预览打开，支持 Mermaid 图表、缩放与平移、复制按钮、front matter 表格和可安装的 v2 主题，与源码编辑共用同一缓冲区。已保存的本地 HTML、HTM 文件在 Windows 上通过 WebView2 Runtime、在 macOS 上通过系统 WKWebView 默认进入浏览器预览，底部状态栏可以切换源码、刷新页面或在外部浏览器打开。源码配色跟随深浅模式，浅色 GitHub Light、深色 Atom One Dark，字体、字号独立设置。文件树默认显示点文件，使用 Symbols 图标并支持复制名称；文档可以填满和还原，diff 可以切换并排与统一布局。[Markdown 主题](docs/customization/markdown-themes.mdx) · [HTML 预览](docs/specs/html-preview.md) · [Diff](docs/git/diffs.mdx)
-
-![ctty7 中的 GitHub Light 源码编辑器](docs/specs/images/editor-github-light-native.png)
-
-**远程工作不用折腾。** WSL 解析账户的登录 shell，Windows 安装包内置启动 WSL 所需的 Linux server。原生 SSH 支持保存的主机配置、系统密钥链、跳板机、SFTP 和端口转发。面板内启动的 `ssh` 会被识别，顶部标签和侧栏行显示蓝色 Remote 标识，把远程会话和本地会话分开。[远程工作区](docs/remote/workspaces.mdx) · [SSH](docs/remote/ssh.mdx)
+**在同一个窗口里阅读和编辑。** 每个终端会话可以同时打开多个文件，用文档标签切换，各自保留编辑内容和预览模式。Markdown 以 GitHub 风格预览打开，支持 Mermaid 图表、缩放与平移、复制按钮、front matter 表格和可安装的 v2 主题，与源码编辑共用同一缓冲区。已保存的本地 HTML、HTM 文件在 Windows 上通过 WebView2 Runtime、在 macOS 上通过系统 WKWebView 默认进入浏览器预览。顶部路径栏旁的 Preview / Markdown、Preview / HTML 控件切换预览与源码，HTML 还支持刷新和在外部浏览器打开。源码语法配色跟随深浅模式，浅色 GitHub Light、深色 Atom One Dark，编辑区域背景跟随应用主题，字体、字号独立设置。文件树默认显示点文件，使用 Symbols 图标并支持复制名称；文档可以填满和还原，diff 可以切换并排与统一布局。[Markdown 主题](docs/customization/markdown-themes.mdx) · [HTML 预览](docs/specs/html-preview.md) · [Diff](docs/git/diffs.mdx)
 
 <table>
   <tr>
-    <td><img src="docs/testing/images/remote-badge-windows-top.png" alt="ctty7 顶部标签中的 Remote 标识" width="100%" /></td>
-    <td><img src="docs/testing/images/remote-badge-windows-sidebar.png" alt="ctty7 侧栏行中的 Remote 标识" width="100%" /></td>
+    <td><img src="assets/screenshots/editor-light.webp" alt="ctty7 多文件标签、项目路径栏和 GitHub Light 源码编辑器" width="100%" /></td>
+    <td><img src="assets/screenshots/html-preview-light.webp" alt="ctty7 本地 HTML 预览及顶部 Preview / HTML 切换控件" width="100%" /></td>
+  </tr>
+  <tr>
+    <td align="center">源码编辑</td>
+    <td align="center">本地 HTML 预览</td>
+  </tr>
+</table>
+
+**远程工作不用折腾。** WSL 解析账户的登录 shell，Windows 安装包内置启动 WSL 所需的 Linux server。原生 SSH 支持保存的主机配置、系统密钥链、跳板机、SFTP 和端口转发。面板内启动的 `ssh` 会被识别，顶部标签和侧栏行显示蓝色 Remote 标识，把远程会话和本地会话分开。SSH 标签保留连接名，进入项目目录时显示连接名与目录，任务名称下方也保留连接信息。[远程工作区](docs/remote/workspaces.mdx) · [SSH](docs/remote/ssh.mdx)
+
+<table>
+  <tr>
+    <td><img src="assets/screenshots/remote-top.webp" alt="ctty7 顶部标签中的 Remote 标识" width="100%" /></td>
+    <td><img src="assets/screenshots/remote-sidebar.webp" alt="ctty7 侧栏行中的 Remote 标识" width="100%" /></td>
   </tr>
   <tr>
     <td align="center">顶部标签</td>
@@ -59,7 +62,7 @@ ctty7 完整保留这些，把重心放在日常使用真正需要的地方：Wi
   </tr>
 </table>
 
-*Windows 原生 SSH fixture 截图，每张 1202 × 691。*
+*Windows 原生截图，通过受控 SSH 演示数据展示 Remote 标识、连接名称和目录信息，不建立网络连接。*
 
 **自己的发布线。** ctty7 维护自己的版本发布，应用内检查更新不依赖 GitHub REST API；终端响铃默认关闭。[更新机制](docs/reference/updates.mdx)
 
