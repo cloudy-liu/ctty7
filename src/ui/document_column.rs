@@ -1389,6 +1389,20 @@ mod gpui_tests {
                         button.left() >= px(0.) && button.right() <= px(width),
                         "layout control fits inside the window: {button:?}"
                     );
+                    for selector in [
+                        "titlebar-right-panel",
+                        "titlebar-search",
+                        "titlebar-settings",
+                    ] {
+                        let tile = vcx
+                            .debug_bounds(selector)
+                            .expect("titlebar actions stay visible");
+                        assert!(tile.right() <= px(width - crate::ui::app::WINDOW_CONTROLS_W));
+                        assert!(
+                            button.right() <= tile.left() || button.top() >= tile.bottom(),
+                            "{front:?} at {width}px: document and titlebar controls cannot overlap"
+                        );
+                    }
                     vcx.simulate_click(button.center(), gpui::Modifiers::none());
                     vcx.run_until_parked();
                     assert_eq!(
@@ -1456,6 +1470,32 @@ mod gpui_tests {
                 Some(entry),
                 "the original entry stays put"
             );
+            let search = vcx
+                .debug_bounds("titlebar-search")
+                .expect("command search stays in the document corner");
+            let settings = vcx
+                .debug_bounds("titlebar-settings")
+                .expect("settings stays in the document corner");
+            assert_eq!(search.left() - entry.right(), px(2.));
+            assert_eq!(settings.left() - search.right(), px(2.));
+            for button in [entry, search, settings] {
+                assert_eq!(button.size, size(px(32.), px(32.)));
+                assert!(
+                    button.right() <= px(1600. - crate::ui::app::WINDOW_CONTROLS_W),
+                    "{front:?}: all three actions fit before native controls: {button:?}"
+                );
+                let restore = vcx.debug_bounds("document-fill-toggle").unwrap();
+                assert!(
+                    restore.right() <= button.left() || restore.top() >= button.bottom(),
+                    "the document control cannot overlap a titlebar action"
+                );
+            }
+            vcx.simulate_mouse_move(settings.center(), None, gpui::Modifiers::none());
+            vcx.simulate_click(settings.center(), gpui::Modifiers::none());
+            vcx.run_until_parked();
+            assert!(app.update_in(&mut vcx, |app, _, _| app.active_settings().is_some()));
+            vcx.simulate_keystrokes("escape");
+            vcx.run_until_parked();
             vcx.simulate_mouse_move(entry.center(), None, gpui::Modifiers::none());
             vcx.simulate_click(entry.center(), gpui::Modifiers::none());
             vcx.run_until_parked();
