@@ -5,23 +5,30 @@ This is a dated snapshot; query GitHub again before merging or preparing a relea
 
 ## Open work
 
-The latest published release is v0.7.1. The v0.8.0 candidate adds independent
+The latest published release is v0.8.0, published on 2026-10-23. It adds independent
 file tabs and explicit preview controls, macOS native HTML preview, in-place
 diff context, and fixes for Codex hook routing, Markdown code backgrounds,
 attention indicators, file-tree refresh and HTML reading positions. See its
 [release notes](../releases/v0.8.0.md) and
 [preserved-change audit](../testing/local-change-audit-v0.8.0.md).
 
-PRs #180, #181, #186 and #187 have been squash-merged into fork main. PRs #189,
-#190 and #191 are being validated with the integrated release candidate.
-Publication requires successful candidate CI, all platform packages and
-verification of every downloaded release asset and checksum. Query GitHub for
-the final merge and publication state.
+PRs #180, #181, #186, #187, #189, #190 and #191 are merged into fork main.
+The integrated main CI and v0.8.0 release workflow both passed. Query GitHub
+again before preparing another release.
 
-Issue #175 remains open for broader HTML preview performance and platform
-acceptance. PR #178 implements native macOS preview; Linux retains source
-editing and external opening. Issue #182 tracks the multi-file document spec;
-implementation and native evidence are included through PR #186.
+Issue #175 is closed for the delivered native HTML preview implementation.
+PR #178 implements macOS preview; both architecture-specific native CI artifacts
+were inspected. Unverified device/performance/package cases remain recorded
+limits. Linux retains source editing and external opening. Issue #182's tabs
+and HTML scroll preservation are implemented by PRs #186 and #191; PR #193
+fixes the fragment regression and links the parent for closure on merge. Its
+code commit passed all ten CI checks, including both native macOS HTML runners.
+Issue #188's upper-right artwork is merged through PR #189. Continued Explorer
+acceptance found a stale icon after clearing; PR #194 fixes class-icon
+restoration and links #188 for closure. See the
+[issue audit](../testing/open-issue-audit-2026-10-23.md) for the closing-reference
+history and remaining checks.
+
 The component fork `cloudy-liu/gpui-component` has a `ctty7` stable integration
 branch. The application pins its exact commit; see
 [gpui-component maintenance](gpui-component.md).
@@ -67,7 +74,9 @@ these are verification gaps, not additional open GitHub tickets.
 
 ## Source and release state
 
-- Published tag `v0.7.1` is the current release baseline. Its [English notes](../releases/v0.7.1.md) and [local-change audit](../testing/local-change-audit-v0.7.1.md) record the recovered fixes and verification limits.
+- Published tag `v0.8.0` is the current release baseline. Its [English notes](../releases/v0.8.0.md) and [local-change audit](../testing/local-change-audit-v0.8.0.md) record the included changes and verification limits.
+
+- Published tag `v0.7.1` remains available. Its [English notes](../releases/v0.7.1.md) and [local-change audit](../testing/local-change-audit-v0.7.1.md) record the recovered fixes and verification limits.
 
 - Published tag `v0.7.0` points to `f8adef01`. [English notes](../releases/v0.7.0.md) record its changes and verification limits. It includes manual HTML preview but omitted the locally validated default-opening changes recovered in PR #176.
 - Published tag `v0.6.0` points to `edf1339d`, including GPUI integration #160, sidebar groups #161, and release preparation #163 and #164. [English notes](../releases/v0.6.0.md) record its changes and verification limits.
