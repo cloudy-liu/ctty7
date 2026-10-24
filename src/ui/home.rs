@@ -142,14 +142,9 @@ fn snap_to_separator(tail: &str) -> &str {
 
 pub(crate) fn key_hint(action: &str, cx: &App) -> Option<String> {
     let spec = crate::ui::keymap::effective_key(action, cx)?;
-    let mut strokes = spec.split_whitespace();
-    let first = Keystroke::parse(strokes.next()?).ok()?;
-    let mut hint = Kbd::format(&first);
-    for key in strokes {
-        hint.push(' ');
-        hint.push_str(&Kbd::format(&Keystroke::parse(key).ok()?));
-    }
-    Some(hint)
+    let first = spec.split_whitespace().next()?;
+    let stroke = Keystroke::parse(first).ok()?;
+    Some(Kbd::format(&stroke))
 }
 
 fn home_shortcut_label(action: &str, closed: Option<&str>) -> String {
