@@ -18,7 +18,7 @@ struct Icon(HICON);
 
 impl Icon {
     fn new(size: u32) -> anyhow::Result<Self> {
-        let image = icon::render_sized(true, size).context("could not render attention icon")?;
+        let image = icon::render_taskbar(size).context("could not render attention icon")?;
         let mut png = std::io::Cursor::new(Vec::new());
         image::RgbaImage::from_raw(image.width, image.height, image.data)
             .context("invalid attention icon")?
