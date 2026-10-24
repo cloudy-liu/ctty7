@@ -1001,8 +1001,16 @@ impl Tty7App {
                 move |menu, _window, _cx| {
                     menu.min_w(px(200.))
                         .action_context(action_ctx.clone())
-                        .menu(t(L10nKey::AppMenuCommandPalette), Box::new(TogglePalette))
-                        .menu(t(L10nKey::AppMenuSettings), Box::new(OpenSettings))
+                        .menu_with_icon(
+                            t(L10nKey::AppMenuCommandPalette),
+                            IconName::Search,
+                            Box::new(TogglePalette),
+                        )
+                        .menu_with_icon(
+                            t(L10nKey::AppMenuSettings),
+                            IconName::Settings,
+                            Box::new(OpenSettings),
+                        )
                 },
             ),
         )
