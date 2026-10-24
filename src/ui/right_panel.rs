@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use crate::core::config::{Config, RightPanelTab};
 use crate::daemon::protocol::PaneProcs;
 use crate::ui::app::{
-    CONTENT_INSET, TILE_GLYPH_XS, TILE_SIZE_XS, Tty7App, tile_trailing_inset,
-    tile_trailing_inset_sm,
+    CONTENT_INSET, TILE_GLYPH_XS, TILE_SIZE, TILE_SIZE_SM, TILE_SIZE_XS, Tty7App,
+    tile_trailing_inset, tile_trailing_inset_sm,
 };
 use crate::ui::i18n::{L10nKey, t};
 use crate::ui::scrollbar::with_vertical_scrollbar;
@@ -351,7 +351,7 @@ impl Tty7App {
                     .items_center()
                     .gap(px(2.))
                     .pl(px(tile_trailing_inset()))
-                    .children(self.right_panel_tabs(cx))
+                    .children(self.right_panel_tabs(TILE_SIZE, cx))
                     .child(div().flex_1())
                     .child(self.window_chrome(window, cx))
                 }))
@@ -469,7 +469,7 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        let tabs = (!cfg!(target_os = "macos")).then(|| self.right_panel_tabs(cx));
+        let tabs = (!cfg!(target_os = "macos")).then(|| self.right_panel_tabs(TILE_SIZE_SM, cx));
         let has_trailing = trailing.is_some();
         if tabs.is_none() && !has_trailing {
             return div().flex_none().into_any_element();
@@ -481,11 +481,7 @@ impl Tty7App {
             cx,
         );
         row.flex_none()
-            .h(px(if tabs.is_some() {
-                crate::ui::app::TITLE_BAR_HEIGHT
-            } else {
-                32.
-            }))
+            .h(px(crate::ui::app::SECONDARY_BAR_HEIGHT))
             .items_center()
             .pl(px(CONTENT_INSET))
             .pr(px(match (&tabs, has_trailing) {

@@ -1059,7 +1059,7 @@ impl Tty7App {
             .child(self.app_menu_tile(window, cx))
     }
 
-    pub(crate) fn right_panel_tabs(&self, cx: &mut Context<Self>) -> Vec<AnyElement> {
+    pub(crate) fn right_panel_tabs(&self, size: f32, cx: &mut Context<Self>) -> Vec<AnyElement> {
         let active_tab = self.right_panel_tab;
         // The count the source control tile carries. It reads the same status
         // the panel draws, so the badge and the group headers can never
@@ -1095,8 +1095,10 @@ impl Tty7App {
                 .occlude()
                 .flex_shrink_0()
                 .child(
-                    chrome_tile(
+                    chrome_tile_sized(
                         Button::new(("right-panel-tab", tab as usize)).icon(icon),
+                        size,
+                        TILE_GLYPH,
                         active_tab == tab,
                         cx,
                     )

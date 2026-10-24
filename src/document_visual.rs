@@ -40,6 +40,8 @@ struct Options {
     dark: bool,
     #[serde(default)]
     dock: bool,
+    #[serde(default)]
+    right_panel: bool,
     #[serde(default = "default_hold_seconds")]
     hold_seconds: u64,
 }
@@ -81,6 +83,8 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             config.install_cli_on_path = false;
             config.cursor_blink = false;
             config.show_tray_icon = false;
+            config.right_panel_visible = options.right_panel;
+            config.right_panel_tab = crate::core::config::RightPanelTab::Files;
             config.document_layout = if options.dock {
                 DocumentLayout::Dock
             } else {
@@ -293,6 +297,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                             "height": f32::from(window.viewport_size().height),
                             "dark": options.dark,
                             "dock": options.dock,
+                            "right_panel": options.right_panel,
                             "files": files,
                             "active": file.path,
                             "preview": file.preview,
