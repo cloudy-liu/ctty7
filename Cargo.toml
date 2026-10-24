@@ -302,13 +302,13 @@ default-members = [".", "crates/tty7-core", "crates/tty7-server", "crates/tty7-c
 
 [workspace.package]
 edition = "2024"
-# The single version for all three crates — `tty7`, `tty7-core`, `tty7-server`
+# The single version for all four crates — `tty7`, `tty7-core`, `tty7-cli`, `tty7-server`
 # all inherit it with `version.workspace = true`. They ship together and a
 # client talking to a server of a different build has to be able to say so, so
 # they must never drift apart. This is the line a release bump edits (and the
 # first explicit version line in the file; package entries above all use
 # `version.workspace = true`).
-version = "0.8.0"
+version = "0.8.1"
 
 [workspace.dependencies]
 # The maintenance fork retains ctty7's existing menu, button and input changes

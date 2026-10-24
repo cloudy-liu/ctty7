@@ -69,6 +69,15 @@ Choose the next semantic version for the accepted scope. Query the repository's
 latest published release instead of inferring it from this runbook's historical
 verification records.
 
+For the current 0.x release line, use a patch increment for corrections and
+refinements to existing capabilities, including interaction and visual polish.
+Use a minor increment for a distinct new user-facing capability or a broader
+feature release. Choose from the accepted product scope, not the number of
+merged PRs or their commit prefixes. For example, v0.8.0 introduced independent
+document tabs and macOS HTML preview; v0.8.1 refines those existing workflows,
+Mermaid reading, and attention indicators. A transition to 1.0 requires an
+explicit decision about the stable product contract.
+
 ## Build, verify, publish
 
 1. Push the matching version tag to the fork. The workflow builds and assembles

@@ -1,31 +1,31 @@
 # Project status
 
-Checked on 2026-10-23 against GitHub and the local checkout.
+Checked on 2026-10-24 against GitHub and the local checkout.
 This is a dated snapshot; query GitHub again before merging or preparing a release.
 
 ## Open work
 
-The latest published release is v0.8.0, published on 2026-10-23. It adds independent
-file tabs and explicit preview controls, macOS native HTML preview, in-place
-diff context, and fixes for Codex hook routing, Markdown code backgrounds,
-attention indicators, file-tree refresh and HTML reading positions. See its
-[release notes](../releases/v0.8.0.md) and
-[preserved-change audit](../testing/local-change-audit-v0.8.0.md).
+The latest published release is v0.8.0, published on 2026-10-23. The v0.8.1
+candidate refines Mermaid reading and mouse navigation, compacts document
+headers, adds menu icons, and fixes Windows attention and HTML fragment
+navigation. See its [English notes](../releases/v0.8.1.md) and
+[preserved-change audit](../testing/local-change-audit-v0.8.1.md).
 
-PRs #180, #181, #186, #187, #189, #190 and #191 are merged into fork main.
-The integrated main CI and v0.8.0 release workflow both passed. Query GitHub
-again before preparing another release.
+PRs #193, #194, #196, #197, #200, #201, and #202 are merged into fork main.
+No open issues or PRs remained before release preparation. Source CI and the
+Release workflow must pass for the frozen candidate; package and checksum
+verification must finish while the Release is still a draft.
 
 Issue #175 is closed for the delivered native HTML preview implementation.
 PR #178 implements macOS preview; both architecture-specific native CI artifacts
 were inspected. Unverified device/performance/package cases remain recorded
 limits. Linux retains source editing and external opening. Issue #182's tabs
-and HTML scroll preservation are implemented by PRs #186 and #191; PR #193
-fixes the fragment regression and links the parent for closure on merge. Its
+and HTML scroll preservation are implemented by PRs #186 and #191; merged PR #193
+fixes the fragment regression and closes the parent issue. Its
 code commit passed all ten CI checks, including both native macOS HTML runners.
 Issue #188's upper-right artwork is merged through PR #189. Continued Explorer
 acceptance found a stale icon after clearing; PR #194 fixes class-icon
-restoration and links #188 for closure. See the
+restoration and closes #188. See the
 [issue audit](../testing/open-issue-audit-2026-10-23.md) for the closing-reference
 history and remaining checks.
 
