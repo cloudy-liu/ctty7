@@ -11,9 +11,9 @@ use unicode_segmentation::UnicodeSegmentation as _;
 
 use crate::core::actions::{
     CloseActiveTab, CloseOtherTabs, CloseTabsToTheRight, CopyAgentSessionId, CopyWorkingDirectory,
-    ForkAgentSession, MarkTabUnread, NewWorktreeTab, OpenSettings, RenameTab, SelectWorkspace1,
-    SelectWorkspace2, SelectWorkspace3, SelectWorkspace4, SelectWorkspace5, SelectWorkspace6,
-    SelectWorkspace7, SelectWorkspace8, SelectWorkspace9, SplitDown, SplitRight, TogglePalette,
+    ForkAgentSession, MarkTabUnread, NewWorktreeTab, RenameTab, SelectWorkspace1, SelectWorkspace2,
+    SelectWorkspace3, SelectWorkspace4, SelectWorkspace5, SelectWorkspace6, SelectWorkspace7,
+    SelectWorkspace8, SelectWorkspace9, SplitDown, SplitRight,
 };
 use crate::core::config::RightPanelTab;
 use crate::core::shells::DetectedShell;
@@ -540,7 +540,7 @@ pub(crate) fn chrome_tile(button: Button, selected: bool, cx: &gpui::App) -> But
     chrome_tile_sized(button, TILE_SIZE, TILE_GLYPH, selected, cx)
 }
 
-/// How wide the two chrome tiles at the trailing end of the title bar are, with
+/// How wide the three chrome tiles at the trailing end of the title bar are, with
 /// the padding around them.
 pub(crate) fn trailing_chrome_tiles_w() -> f32 {
     let trailing_pad = if cfg!(target_os = "macos") {
@@ -548,7 +548,7 @@ pub(crate) fn trailing_chrome_tiles_w() -> f32 {
     } else {
         4.
     };
-    trailing_pad + crate::ui::app::TILE_SIZE + 2. + crate::ui::app::TILE_SIZE
+    trailing_pad + 3. * TILE_SIZE + 2. * 2.
 }
 
 /// The whole trailing cluster: those tiles and the OS window buttons beyond
@@ -977,48 +977,9 @@ impl Tty7App {
             .into_any_element()
     }
 
-    pub(crate) fn app_menu_tile(
-        &self,
-        window: &Window,
-        cx: &mut Context<Self>,
-    ) -> impl IntoElement + use<> {
-        let action_ctx = self
-            .tabs
-            .get(self.active)
-            .and_then(|t| t.pane.focused_or_first(window, cx))
-            .map(|leaf| leaf.read(cx).focus_handle.clone())
-            .unwrap_or_else(|| self.home_focus.clone());
-        div().occlude().flex_shrink_0().child(
-            chrome_tile(
-                Button::new("titlebar-app-menu").icon(IconName::Ellipsis),
-                false,
-                cx,
-            )
-            .rounded_lg()
-            .tooltip(t(L10nKey::TabTooltipMore))
-            .dropdown_menu_with_anchor(
-                gpui::Anchor::TopRight,
-                move |menu, _window, _cx| {
-                    menu.min_w(px(200.))
-                        .action_context(action_ctx.clone())
-                        .menu_with_icon(
-                            t(L10nKey::AppMenuCommandPalette),
-                            IconName::Search,
-                            Box::new(TogglePalette),
-                        )
-                        .menu_with_icon(
-                            t(L10nKey::AppMenuSettings),
-                            IconName::Settings,
-                            Box::new(OpenSettings),
-                        )
-                },
-            ),
-        )
-    }
-
     pub(crate) fn window_chrome(
         &self,
-        window: &Window,
+        _window: &Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement + use<> {
         let panel_open = self.right_panel_open(cx);
@@ -1064,7 +1025,56 @@ impl Tty7App {
                         })),
                     ),
             )
-            .child(self.app_menu_tile(window, cx))
+            .child(
+                div()
+                    .id("titlebar-search-tile")
+                    .role(gpui::Role::Button)
+                    .aria_label(t(L10nKey::AppMenuCommandPalette))
+                    .debug_selector(|| "titlebar-search".into())
+                    .occlude()
+                    .flex_shrink_0()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.toggle_palette(window, cx);
+                    }))
+                    .child(
+                        chrome_tile(
+                            Button::new("titlebar-search").icon(IconName::Search),
+                            false,
+                            cx,
+                        )
+                        .rounded_lg()
+                        .tooltip(chord_hint(
+                            t(L10nKey::AppMenuCommandPalette),
+                            "TogglePalette",
+                            cx,
+                        )),
+                    ),
+            )
+            .child(
+                div()
+                    .id("titlebar-settings-tile")
+                    .role(gpui::Role::Button)
+                    .aria_label(t(L10nKey::AppMenuSettings))
+                    .debug_selector(|| "titlebar-settings".into())
+                    .occlude()
+                    .flex_shrink_0()
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        this.toggle_settings(window, cx);
+                    }))
+                    .child(
+                        chrome_tile(
+                            Button::new("titlebar-settings").icon(IconName::Settings),
+                            false,
+                            cx,
+                        )
+                        .rounded_lg()
+                        .tooltip(chord_hint(
+                            t(L10nKey::AppMenuSettings),
+                            "OpenSettings",
+                            cx,
+                        )),
+                    ),
+            )
     }
 
     pub(crate) fn right_panel_tabs(&self, size: f32, cx: &mut Context<Self>) -> Vec<AnyElement> {
