@@ -12,6 +12,8 @@ use gpui::{App, AppContext, Context, Entity, FocusHandle, Focusable, Render, Win
 use raw_window_handle::{RawWindowHandle, WindowHandle};
 
 mod navigation;
+#[cfg(windows)]
+mod tooltips;
 pub(crate) use navigation::{Event, Failure};
 
 pub(crate) struct PendingHtmlPreview {
@@ -31,6 +33,8 @@ pub(crate) struct HtmlPreview {
     view: Entity<gpui_wry::WebView>,
     started: Rc<Cell<Instant>>,
     observer: navigation::Observer,
+    #[cfg(windows)]
+    tooltips: tooltips::Tooltips,
 }
 
 impl HtmlPreview {
@@ -94,6 +98,8 @@ impl HtmlPreview {
         // The adapter starts visible internally even when the native builder
         // starts hidden. Keep both sides in agreement until it is laid out.
         view.update(cx, |view, _| view.hide());
+        #[cfg(windows)]
+        let tooltips = tooltips::Tooltips::new(&view, window, cx);
         Self {
             path,
             owner,
@@ -104,6 +110,8 @@ impl HtmlPreview {
             view,
             started,
             observer,
+            #[cfg(windows)]
+            tooltips,
         }
     }
 
@@ -212,6 +220,52 @@ impl HtmlPreview {
         self.evaluate(script, cx)
     }
 
+    #[cfg(all(windows, feature = "markdown-visual-tests"))]
+    pub(crate) fn tooltip_footprint(&self) -> Option<gpui::Bounds<gpui::Pixels>> {
+        self.tooltips.footprint()
+    }
+
+    #[cfg(all(windows, feature = "markdown-visual-tests"))]
+    pub(crate) fn disable_tooltip_clipping(&self, cx: &App) {
+        self.tooltips.disable(cx);
+    }
+
+    #[cfg(all(windows, feature = "markdown-visual-tests"))]
+    pub(crate) fn native_covers(
+        &self,
+        point: gpui::Point<gpui::Pixels>,
+        window: &Window,
+        cx: &App,
+    ) -> bool {
+        use windows_sys::Win32::Graphics::Gdi::{
+            CreateRectRgn, DeleteObject, GetWindowRgn, PtInRegion,
+        };
+        use wry::WebViewExtWindows as _;
+        let view = self.view.read(cx);
+        assert!(
+            view.visible(),
+            "native preview must be visible for the occlusion probe"
+        );
+        assert!(
+            view.bounds().contains(&point),
+            "occlusion probe must lie inside the native preview: {point:?} {:?}",
+            view.bounds()
+        );
+        let point = point - view.bounds().origin;
+        let x = (point.x.as_f32() * window.scale_factor()).round() as i32;
+        let y = (point.y.as_f32() * window.scale_factor()).round() as i32;
+        let mut hwnd = Default::default();
+        unsafe {
+            view.raw().controller().ParentWindow(&mut hwnd).unwrap();
+            let region = CreateRectRgn(0, 0, 0, 0);
+            assert!(!region.is_null());
+            let kind = GetWindowRgn(hwnd.0, region);
+            let covers = kind == 0 || PtInRegion(region, x, y) != 0;
+            DeleteObject(region);
+            covers
+        }
+    }
+
     pub(crate) fn focus(&self, window: &mut Window, cx: &mut App) {
         self.focus_handle(cx).focus(window, cx);
         if self.view.read(cx).visible() {
@@ -279,7 +333,7 @@ impl Render for HtmlPreview {
             // before restoring scroll, without briefly showing it at the top.
             .child(
                 gpui::canvas(
-                    move |bounds, _, cx| {
+                    move |bounds, window, cx| {
                         if !view.read(cx).visible() {
                             let _ = view.read(cx).raw().set_bounds(wry::Rect {
                                 size: wry::dpi::LogicalSize::new(
@@ -295,6 +349,8 @@ impl Render for HtmlPreview {
                             });
                         }
                         this.update(cx, |this, cx| {
+                            #[cfg(windows)]
+                            this.tooltips.layout(bounds, window, cx);
                             if !this.laid_out {
                                 this.laid_out = true;
                                 cx.notify();

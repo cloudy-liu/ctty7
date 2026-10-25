@@ -243,7 +243,7 @@ impl Tty7App {
         } else {
             (IconName::Maximize, L10nKey::DocumentFillTooltip)
         };
-        div()
+        let button = div()
             .debug_selector(|| "document-fill-toggle".into())
             .occlude()
             .flex_shrink_0()
@@ -278,8 +278,18 @@ impl Tty7App {
                         reading.update(cx, |reading, cx| reading.restore_layout_selection(cx));
                     }
                 })),
+            );
+        #[cfg(feature = "markdown-visual-tests")]
+        let button = button.relative().child(
+            gpui::canvas(
+                |bounds, _, cx| crate::document_visual::record_fill_target(bounds, cx),
+                |_, _, _, _| {},
             )
-            .into_any_element()
+            .absolute()
+            .inset_0()
+            .size_full(),
+        );
+        button.into_any_element()
     }
 
     /// Explicit layout choices remain available alongside the visible toggle.
