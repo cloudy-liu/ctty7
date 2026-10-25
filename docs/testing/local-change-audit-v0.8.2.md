@@ -17,6 +17,10 @@ Only the main checkout is registered as a worktree. The earlier closeout bundle
 under `.git/archives/closeout-20261024` remains preserved. No stashes, historical
 tags, or published assets are removed or rewritten during this release.
 
+The Linux native capture script labels the trailing action as Settings for the
+current titlebar and retains menu capture names for older baselines, so the
+comparison artifacts describe the interface they actually capture.
+
 The complete range from v0.8.1 includes the document-preview and native-tooltip
 changes in #204, the direct titlebar and transparent preview control in #205,
 and release version/documentation updates. Patch-equivalent source already
