@@ -1,5 +1,8 @@
 # Spec: Add icons to titlebar app menu actions
 
+> Historical decision, superseded by the user's later request to restore
+> [direct titlebar actions](../testing/titlebar-direct-actions.md).
+
 ## Problem Statement
 
 标题栏「…」菜单中的命令面板和设置只有文字，用户希望更容易区分这两个操作，同时保留熟悉的入口位置和操作习惯。

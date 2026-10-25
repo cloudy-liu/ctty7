@@ -1,20 +1,22 @@
 # Project status
 
-Checked on 2026-10-24 against GitHub and the local checkout.
+Checked on 2026-10-25 against GitHub and the local checkout.
 This is a dated snapshot; query GitHub again before merging or preparing a release.
 
 ## Open work
 
-The latest published release is v0.8.0, published on 2026-10-23. The v0.8.1
-candidate refines Mermaid reading and mouse navigation, compacts document
-headers, adds menu icons, and fixes Windows attention and HTML fragment
-navigation. See its [English notes](../releases/v0.8.1.md) and
-[preserved-change audit](../testing/local-change-audit-v0.8.1.md).
+The latest published release at preparation time is v0.8.1, published on
+2026-10-25. The v0.8.2 candidate exposes command search and settings directly
+in the titlebar, keeps preview icons transparent, compacts preview controls and
+project breadcrumbs, and prevents native Windows HTML preview from covering
+tooltips. See its [English notes](../releases/v0.8.2.md) and
+[preserved-change audit](../testing/local-change-audit-v0.8.2.md).
 
-PRs #193, #194, #196, #197, #200, #201, and #202 are merged into fork main.
-No open issues or PRs remained before release preparation. Source CI and the
-Release workflow must pass for the frozen candidate; package and checksum
-verification must finish while the Release is still a draft.
+PR #204 is merged into fork main. Release PR #205 contains the direct titlebar
+and transparent preview controls with native Windows screenshot evidence and
+the v0.8.2 version metadata. Source CI and the Release workflow must pass for
+the frozen candidate; package and checksum verification must finish while the
+Release is still a draft.
 
 Issue #175 is closed for the delivered native HTML preview implementation.
 PR #178 implements macOS preview; both architecture-specific native CI artifacts
@@ -37,6 +39,7 @@ branch. The application pins its exact commit; see
 
 | Work | Completion |
 | --- | --- |
+| v0.8.1 publication | Published on 2026-10-25 and set Latest. Mermaid reading, compact document headers, menu icons, and Windows attention and HTML navigation corrections are included. |
 | v0.7.1 publication | Published on 2026-10-21. Default Windows HTML preview and terminal block-fill corrections are included through PR #176. |
 | v0.6.0 publication | Published on 2026-10-18 and set Latest. Sidebar groups, full-file diffs, rendering improvements, and the stable component pin are included. |
 | v0.3.0 publication | Published on 2026-10-11 and set Latest after all nine frozen source CI jobs, all ten Release jobs, downloaded assets and checksums, package contents, embedded audio, and public endpoints passed verification. |
@@ -74,7 +77,9 @@ these are verification gaps, not additional open GitHub tickets.
 
 ## Source and release state
 
-- Published tag `v0.8.0` is the current release baseline. Its [English notes](../releases/v0.8.0.md) and [local-change audit](../testing/local-change-audit-v0.8.0.md) record the included changes and verification limits.
+- Published tag `v0.8.1` is the release-preparation baseline. Its [English notes](../releases/v0.8.1.md) and [local-change audit](../testing/local-change-audit-v0.8.1.md) record the included changes and verification limits.
+
+- Published tag `v0.8.0` remains available. Its [English notes](../releases/v0.8.0.md) and [local-change audit](../testing/local-change-audit-v0.8.0.md) record the included changes and verification limits.
 
 - Published tag `v0.7.1` remains available. Its [English notes](../releases/v0.7.1.md) and [local-change audit](../testing/local-change-audit-v0.7.1.md) record the recovered fixes and verification limits.
 

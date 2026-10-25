@@ -2198,7 +2198,7 @@ impl Tty7App {
                 }),
             crate::ui::tab_strip::MIN_TARGET,
             14.,
-            preview,
+            false,
             cx,
         )
         .tooltip(t(if preview {

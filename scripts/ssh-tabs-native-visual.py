@@ -52,6 +52,8 @@ def prepare_before(destination):
 
 def capture(binary, output, phase, repository):
     output.mkdir(parents=True, exist_ok=True)
+    direct_actions = "titlebar-settings" in (repository / "src/ui/tab_strip.rs").read_text(encoding="utf-8")
+    titlebar_action = "settings" if direct_actions else "menu"
     desktop_log = (output / f"{phase}-desktop.log").open("w", encoding="utf-8")
     manager = subprocess.Popen(["openbox"], stdout=desktop_log, stderr=desktop_log)
     try:
@@ -86,9 +88,9 @@ def capture(binary, output, phase, repository):
                         colors = int(subprocess.check_output([
                             "identify", "-format", "%k", str(screenshot)], text=True))
                         assert colors > 20 and screenshot.stat().st_size > 5000, "blank screenshot"
-                        # The fixture is 1200x660; the production ellipsis tile
-                        # is centered at (1077, 20) in both tab layouts. Capture
-                        # the actual dropdown as well as the closed titlebar.
+                        # The fixture is 1200x660. The trailing titlebar tile
+                        # opens Settings with direct actions, or the app menu
+                        # on an older baseline. Keep both captures accurately named.
                         subprocess.run(["xdotool", "windowactivate", "--sync", windows[0]],
                                        check=True)
                         subprocess.run(["xdotool", "mousemove", "--sync", "--window",
@@ -96,11 +98,11 @@ def capture(binary, output, phase, repository):
                                         "mousemove", "--window", windows[0], "600", "300"],
                                        check=True)
                         time.sleep(0.5)
-                        menu_screenshot = output / f"{phase}-{surface}-menu.png"
-                        subprocess.run(["import", "-window", windows[0], str(menu_screenshot)],
+                        action_screenshot = output / f"{phase}-{surface}-{titlebar_action}.png"
+                        subprocess.run(["import", "-window", windows[0], str(action_screenshot)],
                                        check=True)
-                        assert menu_screenshot.read_bytes() != screenshot.read_bytes(), \
-                            "opening the app menu did not change the captured window"
+                        assert action_screenshot.read_bytes() != screenshot.read_bytes(), \
+                            f"opening {titlebar_action} did not change the captured window"
                         process.wait(timeout=20)
                         assert process.returncode == 0, log.read_text()
                     finally:
@@ -113,7 +115,8 @@ def capture(binary, output, phase, repository):
         (output / f"{phase}-metadata.json").write_text(json.dumps({
             "revision": revision, "platform": "Linux / X11 / GPUI",
             "viewport": [1200, 660], "theme": "light",
-            "app_menu": "Opened through the production ellipsis tile at window coordinates (1077, 20).",
+            "titlebar_action": titlebar_action,
+            "titlebar_action_trigger": "Opened through the production trailing tile at window coordinates (1077, 20).",
             "source": "Production Tty7App render; deterministic daemon messages, no live SSH.",
             "cases": ["local shell", "local Codex", "local Claude Code", "native SSH shell",
                       "terminal SSH with detected Codex", "native SSH with detected Claude Code"],
