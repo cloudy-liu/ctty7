@@ -20,7 +20,6 @@ use crate::ui::app::Tty7App;
 use crate::ui::document_column::DocumentChrome;
 use crate::ui::host_ops::{HostId, HostOps, MTime, SharedHost, WatchSub};
 use crate::ui::i18n::{L10nKey, t, t_fmt};
-use crate::ui::rounding::RoundedCorners as _;
 
 const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
@@ -120,7 +119,7 @@ impl TabCode {
         self.files.get(self.active)
     }
 
-    fn active_display_path(&self, tree_host: HostId) -> Option<PathBuf> {
+    pub(crate) fn active_display_path(&self, tree_host: HostId) -> Option<PathBuf> {
         let file = self.active_file()?;
         let path = crate::ui::path_display::readable_path(&file.path, file.host.id());
         // Start at the matching project name, without its absolute ancestors.
@@ -139,7 +138,9 @@ impl TabCode {
         {
             return Some(relative);
         }
-        Some(path.into_owned())
+        // The tree can change hosts or refresh its roots while a file stays
+        // open. Keep absolute ancestors in the full-path tooltip only.
+        path.file_name().map(PathBuf::from)
     }
 }
 
@@ -2152,7 +2153,7 @@ impl Tty7App {
                     ),
             )
             .when(has_preview, |row| {
-                row.child(self.render_editor_preview_modes(is_html, preview, cx))
+                row.child(self.render_editor_preview_toggle(preview, cx))
             })
             .when(is_html, |this| {
                 this.child(
@@ -2186,70 +2187,27 @@ impl Tty7App {
             })
     }
 
-    fn render_editor_preview_modes(
-        &self,
-        is_html: bool,
-        preview: bool,
-        cx: &mut Context<Self>,
-    ) -> AnyElement {
-        let surface = cx.global::<crate::ui::presets::Surfaces>().window;
-        let options = [
-            t(L10nKey::EditorPreview),
-            if is_html { "HTML" } else { "Markdown" },
-        ];
-        h_flex()
-            .id("editor-preview-modes")
-            .debug_selector(|| "editor-preview-modes".into())
-            .flex_none()
-            .h(px(24.))
-            .rounded(crate::ui::rounding::TRACK_RADIUS)
-            .border_1()
-            .border_color(cx.theme().border)
-            .bg(gpui::rgb(surface.base))
-            .overflow_hidden()
-            .children(options.into_iter().enumerate().map(|(ix, label)| {
-                let selected = (ix == 0) == preview;
-                h_flex()
-                    .id(("editor-preview-mode", ix))
-                    .debug_selector(move || format!("editor-preview-mode-{ix}"))
-                    .h_full()
-                    .items_center()
-                    .justify_center()
-                    .px_1()
-                    .text_xs()
-                    .cursor_pointer()
-                    .rounded_corners(crate::ui::rounding::segment_corners(
-                        ix,
-                        2,
-                        crate::ui::rounding::TRACK_RADIUS,
-                        crate::ui::rounding::HAIRLINE,
-                    ))
-                    .when(ix > 0, |cell| {
-                        cell.border_l_1().border_color(cx.theme().border)
-                    })
-                    .when(selected, |cell| {
-                        cell.bg(gpui::rgb(surface.selected))
-                            .text_color(gpui::rgb(surface.text_selected))
-                            .font_weight(gpui::FontWeight::MEDIUM)
-                    })
-                    .when(!selected, |cell| {
-                        cell.text_color(gpui::rgb(surface.text_resting))
-                            .hover(|cell| cell.bg(gpui::rgb(surface.hover)))
-                    })
-                    .active(|cell| cell.bg(gpui::rgb(surface.pressed)))
-                    .child(label)
-                    .on_click(cx.listener(move |app, _, window, cx| {
-                        let requested = ix == 0;
-                        if app
-                            .tab_code()
-                            .and_then(|code| code.active_file())
-                            .is_some_and(|file| file.preview != requested)
-                        {
-                            app.editor_toggle_preview(window, cx);
-                        }
-                    }))
-            }))
-            .into_any_element()
+    fn render_editor_preview_toggle(&self, preview: bool, cx: &mut Context<Self>) -> AnyElement {
+        crate::ui::tab_strip::chrome_tile_sized(
+            Button::new("editor-preview-toggle")
+                .debug_selector(|| "editor-preview-toggle".into())
+                .icon(if preview {
+                    IconName::Eye
+                } else {
+                    IconName::EyeOff
+                }),
+            crate::ui::tab_strip::MIN_TARGET,
+            14.,
+            preview,
+            cx,
+        )
+        .tooltip(t(if preview {
+            L10nKey::EditorEdit
+        } else {
+            L10nKey::EditorPreview
+        }))
+        .on_click(cx.listener(|app, _, window, cx| app.editor_toggle_preview(window, cx)))
+        .into_any_element()
     }
 
     fn render_code_status_bar(&self, _window: &Window, cx: &mut Context<Self>) -> gpui::Div {
@@ -2637,7 +2595,7 @@ mod tests {
         let first_tab = vcx.debug_bounds("editor-file-tab-0").unwrap();
         vcx.simulate_click(first_tab.center(), gpui::Modifiers::none());
         vcx.run_until_parked();
-        let source = vcx.debug_bounds("editor-preview-mode-1").unwrap();
+        let source = vcx.debug_bounds("editor-preview-toggle").unwrap();
         vcx.simulate_click(source.center(), gpui::Modifiers::none());
         vcx.run_until_parked();
         vcx.simulate_keystrokes("x");
@@ -2683,7 +2641,7 @@ mod tests {
         app.read_with(&vcx, |app, _| {
             assert!(app.tab_code().unwrap().active_file().unwrap().preview)
         });
-        let source = vcx.debug_bounds("editor-preview-mode-1").unwrap();
+        let source = vcx.debug_bounds("editor-preview-toggle").unwrap();
         vcx.simulate_click(source.center(), gpui::Modifiers::none());
         vcx.run_until_parked();
         vcx.simulate_keystrokes("x");
@@ -3122,19 +3080,40 @@ mod tests {
             code.files[active].path = "/work/second/docs/guide.md".into();
             assert_eq!(
                 code.active_display_path(HostId(99)),
-                Some(PathBuf::from("/work/second/docs/guide.md")),
+                Some(PathBuf::from("guide.md")),
                 "roots on another host must not label this buffer's path"
             );
             code.roots = vec!["/work/elsewhere".into()];
             assert_eq!(
                 code.active_display_path(HostId::LOCAL),
-                Some(PathBuf::from("/work/second/docs/guide.md"))
+                Some(PathBuf::from("guide.md"))
             );
             code.roots.clear();
             assert_eq!(
                 code.active_display_path(HostId::LOCAL),
-                Some(PathBuf::from("/work/second/docs/guide.md"))
+                Some(PathBuf::from("guide.md")),
+                "an unresolved project must never expose absolute ancestors"
             );
+            #[cfg(windows)]
+            for path in [
+                r"D:\gh-prj\ctty7\tests\fixtures\html-preview\report.html",
+                r"\\?\D:\gh-prj\ctty7\tests\fixtures\html-preview\report.html",
+            ] {
+                // This test covers path spelling; the native browser has its
+                // own real-window acceptance fixture.
+                code.files[active].preview = false;
+                code.files[active].path = path.into();
+                code.roots.clear();
+                assert_eq!(
+                    code.active_display_path(HostId::LOCAL),
+                    Some("report.html".into())
+                );
+                code.roots.push(r"D:\gh-prj\ctty7".into());
+                assert_eq!(
+                    code.active_display_path(HostId::LOCAL),
+                    Some(r"ctty7\tests\fixtures\html-preview\report.html".into())
+                );
+            }
         });
     }
 
@@ -3186,6 +3165,17 @@ mod tests {
                     Some(PathBuf::from(root.file_name().unwrap()).join(relative)),
                     "canonicalized local files must start their breadcrumbs at the project name"
                 );
+            });
+            app.update_in(&mut vcx, |app, window, cx| {
+                // A tree refresh can remove the matching root while the
+                // canonical buffer stays open. Reopen through the real path.
+                app.tab_code_mut().unwrap().roots.clear();
+                app.editor_open_on_host(
+                    tty7_core::host::local::LocalHost::new(), &path, window, cx,
+                );
+                assert_eq!(app.tab_code().unwrap().active_display_path(HostId::LOCAL),
+                    Some(PathBuf::from(path.file_name().unwrap())),
+                    "reopening without a project root must keep disk and parent directories out of the header");
             });
         }
     }
@@ -3284,40 +3274,22 @@ mod tests {
                     vcx.debug_bounds("status-md-preview").is_none(),
                     "the footer toggle is removed"
                 );
-                let modes = vcx
-                    .debug_bounds("editor-preview-modes")
-                    .expect("text mode segments are beside the breadcrumb");
-                assert!(modes.size.height >= px(24.));
+                let toggle = vcx
+                    .debug_bounds("editor-preview-toggle")
+                    .expect("a single preview icon is beside the breadcrumb");
+                assert_eq!(toggle.size.width, px(crate::ui::tab_strip::MIN_TARGET));
+                assert!(toggle.size.height >= px(24.));
                 let row = vcx.debug_bounds("editor-breadcrumb-row").unwrap();
-                assert!(modes.left() >= path.right() && modes.right() <= row.right());
-                assert!(modes.top() >= row.top() && modes.bottom() <= row.bottom());
-                // Pick the already selected segment first. It must not toggle.
-                let selected_x = if expected_preview {
-                    modes.right() - px(12.)
-                } else {
-                    modes.left() + px(12.)
-                };
-                vcx.simulate_click(
-                    gpui::point(selected_x, modes.center().y),
-                    gpui::Modifiers::none(),
-                );
+                assert!(toggle.left() >= path.right() && toggle.right() <= row.right());
+                assert!(toggle.top() >= row.top() && toggle.bottom() <= row.bottom());
+                vcx.simulate_click(toggle.center(), gpui::Modifiers::none());
                 vcx.run_until_parked();
                 app.read_with(&vcx, |app, _| {
                     assert_eq!(
                         app.tab_code().unwrap().active_file().unwrap().preview,
-                        !expected_preview
+                        expected_preview
                     )
                 });
-                let pick_x = if expected_preview {
-                    modes.left() + px(12.)
-                } else {
-                    modes.right() - px(12.)
-                };
-                vcx.simulate_click(
-                    gpui::point(pick_x, modes.center().y),
-                    gpui::Modifiers::none(),
-                );
-                vcx.run_until_parked();
                 let preview = app.read_with(&vcx, |app, _| {
                     app.tab_code().unwrap().active_file().unwrap().preview
                 });

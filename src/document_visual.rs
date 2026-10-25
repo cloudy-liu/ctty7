@@ -47,6 +47,18 @@ struct Options {
     right_panel: bool,
     #[serde(default)]
     readme: bool,
+    #[serde(default)]
+    hover_at: Option<[f32; 2]>,
+    #[serde(default)]
+    assert_native_clear: Option<[f32; 2]>,
+    #[serde(default)]
+    assert_native_restored: bool,
+    #[serde(default)]
+    check_native_tooltip: bool,
+    #[serde(default)]
+    disable_native_tooltip_clip: bool,
+    #[serde(default)]
+    assert_breadcrumb: Option<PathBuf>,
     #[serde(default = "default_hold_seconds")]
     hold_seconds: u64,
 }
@@ -56,6 +68,16 @@ struct ReadmePane {
     _stream: Stream,
     agent: Option<CLIAgent>,
     status: Option<AgentStatus>,
+}
+
+#[derive(Default)]
+struct FillTarget(Option<Bounds<Pixels>>);
+impl Global for FillTarget {}
+
+pub(crate) fn record_fill_target(bounds: Bounds<Pixels>, cx: &mut App) {
+    if cx.has_global::<FillTarget>() {
+        cx.global_mut::<FillTarget>().0 = Some(bounds);
+    }
 }
 
 fn default_width() -> f32 {
@@ -132,6 +154,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 config.sidebar_collapsed_groups.insert(archive);
             }
             cx.set_global(config);
+            cx.set_global(FillTarget::default());
             WorkspaceStore::init(cx);
             WindowRegistry::init(cx);
             crate::ui::presets::load_registry(cx);
@@ -164,7 +187,10 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                             if options.readme {
                                 readme_panes = install_readme_tabs(app, &options.root, window, cx);
                             } else {
-                                app.tabs.push(Tab::new(Pane::Empty));
+                                let (view, mut stream) = quiet_test_pane(1, window, cx);
+                                DaemonMsg::Cwd(options.root.clone()).encode(&mut stream).unwrap();
+                                app.tabs.push(Tab::new(Pane::leaf(PaneSlot::Ready(view.clone()))));
+                                readme_panes.push(ReadmePane { view, _stream: stream, agent: None, status: None });
                                 app.active = app.tabs.len() - 1;
                             }
                             app.tab_code_mut_or_init()
@@ -318,12 +344,67 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 cx.background_executor()
                     .timer(Duration::from_millis(500))
                     .await;
+                if let Some([x, y]) = options.hover_at {
+                    cx.update_window(handle.into(), |_, window, cx| {
+                        window.simulate_mouse_move(point(px(x), px(y)), cx);
+                    })
+                    .unwrap();
+                    cx.background_executor()
+                        .timer(Duration::from_millis(900))
+                        .await;
+                }
+                #[cfg(windows)]
+                let mut tooltip_probe = None;
+                #[cfg(windows)]
+                if options.check_native_tooltip {
+                    cx.update_window(handle.into(), |_, window, cx| {
+                        window.activate_window();
+                        if options.disable_native_tooltip_clip {
+                            app.read(cx).editor.html.as_ref().unwrap().read(cx).disable_tooltip_clipping(cx);
+                        }
+                    }).unwrap();
+                    let deadline = Instant::now() + Duration::from_secs(5);
+                    loop {
+                        cx.background_executor().timer(Duration::from_millis(100)).await;
+                        let bounds = cx.update_window(handle.into(), |_, window, cx| {
+                            let target = cx.global::<FillTarget>().0.expect("fill control was laid out");
+                            window.simulate_mouse_move(target.center(), cx);
+                            window.refresh();
+                            let _ = window.draw(cx);
+                            app.read(cx).editor.html.as_ref().unwrap().read(cx).tooltip_footprint()
+                        }).unwrap();
+                        if let Some(bounds) = bounds {
+                            tooltip_probe = Some(bounds.center());
+                            eprintln!("NATIVE_TOOLTIP_FOOTPRINT={bounds:?}");
+                            break;
+                        }
+                        assert!(Instant::now() < deadline, "the real fill tooltip did not appear");
+                    }
+                    cx.background_executor().timer(Duration::from_millis(250)).await;
+                }
                 let evidence = cx
                     .update_window(handle.into(), |_, window, cx| {
                         window.set_window_title("ctty7 document acceptance");
                         window.refresh();
                         let _ = window.draw(cx);
+                        #[cfg(windows)]
+                        if let Some([x, y]) = options.assert_native_clear {
+                            let html = app.read(cx).editor.html.as_ref().expect("HTML preview");
+                            assert!(
+                                !html.read(cx).native_covers(point(px(x), px(y)), window, cx),
+                                "native HTML child covers the tooltip at ({x}, {y})"
+                            );
+                        }
                         let file = app.read(cx).tab_code().unwrap().active_file().unwrap();
+                        if let Some(expected) = &options.assert_breadcrumb {
+                            assert_eq!(app.read(cx).tab_code().unwrap().active_display_path(app.read(cx).spawn_host(cx)).as_ref(), Some(expected),
+                                "native file opening must not expose absolute ancestors in the breadcrumb");
+                        }
+                        #[cfg(windows)]
+                        if let Some(point) = tooltip_probe {
+                            let covered = app.read(cx).editor.html.as_ref().unwrap().read(cx).native_covers(point, window, cx);
+                            assert!(!covered, "native HTML child covers the tooltip at {point:?}");
+                        }
                         assert_eq!(
                             file.path, files[options.active],
                             "selected document changed before capture"
@@ -339,7 +420,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                                 file.path.extension().and_then(|s| s.to_str()),
                                 Some("html" | "htm")
                             );
-                        let capture = if html {
+                        let capture = if html && options.hover_at.is_none() {
                             "Use native screenshot: GPUI images omit the child WebView".to_owned()
                         } else if let Some(path) = &options.image {
                             match window
@@ -380,6 +461,26 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     "NATIVE_DOCUMENT_READY_FOR_CAPTURE {}",
                     options.output.display()
                 );
+                #[cfg(windows)]
+                if options.assert_native_restored {
+                    let point = tooltip_probe.or_else(|| options.assert_native_clear.map(|[x,y]| point(px(x), px(y)))).expect("restoration requires an occlusion probe");
+                    cx.update_window(handle.into(), |_, window, cx| {
+                        window.simulate_mouse_move(gpui::point(px(10.), px(400.)), cx);
+                    })
+                    .unwrap();
+                    cx.background_executor()
+                        .timer(Duration::from_millis(600))
+                        .await;
+                    cx.update_window(handle.into(), |_, window, cx| {
+                        let html = app.read(cx).editor.html.as_ref().expect("HTML preview");
+                        assert!(
+                            html.read(cx).native_covers(point, window, cx),
+                            "native HTML region was not restored after hiding the tooltip"
+                        );
+                    })
+                    .unwrap();
+                    eprintln!("NATIVE_TOOLTIP_REGION_RESTORED");
+                }
                 cx.background_executor()
                     .timer(Duration::from_secs(options.hold_seconds.min(600)))
                     .await;
