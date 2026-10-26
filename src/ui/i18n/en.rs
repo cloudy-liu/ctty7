@@ -1084,7 +1084,16 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::EditorWrapOn => "Wrap: on",
         L10nKey::EditorWrapOff => "Wrap: off",
         L10nKey::EditorFileTooLarge => "\"{path}\" is too large for the editor ({size} MB)",
-        L10nKey::EditorBinaryFile => "\"{path}\" looks like a binary file",
+        L10nKey::EditorBinaryFile => {
+            "\"{path}\" is a non-text file and cannot be opened in the built-in editor."
+        }
+        L10nKey::EditorPreviewUnsupported => "This file cannot be previewed",
+        L10nKey::EditorDontShowBinaryNotice => "Don't show these hints again",
+        L10nKey::EditorPreviewDismiss => "Got it",
+        L10nKey::SettingsBinaryFileNotice => "Show unsupported preview hints",
+        L10nKey::SettingsBinaryFileNoticeDesc => {
+            "Show a hint when opening archives or other non-text files. Read errors are always shown."
+        }
         L10nKey::PanelInfoTitle => "Info",
         L10nKey::PanelChangesTitle => "Source Control",
         L10nKey::PanelScmTitle => "Source Control",
