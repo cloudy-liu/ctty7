@@ -220,6 +220,9 @@ pub struct Config {
     /// impression than one they asked for.
     #[serde(default)]
     pub scm_graph_expanded: bool,
+    /// Download small author photos for History; local initials remain available.
+    #[serde(default = "default_true")]
+    pub scm_remote_avatars: bool,
     #[serde(default, deserialize_with = "de_lenient")]
     pub sidebar_grouping: SidebarGrouping,
     #[serde(default = "default_true")]
@@ -638,6 +641,7 @@ impl Default for Config {
             document_layout: DocumentLayout::default(),
             document_ratio: default_document_ratio(),
             scm_graph_expanded: false,
+            scm_remote_avatars: true,
             sidebar_grouping: SidebarGrouping::Repo,
             sidebar_diff_preview: true,
             sidebar_agent_status_text: true,
