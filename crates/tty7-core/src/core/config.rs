@@ -149,6 +149,8 @@ pub struct Config {
         deserialize_with = "de_editor_line_height"
     )]
     pub editor_line_height: f32,
+    /// Show an explanatory hint when a non-text file cannot be previewed.
+    pub show_binary_file_notice: bool,
     pub theme_follow_system: bool,
     pub theme_preset_light: String,
     pub theme_preset_dark: String,
@@ -608,6 +610,7 @@ impl Default for Config {
             editor_font_family: default_editor_font_family(),
             editor_font_size: default_editor_font_size(),
             editor_line_height: default_editor_line_height(),
+            show_binary_file_notice: true,
             theme_follow_system: false,
             theme_preset_light: "light".to_string(),
             theme_preset_dark: "dark".to_string(),
@@ -1279,6 +1282,16 @@ where
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn binary_preview_notice_defaults_on_and_preserves_opt_out() {
+        let mut config: super::Config = serde_json::from_str("{}").unwrap();
+        assert!(config.show_binary_file_notice);
+        config.show_binary_file_notice = false;
+        let saved = serde_json::to_string(&config).unwrap();
+        let restored: super::Config = serde_json::from_str(&saved).unwrap();
+        assert!(!restored.show_binary_file_notice);
+    }
+
     #[test]
     fn agent_sound_upgrades_preserve_desktop_preferences() {
         for desktop in ["never", "unfocused", "always"] {
