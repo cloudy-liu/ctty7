@@ -706,6 +706,11 @@ fn settings_search_entries() -> &'static [SearchEntry] {
         },
         SearchEntry {
             section: WindowTabs,
+            title: SettingsBinaryFileNotice,
+            keywords: SettingsBinaryFileNoticeDesc,
+        },
+        SearchEntry {
+            section: WindowTabs,
             title: SettingsAgentNotificationSound,
             keywords: SettingsSearchAgentNotificationSoundKeywords,
         },
@@ -5888,6 +5893,7 @@ impl Tty7App {
         let restore_session = cfg.restore_session;
         let remember_window_size = cfg.remember_window_size;
         let show_tray_icon = cfg.show_tray_icon;
+        let show_binary_file_notice = cfg.show_binary_file_notice;
         let tab_bar_idx = match cfg.tab_bar_position {
             TabBarPosition::Top => 0,
             TabBarPosition::Left => 1,
@@ -5993,6 +5999,10 @@ impl Tty7App {
             },
         );
 
+        let binary_notice_switch = crate::ui::theme::switch("wt-binary-file-notice", cx)
+            .checked(show_binary_file_notice)
+            .on_click(cx.listener(|this, on: &bool, _w, cx| this.set_binary_file_notice(*on, cx)))
+            .into_any_element();
         let restore_switch = crate::ui::theme::switch("wt-restore-session", cx)
             .checked(restore_session)
             .on_click(cx.listener(|this, on: &bool, _w, cx| this.set_restore_session(*on, cx)))
@@ -6141,6 +6151,12 @@ impl Tty7App {
             ))
             .child(self.section_rule(cx))
             .child(self.section_header(t(L10nKey::SettingsNotifications), cx))
+            .child(self.settings_row(
+                t(L10nKey::SettingsBinaryFileNotice),
+                t(L10nKey::SettingsBinaryFileNoticeDesc),
+                binary_notice_switch,
+                cx,
+            ))
             .child(self.settings_row(
                 t(L10nKey::SettingsNotifyOnCommandFinish),
                 t(L10nKey::SettingsNotifyOnCommandFinishDesc),

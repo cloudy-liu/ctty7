@@ -1044,7 +1044,13 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::EditorWrapOn => "自动换行：开",
         L10nKey::EditorWrapOff => "自动换行：关",
         L10nKey::EditorFileTooLarge => "“{path}”太大，无法在编辑器中打开（{size} MB）",
-        L10nKey::EditorBinaryFile => "“{path}”看起来是二进制文件",
+        L10nKey::EditorBinaryFile => "“{path}”是非文本文件，无法在内置编辑器中打开。",
+        L10nKey::EditorPreviewUnsupported => "此文件不支持预览",
+        L10nKey::EditorDontShowBinaryNotice => "不再提示此类消息",
+        L10nKey::SettingsBinaryFileNotice => "提示不支持预览的文件",
+        L10nKey::SettingsBinaryFileNoticeDesc => {
+            "点击压缩包等非文本文件时显示说明，不影响读取错误提示。"
+        }
         L10nKey::PanelInfoTitle => "信息",
         L10nKey::PanelChangesTitle => "源代码管理",
         L10nKey::PanelScmTitle => "源代码管理",

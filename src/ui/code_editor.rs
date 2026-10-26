@@ -12,10 +12,12 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState, Position, TabSize};
 use gpui_component::menu::ContextMenuExt as _;
+use gpui_component::notification::Notification;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
 
+use crate::core::config::Config;
 use crate::ui::app::Tty7App;
 use crate::ui::document_column::DocumentChrome;
 use crate::ui::host_ops::{HostId, HostOps, MTime, SharedHost, WatchSub};
@@ -312,6 +314,28 @@ fn place_cursor(
 
 fn looks_binary(bytes: &[u8]) -> bool {
     bytes.iter().take(8192).any(|b| *b == 0)
+}
+
+fn is_archive(path: &Path) -> bool {
+    path.extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| {
+            matches!(
+                ext.to_ascii_lowercase().as_str(),
+                "zip" | "7z" | "rar" | "tar" | "gz" | "tgz" | "bz2" | "xz" | "zst" | "cab"
+            )
+        })
+}
+
+enum EditorOpenError {
+    Binary(String),
+    Message(String),
+}
+
+impl From<String> for EditorOpenError {
+    fn from(message: String) -> Self {
+        Self::Message(message)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -630,8 +654,8 @@ impl Tty7App {
         if self.tabs.get(self.active).is_none() {
             return;
         }
-        self.raise_code_overlay();
         if self.editor_activate_open(host.id(), path, window, cx) {
+            self.raise_code_overlay();
             self.apply_editor_navigation(host.id(), path, navigation, window, cx);
             return;
         }
@@ -641,7 +665,7 @@ impl Tty7App {
             host.clone(),
             window,
             cx,
-            move |h| -> Result<(PathBuf, String, Option<MTime>), String> {
+            move |h| -> Result<(PathBuf, String, Option<MTime>), EditorOpenError> {
                 let path = h.canonicalize(&p).unwrap_or(p);
                 let display_path = crate::ui::path_display::readable_path(&path, host_id)
                     .display()
@@ -652,9 +676,15 @@ impl Tty7App {
                         return Err(t_fmt(
                             L10nKey::EditorCantOpen,
                             &[("path", &display_path), ("e", &e.to_string())],
-                        ));
+                        )
+                        .into());
                     }
                 };
+                // Reject known archives before the size limit or a remote download.
+                // Other extensions still use the existing content sniff below.
+                if is_archive(&path) {
+                    return Err(EditorOpenError::Binary(display_path));
+                }
                 if meta.len > MAX_FILE_BYTES {
                     return Err(t_fmt(
                         L10nKey::EditorFileTooLarge,
@@ -662,7 +692,8 @@ impl Tty7App {
                             ("path", &display_path),
                             ("size", &(meta.len / (1024 * 1024)).to_string()),
                         ],
-                    ));
+                    )
+                    .into());
                 }
                 let bytes = match h.read_file(&path, MAX_FILE_BYTES) {
                     Ok(b) => b,
@@ -670,11 +701,12 @@ impl Tty7App {
                         return Err(t_fmt(
                             L10nKey::EditorCantRead,
                             &[("path", &display_path), ("e", &e.to_string())],
-                        ));
+                        )
+                        .into());
                     }
                 };
                 if looks_binary(&bytes) {
-                    return Err(t_fmt(L10nKey::EditorBinaryFile, &[("path", &display_path)]));
+                    return Err(EditorOpenError::Binary(display_path));
                 }
                 let text = String::from_utf8(bytes)
                     .map_err(|_| t_fmt(L10nKey::EditorNotUtf8, &[("path", &display_path)]))?;
@@ -686,14 +718,55 @@ impl Tty7App {
                 }
                 match opened {
                     Ok((path, text, mtime)) => {
+                        app.raise_code_overlay();
                         app.editor_install_file(host, path.clone(), text, mtime, window, cx);
                         // Apply this request to the canonical path returned by
                         // its Host, including when the link named a symlink.
                         app.apply_editor_navigation(host_id, &path, navigation, window, cx);
                     }
-                    Err(message) => window.push_notification(message, cx),
+                    Err(EditorOpenError::Binary(path)) => {
+                        app.editor_binary_file_notice(&path, window, cx);
+                    }
+                    Err(EditorOpenError::Message(message)) => window.push_notification(message, cx),
                 }
             },
+        );
+    }
+
+    pub(crate) fn set_binary_file_notice(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.update_config(cx, |cfg| cfg.show_binary_file_notice = on);
+    }
+
+    fn editor_binary_file_notice(&self, path: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if !cx.global::<Config>().show_binary_file_notice {
+            return;
+        }
+        let app = cx.weak_entity();
+        window.push_notification(
+            Notification::info(t_fmt(L10nKey::EditorBinaryFile, &[("path", path)]))
+                .title(t(L10nKey::EditorPreviewUnsupported))
+                .id1::<Self>("binary-preview")
+                .autohide(false)
+                .content(move |_, _, cx| {
+                    let app = app.clone();
+                    h_flex()
+                        .mt_2()
+                        .child(
+                            Button::new("editor-hide-binary-notice")
+                                .debug_selector(|| "editor-hide-binary-notice".into())
+                                .ghost()
+                                .small()
+                                .label(t(L10nKey::EditorDontShowBinaryNotice))
+                                .on_click(cx.listener(move |notice, _, window, cx| {
+                                    let _ = app.update(cx, |app, cx| {
+                                        app.set_binary_file_notice(false, cx)
+                                    });
+                                    notice.dismiss(window, cx);
+                                })),
+                        )
+                        .into_any_element()
+                }),
+            cx,
         );
     }
 
@@ -2397,6 +2470,111 @@ mod tests {
             cx.notify();
         });
         (app, vcx)
+    }
+
+    #[gpui::test]
+    fn editor_binary_notice_can_be_muted_without_hiding_open_errors(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let archive = dir.path().join("archive.ZIP");
+        let binary = dir.path().join("binary.dat");
+        let invalid_text = dir.path().join("legacy.txt");
+        // A large archive must use the unsupported-preview hint, not the size error.
+        std::fs::File::create(&archive)
+            .unwrap()
+            .set_len(MAX_FILE_BYTES + 1)
+            .unwrap();
+        std::fs::write(&binary, b"data\0bytes").unwrap();
+        std::fs::write(&invalid_text, [0xff, 0xfe]).unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                dir.path().join("keep.rs"),
+                "fn keep() {}".into(),
+                None,
+                window,
+                cx,
+            );
+            app.tabs[app.active].overlay_top = crate::ui::app::OverlayTop::Diff;
+        });
+        for path in [&archive, &binary] {
+            app.update_in(&mut vcx, |app, window, cx| {
+                gpui_component::Root::read(window, cx)
+                    .notification
+                    .clone()
+                    .update(cx, |list, cx| list.clear(window, cx));
+                app.editor_open_on_host(tty7_core::host::local::LocalHost::new(), path, window, cx);
+            });
+            wait_for_markdown(&mut vcx, |cx| {
+                cx.update(|window, cx| {
+                    !gpui_component::Root::read(window, cx)
+                        .notification
+                        .read(cx)
+                        .notifications()
+                        .is_empty()
+                })
+            });
+            app.read_with(&vcx, |app, _| {
+                assert_eq!(
+                    app.tabs[app.active].overlay_top,
+                    crate::ui::app::OverlayTop::Diff
+                );
+                assert_eq!(app.tab_code().unwrap().files.len(), 1);
+            });
+        }
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_binary_file_notice("another.zip", window, cx);
+            assert_eq!(
+                gpui_component::Root::read(window, cx)
+                    .notification
+                    .read(cx)
+                    .notifications()
+                    .len(),
+                1
+            );
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let mute = vcx.debug_bounds("editor-hide-binary-notice").unwrap();
+        vcx.simulate_click(mute.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        app.update_in(&mut vcx, |app, window, cx| {
+            assert!(!cx.global::<Config>().show_binary_file_notice);
+            let list = gpui_component::Root::read(window, cx).notification.clone();
+            list.update(cx, |list, cx| list.clear(window, cx));
+            app.editor_binary_file_notice("muted.zip", window, cx);
+            assert!(list.read(cx).notifications().is_empty());
+        });
+        for path in [&invalid_text, &dir.path().join("missing.zip")] {
+            app.update_in(&mut vcx, |app, window, cx| {
+                gpui_component::Root::read(window, cx)
+                    .notification
+                    .clone()
+                    .update(cx, |list, cx| list.clear(window, cx));
+                app.editor_open_on_host(tty7_core::host::local::LocalHost::new(), path, window, cx);
+            });
+            wait_for_markdown(&mut vcx, |cx| {
+                cx.update(|window, cx| {
+                    !gpui_component::Root::read(window, cx)
+                        .notification
+                        .read(cx)
+                        .notifications()
+                        .is_empty()
+                })
+            });
+        }
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.set_binary_file_notice(true, cx);
+            app.editor_binary_file_notice("restored.zip", window, cx);
+            assert!(cx.global::<Config>().show_binary_file_notice);
+            assert_eq!(
+                app.tabs[app.active].overlay_top,
+                crate::ui::app::OverlayTop::Diff
+            );
+            assert_eq!(app.tab_code().unwrap().files.len(), 1);
+        });
     }
 
     #[gpui::test]
