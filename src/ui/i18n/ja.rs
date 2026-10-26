@@ -1348,6 +1348,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::DiffPreviousChange => "前の変更",
         L10nKey::DiffMoreAbove => "上に最大20行を表示",
         L10nKey::DiffMoreBelow => "下に最大20行を表示",
+        L10nKey::DiffExpandGap => "この区間の非表示行をすべて展開",
         L10nKey::PendingConnecting => "{machine} に接続中…",
         L10nKey::PendingUnreachable => "{machine} に到達できませんでした",
         L10nKey::WorktreePromptNeedsName => "ワークツリーには名前が必要です",
