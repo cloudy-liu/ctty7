@@ -1270,6 +1270,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::DiffPreviousChange => "Previous change",
         L10nKey::DiffMoreAbove => "Show up to 20 more lines above",
         L10nKey::DiffMoreBelow => "Show up to 20 more lines below",
+        L10nKey::DiffExpandGap => "Expand all hidden lines in this section",
         L10nKey::PendingConnecting => "Connecting to {machine}…",
         L10nKey::PendingUnreachable => "Could not reach {machine}",
         L10nKey::WorktreePromptNeedsName => "The worktree needs a name",

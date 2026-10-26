@@ -525,7 +525,7 @@ impl Tty7App {
         &self,
         path: &str,
         range: Range<u32>,
-        above: bool,
+        above: Option<bool>,
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let selector = format!("diff-more:{path}:{}:{}", range.start, range.end);
@@ -536,15 +536,25 @@ impl Tty7App {
         )))
         .xsmall()
         .ghost()
-        .icon(if above {
-            IconName::ArrowUp
-        } else {
-            IconName::ArrowDown
-        })
-        .tooltip(t(if above {
-            L10nKey::DiffMoreAbove
-        } else {
-            L10nKey::DiffMoreBelow
+        .w_full()
+        .h_full()
+        .p_0()
+        .rounded_none()
+        .text_color(diff_palette(cx).muted)
+        .child(
+            gpui::svg()
+                .path(match above {
+                    Some(true) => "icons/diff-expand-up.svg",
+                    Some(false) => "icons/diff-expand-down.svg",
+                    None => "icons/diff-unfold.svg",
+                })
+                .size(px(16.))
+                .text_color(diff_palette(cx).muted),
+        )
+        .tooltip(t(match above {
+            Some(true) => L10nKey::DiffMoreAbove,
+            Some(false) => L10nKey::DiffMoreBelow,
+            None => L10nKey::DiffExpandGap,
         }))
         .on_click(cx.listener(move |this, _, _, cx| {
             cx.stop_propagation();
@@ -552,6 +562,9 @@ impl Tty7App {
         }));
         div()
             .debug_selector(move || selector.clone())
+            .w_full()
+            .flex_1()
+            .min_h_0()
             .child(button)
             .into_any_element()
     }
@@ -1657,8 +1670,13 @@ impl Tty7App {
             };
             let hunk_heights: Vec<_> = gaps
                 .iter()
-                .map(|gap| {
-                    if gap.is_some() {
+                .enumerate()
+                .map(|(h, gap)| {
+                    if h > 0
+                        && gap
+                            .as_ref()
+                            .is_some_and(|(above, below)| above.start > below.end)
+                    {
                         hunk_height * 2.
                     } else {
                         hunk_height
@@ -1781,6 +1799,13 @@ impl Tty7App {
                                     text,
                                 )
                             };
+                            let divider = if sides.len() == 2 {
+                                DIFF_DIVIDER_WIDTH
+                            } else {
+                                0.
+                            };
+                            let column_width =
+                                (bounds.size.width.as_f32() - divider) / sides.len() as f32;
                             let mut width = 0_f32;
                             for (header, rows) in &hunks {
                                 width = width.max(measure(header) + 16. + hunk_control_width);
@@ -1810,6 +1835,9 @@ impl Tty7App {
                             }
                             for (h, (header, rows)) in hunks.iter().enumerate() {
                                 let mut hunk_header = h_flex()
+                                    .debug_selector(move || {
+                                        format!("diff-hunk-header:{column}:{h}")
+                                    })
                                     .w_full()
                                     .h(hunk_heights[h])
                                     .flex_shrink_0()
@@ -1823,23 +1851,39 @@ impl Tty7App {
                                         .w(px(DIFF_HUNK_CONTROL_WIDTH))
                                         .h_full()
                                         .flex_shrink_0()
-                                        .items_center()
+                                        .items_stretch()
                                         .justify_center();
                                     if let Some((above, below)) = gaps[h].clone() {
-                                        gutter = gutter
-                                            .bg(palette.hunk_controls)
-                                            .child(app.diff_more_button(
+                                        gutter = gutter.bg(palette.hunk_controls);
+                                        if h == 0 {
+                                            gutter = gutter.child(app.diff_more_button(
                                                 &context_path,
                                                 above,
-                                                true,
-                                                cx,
-                                            ))
-                                            .child(app.diff_more_button(
-                                                &context_path,
-                                                below,
-                                                false,
+                                                Some(true),
                                                 cx,
                                             ));
+                                        } else if above.start <= below.end {
+                                            gutter = gutter.child(app.diff_more_button(
+                                                &context_path,
+                                                below.start..above.end,
+                                                None,
+                                                cx,
+                                            ));
+                                        } else {
+                                            gutter = gutter
+                                                .child(app.diff_more_button(
+                                                    &context_path,
+                                                    above,
+                                                    Some(true),
+                                                    cx,
+                                                ))
+                                                .child(app.diff_more_button(
+                                                    &context_path,
+                                                    below,
+                                                    Some(false),
+                                                    cx,
+                                                ));
+                                        }
                                     }
                                     hunk_header = hunk_header.child(gutter);
                                 }
@@ -1984,7 +2028,9 @@ impl Tty7App {
                                         }
                                     }
                                 }))
-                                .child(body.min_w(px(width.ceil()))),
+                                // A definite width also fills short hunk headers when
+                                // another row makes the column horizontally scrollable.
+                                .child(body.w(px(width.ceil().max(column_width)))),
                             &selection,
                             column,
                             scroll.clone(),
@@ -3911,6 +3957,34 @@ mod github_theme_gpui_tests {
                 assert_eq!(f.hunks[0].lines[0].new_no, Some(2));
                 assert_eq!(o.source, DiffSource::Staged);
             });
+            let gap = vcx.debug_bounds("diff-more:context.rs:29:62").unwrap();
+            vcx.simulate_click(gap.center(), gpui::Modifiers::none());
+            vcx.run_until_parked();
+            app.update(vcx, |app, _| {
+                let view = &app.tabs[0].diff_overlay.as_ref().unwrap().file_views["context.rs"];
+                let shown = view.shown.as_ref().unwrap();
+                assert_eq!(
+                    shown.hunks.len(),
+                    1,
+                    "the combined control reveals the entire gap"
+                );
+                assert_eq!(
+                    shown.hunks[0]
+                        .lines
+                        .iter()
+                        .filter(|l| l.kind == LineKind::Added)
+                        .count(),
+                    2
+                );
+                assert_eq!(
+                    shown.hunks[0]
+                        .lines
+                        .iter()
+                        .filter(|l| l.kind == LineKind::Removed)
+                        .count(),
+                    2
+                );
+            });
             app.update_in(vcx, |app, window, cx| {
                 app.open_diff_overlay(
                     crate::ui::host_ops::HostId::LOCAL,
@@ -4252,6 +4326,67 @@ mod github_theme_gpui_tests {
     }
 
     #[gpui::test]
+    fn short_context_gap_uses_one_full_width_hunk_row(cx: &mut TestAppContext) {
+        let (app, _) = test_window::harness(cx);
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            let mut file = git_diff::synthesize_added(
+                "short.rs",
+                b"first\n",
+                &git_diff::DiffBudget::SINGLE_FILE,
+            );
+            file.hunks.push(git_diff::Hunk {
+                header: "@@ -20,0 +20 @@".into(),
+                lines: vec![git_diff::DiffLine {
+                    kind: LineKind::Added,
+                    old_no: None,
+                    new_no: Some(20),
+                    text: "last".into(),
+                }],
+            });
+            let (_, vcx) = cx.add_window_view(|_, _| LongDiff {
+                app: app.clone(),
+                file,
+                mode,
+                vertical: gpui::ScrollHandle::new(),
+            });
+            vcx.run_until_parked();
+            for (viewport, first, gap) in if mode == DiffViewMode::Split {
+                vec![
+                    (
+                        "diff-old-scroll",
+                        "diff-hunk-header:0:0",
+                        "diff-hunk-header:0:1",
+                    ),
+                    (
+                        "diff-new-scroll",
+                        "diff-hunk-header:1:0",
+                        "diff-hunk-header:1:1",
+                    ),
+                ]
+            } else {
+                vec![(
+                    "diff-unified-scroll",
+                    "diff-hunk-header:0:0",
+                    "diff-hunk-header:0:1",
+                )]
+            } {
+                let viewport = vcx.debug_bounds(viewport).unwrap();
+                let first = vcx.debug_bounds(first).unwrap();
+                let gap = vcx.debug_bounds(gap).unwrap();
+                assert!(
+                    (gap.right() - viewport.right()).abs() < px(0.01),
+                    "hunk background must fill the column without horizontal overflow in {mode:?}: {gap:?} vs {viewport:?}"
+                );
+                assert_eq!(
+                    gap.size.height, first.size.height,
+                    "a short gap uses one combined unfold control in {mode:?}"
+                );
+            }
+            assert!(vcx.debug_bounds("diff-more:short.rs:2:20").is_some());
+        }
+    }
+
+    #[gpui::test]
     fn short_hunks_keep_the_full_column_width_after_horizontal_scroll(cx: &mut TestAppContext) {
         use crate::ui::diff_selection::geometry_probe;
         let (app, _) = test_window::harness(cx);
@@ -4299,6 +4434,17 @@ mod github_theme_gpui_tests {
                 2,
                 "both hunk rows span the column in {mode:?}"
             );
+            for selector in if mode == DiffViewMode::Split {
+                ["diff-hunk-header:1:0", "diff-hunk-header:1:1"]
+            } else {
+                ["diff-hunk-header:0:0", "diff-hunk-header:0:1"]
+            } {
+                let header = vcx.debug_bounds(selector).expect("visible hunk header");
+                assert!(
+                    header.right() >= viewport.right() - px(1.),
+                    "hunk background must fill the scrolled viewport in {mode:?}: {header:?} vs {viewport:?}"
+                );
+            }
         }
     }
 

@@ -943,6 +943,7 @@ l10n_keys! {
     DiffPreviousChange,
     DiffMoreAbove,
     DiffMoreBelow,
+    DiffExpandGap,
     PendingConnecting,
     PendingUnreachable,
     WorktreePromptNeedsName,

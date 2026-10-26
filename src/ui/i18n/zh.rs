@@ -1209,6 +1209,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::DiffPreviousChange => "上一处修改",
         L10nKey::DiffMoreAbove => "向上补看最多 20 行",
         L10nKey::DiffMoreBelow => "向下补看最多 20 行",
+        L10nKey::DiffExpandGap => "展开此处全部隐藏行",
         L10nKey::PendingConnecting => "正在连接 {machine}…",
         L10nKey::PendingUnreachable => "无法连接到 {machine}",
         L10nKey::WorktreePromptNeedsName => "worktree 需要一个名称",
