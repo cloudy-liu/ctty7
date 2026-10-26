@@ -12,6 +12,7 @@ use gpui::{
 use gpui_component::button::{Button, ButtonVariants as _};
 use gpui_component::input::{Input, InputEvent, InputState, Position, TabSize};
 use gpui_component::menu::ContextMenuExt as _;
+use gpui_component::scroll::ScrollbarShow;
 use gpui_component::{
     ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _, h_flex, v_flex,
 };
@@ -1752,6 +1753,7 @@ impl Tty7App {
                 let input = f.input.clone();
                 Input::new(&input)
                     .appearance(false)
+                    .scrollbar_show(ScrollbarShow::Always)
                     .editor_style(crate::ui::editor_theme::current(cx))
                     .font_family(crate::ui::editor_theme::font_family(cx))
                     .text_size(px(cx
@@ -1781,7 +1783,13 @@ impl Tty7App {
             .children(header)
             .child(self.render_editor_breadcrumb(window, cx))
             .when_some(conflict_banner, |this, b| this.child(b))
-            .child(div().flex_1().min_h_0().child(body));
+            .child(
+                div()
+                    .debug_selector(|| "editor-body".into())
+                    .flex_1()
+                    .min_h_0()
+                    .child(body),
+            );
 
         // The panel's own paint is the same either way; only the box is not.
         // Filling the workspace means stopping the window's translucency and
@@ -2397,6 +2405,43 @@ mod tests {
             cx.notify();
         });
         (app, vcx)
+    }
+
+    #[gpui::test]
+    fn editor_long_lines_scroll_with_the_horizontal_track(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let input = app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/work/long-lines.rs".into(),
+                format!(
+                    "const LONG_LINE: &str = \"{}END_OF_LONG_LINE\";\n",
+                    "0123456789 ".repeat(40)
+                ),
+                None,
+                window,
+                cx,
+            );
+            app.tab_code().unwrap().active_file().unwrap().input.clone()
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let body = vcx.debug_bounds("editor-body").unwrap();
+        assert_eq!(
+            input.read_with(&vcx, |input, _| input.scroll_offset().x),
+            px(0.)
+        );
+        vcx.simulate_click(
+            gpui::point(body.right() - px(30.), body.bottom() - px(5.)),
+            gpui::Modifiers::none(),
+        );
+        vcx.run_until_parked();
+        assert!(
+            input.read_with(&vcx, |input, _| input.scroll_offset().x) < px(-100.),
+            "clicking the bottom horizontal track must reveal the long line ending"
+        );
     }
 
     #[gpui::test]
