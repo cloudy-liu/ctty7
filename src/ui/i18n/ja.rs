@@ -1152,6 +1152,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::EditorPreviewUnsupported => "このファイルはプレビューできません",
         L10nKey::EditorDontShowBinaryNotice => "今後この種類のヒントを表示しない",
+        L10nKey::EditorPreviewDismiss => "わかりました",
         L10nKey::SettingsBinaryFileNotice => "プレビュー非対応のヒントを表示",
         L10nKey::SettingsBinaryFileNoticeDesc => {
             "圧縮ファイルなど、テキスト以外のファイルを開く際に説明を表示します。読み取りエラーは常に表示されます。"

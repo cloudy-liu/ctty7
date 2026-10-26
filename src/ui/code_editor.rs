@@ -10,6 +10,7 @@ use gpui::{
     div, px, rems,
 };
 use gpui_component::button::{Button, ButtonVariants as _};
+use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{Input, InputEvent, InputState, Position, TabSize};
 use gpui_component::menu::ContextMenuExt as _;
 use gpui_component::notification::Notification;
@@ -742,6 +743,7 @@ impl Tty7App {
             return;
         }
         let app = cx.weak_entity();
+        let opt_out = cx.new(|_| false);
         window.push_notification(
             Notification::info(t_fmt(L10nKey::EditorBinaryFile, &[("path", path)]))
                 .title(t(L10nKey::EditorPreviewUnsupported))
@@ -749,20 +751,37 @@ impl Tty7App {
                 .autohide(false)
                 .content(move |_, _, cx| {
                     let app = app.clone();
-                    h_flex()
+                    let toggle_opt_out = opt_out.clone();
+                    let confirm_opt_out = opt_out.clone();
+                    v_flex()
                         .mt_2()
+                        .gap_2()
                         .child(
-                            Button::new("editor-hide-binary-notice")
+                            Checkbox::new("editor-hide-binary-notice")
                                 .debug_selector(|| "editor-hide-binary-notice".into())
-                                .ghost()
                                 .small()
                                 .label(t(L10nKey::EditorDontShowBinaryNotice))
-                                .on_click(cx.listener(move |notice, _, window, cx| {
-                                    let _ = app.update(cx, |app, cx| {
-                                        app.set_binary_file_notice(false, cx)
-                                    });
-                                    notice.dismiss(window, cx);
+                                .checked(*opt_out.read(cx))
+                                .on_click(cx.listener(move |_, checked: &bool, _, cx| {
+                                    toggle_opt_out.update(cx, |value, _| *value = *checked);
+                                    cx.notify();
                                 })),
+                        )
+                        .child(
+                            h_flex().justify_end().child(
+                                Button::new("editor-binary-notice-ok")
+                                    .debug_selector(|| "editor-binary-notice-ok".into())
+                                    .small()
+                                    .label(t(L10nKey::EditorPreviewDismiss))
+                                    .on_click(cx.listener(move |notice, _, window, cx| {
+                                        if *confirm_opt_out.read(cx) {
+                                            let _ = app.update(cx, |app, cx| {
+                                                app.set_binary_file_notice(false, cx)
+                                            });
+                                        }
+                                        notice.dismiss(window, cx);
+                                    })),
+                            ),
                         )
                         .into_any_element()
                 }),
@@ -2540,6 +2559,15 @@ mod tests {
         let mute = vcx.debug_bounds("editor-hide-binary-notice").unwrap();
         vcx.simulate_click(mute.center(), gpui::Modifiers::none());
         vcx.run_until_parked();
+        app.read_with(&vcx, |_, cx| {
+            assert!(
+                cx.global::<Config>().show_binary_file_notice,
+                "checking the box must not persist before confirmation"
+            );
+        });
+        let confirm = vcx.debug_bounds("editor-binary-notice-ok").unwrap();
+        vcx.simulate_click(confirm.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
         app.update_in(&mut vcx, |app, window, cx| {
             assert!(!cx.global::<Config>().show_binary_file_notice);
             let list = gpui_component::Root::read(window, cx).notification.clone();
@@ -2566,6 +2594,10 @@ mod tests {
             });
         }
         app.update_in(&mut vcx, |app, window, cx| {
+            gpui_component::Root::read(window, cx)
+                .notification
+                .clone()
+                .update(cx, |list, cx| list.clear(window, cx));
             app.set_binary_file_notice(true, cx);
             app.editor_binary_file_notice("restored.zip", window, cx);
             assert!(cx.global::<Config>().show_binary_file_notice);
@@ -2574,6 +2606,19 @@ mod tests {
                 crate::ui::app::OverlayTop::Diff
             );
             assert_eq!(app.tab_code().unwrap().files.len(), 1);
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let confirm = vcx.debug_bounds("editor-binary-notice-ok").unwrap();
+        vcx.simulate_click(confirm.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        app.read_with(&vcx, |_, cx| {
+            assert!(
+                cx.global::<Config>().show_binary_file_notice,
+                "confirming an unchecked box only dismisses this hint"
+            );
         });
     }
 

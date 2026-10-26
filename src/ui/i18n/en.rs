@@ -1089,6 +1089,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         }
         L10nKey::EditorPreviewUnsupported => "This file cannot be previewed",
         L10nKey::EditorDontShowBinaryNotice => "Don't show these hints again",
+        L10nKey::EditorPreviewDismiss => "Got it",
         L10nKey::SettingsBinaryFileNotice => "Show unsupported preview hints",
         L10nKey::SettingsBinaryFileNoticeDesc => {
             "Show a hint when opening archives or other non-text files. Read errors are always shown."

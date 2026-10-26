@@ -795,6 +795,7 @@ l10n_keys! {
     EditorBinaryFile,
     EditorPreviewUnsupported,
     EditorDontShowBinaryNotice,
+    EditorPreviewDismiss,
     PanelInfoTitle,
     PanelChangesTitle,
     PanelScmTitle,

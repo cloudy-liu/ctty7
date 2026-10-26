@@ -2,7 +2,9 @@
 
 Clicking an archive or another detected binary file keeps the current document
 and shows an informational notification with a **Don't show these hints again**
-button. The choice is saved as `show_binary_file_notice: false` in `config.json`.
+checkbox and a **Got it** button. Checking the box keeps the hint visible;
+pressing **Got it** saves `show_binary_file_notice: false` in `config.json`
+and dismisses it. Leaving the box unchecked only dismisses the current hint.
 The **Window & Tabs → Notifications → Show unsupported preview hints** setting
 restores these hints. Missing files, read failures, oversized text files and
 unsupported text encodings still report their own errors.
@@ -54,8 +56,11 @@ Copy the resulting executable outside `target` before launching it. Pass
 `--config-dir <scratch>/after-config --document-visual <scratch>/after-options.json`.
 Wait for `NATIVE_DOCUMENT_READY_FOR_CAPTURE` in stderr. Click `archive.zip` in
 the Files panel, then click `binary.dat` repeatedly. Only one unsupported-preview
-hint should remain. Click its opt-out button, repeat both file selections, and
-inspect `config.json` for the saved false value. The guide and its single tab
+hint should remain. First leave the checkbox unchecked and press **Got it**;
+selecting the archive again must still show the hint. Then check the box and
+verify that the hint remains visible and the setting has not yet changed. Press
+**Got it**, repeat both file selections, and inspect `config.json` for the saved
+false value. The guide and its single tab
 must remain visible throughout.
 
 Open Settings and use its search to find **Show unsupported preview hints**.
@@ -82,15 +87,27 @@ capture API. Screenshots are unmodified captures of the running application.
 
 ![Before: another binary file uses the same non-actionable message.](images/binary-preview-notifications/before-binary.jpg)
 
-![After: the explanation has a persistent opt-out action below the file description.](images/binary-preview-notifications/after-archive.jpg)
+![After: an initially unchecked opt-out checkbox and a separate Got it button.](images/binary-preview-notifications/after-archive.jpg)
 
-![After opting out: the archive is selected, the guide remains open, and no hint appears.](images/binary-preview-notifications/after-muted.jpg)
+![After checking the box and confirming: the archive is selected, the guide remains open, and no hint appears.](images/binary-preview-notifications/after-muted.jpg)
 
 ![Recovery: the searchable Notifications setting re-enables unsupported-preview hints.](images/binary-preview-notifications/after-settings.jpg)
 
 ![After restoring the setting: selecting the archive shows the hint again.](images/binary-preview-notifications/after-restored.jpg)
 
 ![With hints disabled: an invalid UTF-8 text file still displays its encoding error.](images/binary-preview-notifications/after-read-error.jpg)
+
+## Checkbox interaction
+
+The first PR iteration used a one-click opt-out action. The final interaction
+uses a visible checkbox and an explicit acknowledgement. Both images below use
+the same fixture, viewport, scale, theme and enabled preference.
+
+| Before | After | Why |
+| --- | --- | --- |
+| ![One-click opt-out](images/binary-preview-notifications/before-checkbox.jpg) | ![Checkbox and acknowledgement](images/binary-preview-notifications/after-archive.jpg) | Make the persistent preference visible and apply it when the user confirms. |
+
+![Checked but not yet confirmed: the hint remains open.](images/binary-preview-notifications/after-checked.jpg)
 
 ## Verification
 
@@ -114,7 +131,8 @@ and stderr when running this GUI-subsystem test executable directly.
 `bash .github/scripts/check-host-boundary.sh` also passed.
 
 The new regression covers uppercase and oversized archives, binary content,
-notification deduplication, the opt-out button, restoring the preference,
+notification deduplication, selecting the checkbox without saving early,
+confirming with and without the checkbox, restoring the preference,
 preserving the current document/overlay, and showing missing-file and encoding
 errors while hints are muted. The config regression checks the enabled default
 for old configuration files and serialization of the disabled preference.

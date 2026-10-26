@@ -1047,6 +1047,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::EditorBinaryFile => "“{path}”是非文本文件，无法在内置编辑器中打开。",
         L10nKey::EditorPreviewUnsupported => "此文件不支持预览",
         L10nKey::EditorDontShowBinaryNotice => "不再提示此类消息",
+        L10nKey::EditorPreviewDismiss => "知道了",
         L10nKey::SettingsBinaryFileNotice => "提示不支持预览的文件",
         L10nKey::SettingsBinaryFileNoticeDesc => {
             "点击压缩包等非文本文件时显示说明，不影响读取错误提示。"
