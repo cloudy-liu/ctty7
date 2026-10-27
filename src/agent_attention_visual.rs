@@ -153,6 +153,16 @@ fn open(index: usize, split: bool, cx: &mut App) -> NativeWindow {
 
 pub(crate) fn run(path: &std::ffi::OsStr) {
     let options: Options = serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap();
+    #[cfg(windows)]
+    {
+        // Match normal startup's taskbar identity without creating or
+        // repointing the user's Start Menu shortcut from a test executable.
+        let exe = std::env::current_exe().unwrap();
+        let app_id = windows::core::HSTRING::from(crate::core::aumid::taskbar_app_id(&exe));
+        unsafe {
+            windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(&app_id).unwrap();
+        }
+    }
     gpui_platform::application()
         .with_assets(crate::ui::assets::Assets)
         .with_quit_mode(QuitMode::Explicit)

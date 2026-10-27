@@ -36,7 +36,7 @@ pub(crate) const AUMID: &str = "com.github.tty7";
 
 const DEV_AUMID: &str = "com.github.tty7.dev";
 
-fn taskbar_app_id(exe: &Path) -> &'static str {
+pub(crate) fn taskbar_app_id(exe: &Path) -> &'static str {
     if is_build_output(exe) {
         DEV_AUMID
     } else {

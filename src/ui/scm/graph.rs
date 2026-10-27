@@ -1,44 +1,6 @@
-//! The history section at the foot of the panel.
-//!
-//! Its job is shape first and text second. 260px leaves room for roughly 26
-//! characters beside the lanes, and this repository's commit subjects run to a
-//! median of 64 — so what a reader gets here is where the branches are, where
-//! they merged, which refs sit where, and how recently anything moved. Reading
-//! a whole message is the commit detail view's job, one click away.
-//!
-//! # What size everything is
-//!
-//! Three, and no more: 12px for the commit subject and for the
-//! conventional-commit type in front of it, which are one run of text and are
-//! told apart by tone rather than by size; 11px for the section's own heading
-//! and for the "load more" control; and 10.5px for the annotations — the
-//! relative age, the commit count, the ref chip. A sidebar list is dense by
-//! design, and the graph is the densest thing in this panel.
-//!
-//! That is also VS Code's own reading of a sidebar graph, and it is why the
-//! conventional-commit prefix is cut down to its type and demoted to muted ink
-//! rather than left to eat half the line. The lane gutter itself never folds
-//! away: the lanes are the graph, and a graph without them is just a list.
-//!
-//! The section is not a surface of its own. It sits flush on the panel's
-//! `theme.sidebar` fill and is separated from the file list above it by a
-//! hairline, the way every other band of this panel is. The only colour that
-//! gets to be saturated here is a lane's, and the lanes stay in the gutter,
-//! below the text; the rows themselves are ink, muted ink and the sidebar's own
-//! neutral hover and selection fills.
-//!
-//! # How it is drawn
-//!
-//! One `canvas` covering the whole list, absolutely positioned over ordinary
-//! interactive rows — never one canvas per row. Every `PrimitiveBatch::Paths`
-//! gpui emits ends the current encoder, opens a render pass, clears a
-//! drawable-sized intermediate texture, rasterises, resolves MSAA and
-//! composites back; forty visible rows would mean forty of those per frame.
-//!
-//! Being on top costs nothing in event terms: `Canvas::id` returns `None` and
-//! it implements no interactivity, so it registers no hitbox in prepaint. The
-//! rows underneath keep gpui's native hover, click, context menu and
-//! scroll-into-view. This was measured, not assumed — see the G7·0 spike commit.
+//! Compact author rows over the existing virtualized commit graph.
+//! Subjects keep their scopes; author, age, and refs share the second line.
+//! One clipped canvas draws the graph over the interactive rows.
 
 use std::cell::Cell as StdCell;
 use std::rc::Rc;
@@ -62,23 +24,12 @@ use tty7_core::core::git::ops::{GitOp, ResetMode};
 use crate::ui::app::{CONTENT_INSET, Tty7App};
 use crate::ui::i18n::{L10nKey, t};
 use crate::ui::presets::{ActiveLanes, LANE_SLOTS, Lanes};
-use crate::ui::right_panel::{META, META_MONO, TEXT, info_chip};
+use crate::ui::right_panel::{META, META_MONO, TEXT};
 use crate::ui::scm::path::{elide_middle, relative_time};
 use crate::ui::scm::state::RepoKey;
 
-/// One commit per row. 24px rather than the file list's 26: a graph row has no
-/// icon column, and the vertical pitch wants to stay close to the lane pitch or
-/// the diagonal of a merge reads as a much shallower angle than it is.
-///
-/// It also has to contain the line the subject is set on — gpui leads text at
-/// phi, so [`TEXT`] occupies `round(14 × 1.618) = 23px`, and 24 is the first
-/// even pitch above it. Both numbers were 4 smaller while the section was on
-/// the panel's old 12px step.
-///
-/// A taller row against an unchanged [`GRAPH_LANE_W`] steepens a merge's
-/// diagonal, which is the safe direction: the failure this pitch is guarding
-/// against is an angle read as *shallower* than the jump it draws.
-const GRAPH_ROW_H: f32 = 24.;
+/// Two text lines and a circular 28px author avatar.
+const GRAPH_ROW_H: f32 = 44.;
 /// Rows materialized above and below the visible band, so a fast scroll never
 /// outruns the window into blank space, and the "load more" band — laid out
 /// one row past the window's end — stays below the fold until it is real.
@@ -110,14 +61,8 @@ const GRAPH_LANE_W: f32 = 12.;
 const GRAPH_PAD_L: f32 = 6.;
 const GRAPH_PAD_R: f32 = 6.;
 
-/// An ordinary node is a 3px disc and a lane line is 1.5px wide: the dot is a
-/// quarter of the row's height, which is enough to read as a bead on a string
-/// without closing the gap to the row above. Merges and roots are drawn from
-/// the same radius rather than from a second vocabulary.
-///
-/// It stays 3 while the row grows, because what a bead is measured against is
-/// the string it is on — `GRAPH_LANE_W`, which has not moved. A quarter is the
-/// floor the test below holds it to.
+/// The existing 3px radius and 1.5px lane stroke stay proportional to the lane
+/// spacing. Merge and root shapes use the same radius in the taller rows.
 const GRAPH_DOT_R: f32 = 3.;
 const GRAPH_LINE_W: f32 = 1.5;
 
@@ -133,22 +78,9 @@ const GRAPH_MAX_LANES: usize = LANE_SLOTS;
 /// out the same colour and the whole point of colouring by lane is lost.
 const _: () = assert!(GRAPH_MAX_LANES <= LANE_SLOTS);
 
-/// Resting height of the history section and the range the divider drags it
-/// through. The ceiling is a share of the window rather than a constant: the
-/// file list has to keep a usable part of a short one.
-///
-/// Both of the fixed ones are counted in rows against the header: what they
-/// mean is a number of commits, not a number of pixels. 260 is `24 + 9.8 × 24`
-/// — nine commits and most of a tenth, and the fraction is deliberate, because
-/// a row cut by the bottom edge is the only honest way a fixed-height list says
-/// there is more below it. 100 is `24 + 3.2 × 24`, three and a bit, which is
-/// the least that still looks like history rather than like a mistake.
-///
-/// They grew with [`GRAPH_ROW_H`] — 220 and 88 around a 20px row — precisely
-/// because they are counted in commits: holding the pixels would have quietly
-/// bought the file list 40px by showing two fewer commits.
+/// Keep the default footprint; the divider can shrink it to two full rows.
 const GRAPH_H_DEFAULT: f32 = 260.;
-const GRAPH_H_MIN: f32 = 100.;
+const GRAPH_H_MIN: f32 = 128.;
 const GRAPH_H_MAX_RATIO: f32 = 0.65;
 
 /// The divider's grab area, matching `RESIZE_HANDLE_WIDTH` on the other axis.
@@ -206,49 +138,6 @@ fn lane_center_x(column: Lane, scale: f32) -> f32 {
 /// Total width of the gutter for a given cap.
 fn gutter_width(max_lanes: usize) -> f32 {
     GRAPH_PAD_L + GRAPH_LANE_W * max_lanes as f32 + GRAPH_PAD_R
-}
-
-/// Split a conventional-commit prefix off the subject.
-///
-/// Returns the type, whether it was marked breaking, and what is left. This
-/// repository's subjects spend an average of 12.7 characters on the prefix,
-/// which is half of what a 260px panel has to give — and the scope in the
-/// middle of it is the part nobody scans for, so it goes. The type stays, in
-/// front of the subject and a shade quieter than it.
-///
-/// Strict on purpose. Only a lowercase ASCII type, an optional parenthesised
-/// scope, an optional `!`, then `": "`. `Note: see below` and `TODO: fix` are
-/// not conventional commits and keep their whole line.
-fn split_conventional(subject: &str) -> (Option<(&str, bool)>, &str) {
-    let bytes = subject.as_bytes();
-    let type_len = bytes.iter().take_while(|b| b.is_ascii_lowercase()).count();
-    // Two is `ci`; past twelve it is prose that happens to start lowercase.
-    if !(2..=12).contains(&type_len) {
-        return (None, subject);
-    }
-    let mut i = type_len;
-    if bytes.get(i) == Some(&b'(') {
-        match bytes[i..].iter().position(|b| *b == b')') {
-            // An empty scope, `feat(): x`, is malformed; treat the line as prose.
-            Some(0 | 1) => return (None, subject),
-            Some(close) => i += close + 1,
-            None => return (None, subject),
-        }
-    }
-    let breaking = bytes.get(i) == Some(&b'!');
-    if breaking {
-        i += 1;
-    }
-    // The space matters: `fix:it` is not a conventional commit, and without it
-    // a URL-bearing subject would be cut at `https:`.
-    if bytes.get(i) != Some(&b':') || bytes.get(i + 1) != Some(&b' ') {
-        return (None, subject);
-    }
-    let rest = subject[i + 2..].trim_start();
-    if rest.is_empty() {
-        return (None, subject);
-    }
-    (Some((&subject[..type_len], breaking)), rest)
 }
 
 /// Which colour a visible column draws with.
@@ -760,7 +649,18 @@ impl Tty7App {
         cx: &mut Context<Self>,
     ) -> AnyElement {
         let panel_w = cx.global::<crate::core::config::Config>().right_panel_width;
-        let cap = max_lanes(panel_w);
+        if cx
+            .global::<crate::core::config::Config>()
+            .scm_remote_avatars
+            && self.scm.graph.avatars.is_none()
+        {
+            let directory = crate::core::config::config_dir_path()
+                .map(|root| root.join("cache").join("avatars"));
+            let cache = super::avatars::AvatarCache::new(directory, cx);
+            self.scm.graph.avatar_watch = Some(cx.observe(&cache, |_, _, cx| cx.notify()));
+            self.scm.graph.avatars = Some(cache);
+        }
+        let cap = max_lanes(panel_w).min(usize::from(page.max_lanes.max(1)));
         let gutter = gutter_width(cap);
         let now = crate::ui::home::now_secs() as i64;
 
@@ -850,13 +750,7 @@ impl Tty7App {
         )
     }
 
-    /// One commit.
-    ///
-    /// Column order is fixed and every optional part has a hard cap, so the
-    /// worst case cannot squeeze the message to nothing: type prefix, message,
-    /// ref chip, age. The age goes when a ref chip is present — a chip says
-    /// where a branch is, which is worth more here than three characters of
-    /// "3d", and the full timestamp is in the tooltip either way.
+    /// The public row keeps its graph node, author, refs, tooltip and Git actions.
     fn graph_row(
         &self,
         repo: &RepoKey,
@@ -868,73 +762,125 @@ impl Tty7App {
     ) -> AnyElement {
         let commit = &page.commits[i];
         let mono = cx.theme().mono_font_family.clone();
-        // The sidebar's surface, because that is the fill this row sits on.
         let sf = cx.global::<crate::ui::presets::Surfaces>().sidebar;
         let selected = self.scm.graph.selected.as_deref() == Some(commit.oid.as_str());
-        let (prefix, subject) = split_conventional(&commit.summary);
-        let deco = commit.refs.first();
-        let extra = commit.refs.len().saturating_sub(1);
+        let mut refs: Vec<_> = commit.refs.iter().take(1).collect();
+        if let Some(tag) = commit.refs.iter().find(|r| {
+            r.kind == RefKind::Tag && refs.first().is_none_or(|first| first.full != r.full)
+        }) {
+            refs.push(tag);
+        }
+        let extra = commit.refs.len().saturating_sub(refs.len());
+        let panel_w = cx.global::<crate::core::config::Config>().right_panel_width;
+        let column_w = panel_w - gutter - 28. - 8. - CONTENT_INSET;
+        // Keep author and age readable even beside two long ref names.
+        let ref_width = (column_w - 64. - 4.).max(0.);
         let oid = commit.oid.clone();
+        let image = if cx
+            .global::<crate::core::config::Config>()
+            .scm_remote_avatars
+        {
+            self.scm.graph.avatars.as_ref().and_then(|cache| {
+                cache.update(cx, |cache, cx| cache.image(&commit.author.email, cx))
+            })
+        } else {
+            None
+        };
+        let avatar = gpui_component::avatar::Avatar::new()
+            .name(commit.author.name.clone())
+            .with_size(px(28.))
+            .when_some(image, |avatar, image| {
+                avatar.src(gpui::ImageSource::Render(image))
+            });
 
         h_flex()
             .id(SharedString::from(format!("scm-graph-row-{i}")))
+            .debug_selector(move || format!("scm-graph-row-{i}"))
             .items_center()
-            .gap(px(4.))
+            .gap(px(8.))
             .h(px(GRAPH_ROW_H))
             .pl(px(gutter))
             .pr(px(CONTENT_INSET))
+            .rounded(px(6.))
             .cursor_pointer()
-            // The panel's own neutral selection and hover fills, the same two
-            // the file list above uses. A tinted band would make this one list
-            // in the sidebar announce itself differently from every other.
             .when(selected, |d| d.bg(gpui::rgb(sf.selected)))
             .when(!selected, |d| d.hover(|s| s.bg(gpui::rgb(sf.hover))))
-            // Prefix and subject are one run of text, so they sit closer than
-            // the row's own gap: two pixels between `feat` and the words it
-            // introduces is about a word space at this size, and reads as one
-            // rather than as the space between two elements. The outer gap
-            // still separates them from the ref chip and the age, which *are*
-            // other elements.
+            .child(avatar)
             .child(
-                h_flex()
+                v_flex()
                     .flex_1()
-                    .min_w(px(0.))
-                    .gap(px(2.))
-                    .children(
-                        prefix.map(|(kind, breaking)| self.graph_type_prefix(kind, breaking, cx)),
-                    )
+                    .min_w_0()
                     .child(
-                        // The only full-strength ink on the row, and the widest
-                        // thing on it. Everything else — the type, the age, the
-                        // refs, the lanes — is an annotation on this.
                         div()
-                            .flex_1()
-                            .min_w(px(0.))
+                            .debug_selector(move || format!("scm-graph-subject-{i}"))
                             .truncate()
                             .text_size(rems(TEXT))
+                            .line_height(rems(18. / 16.))
+                            .font_weight(gpui::FontWeight::MEDIUM)
                             .text_color(cx.theme().foreground)
-                            .child(SharedString::from(subject.to_string())),
+                            .child(SharedString::from(commit.summary.clone())),
+                    )
+                    .child(
+                        h_flex()
+                            .items_center()
+                            .gap(px(4.))
+                            .line_height(rems(16. / 16.))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w(px(64.))
+                                    .text_size(rems(META))
+                                    .text_color(cx.theme().muted_foreground)
+                                    .child(
+                                        h_flex()
+                                            .gap(px(4.))
+                                            .child(
+                                                div()
+                                                    .flex_shrink(1.)
+                                                    .min_w_0()
+                                                    .truncate()
+                                                    .debug_selector(move || {
+                                                        format!("scm-graph-author-{i}")
+                                                    })
+                                                    .child(commit.author.name.clone()),
+                                            )
+                                            .child(
+                                                div()
+                                                    .flex_none()
+                                                    .debug_selector(move || {
+                                                        format!("scm-graph-age-{i}")
+                                                    })
+                                                    .child(format!(
+                                                        "\u{b7} {}",
+                                                        relative_time(now, commit.author.at.unix)
+                                                    )),
+                                            ),
+                                    ),
+                            )
+                            .child(
+                                h_flex()
+                                    .flex_none()
+                                    .max_w(px(ref_width))
+                                    .gap(px(4.))
+                                    .children(
+                                        refs.iter().map(|r| self.graph_ref_chip(r, &mono, cx)),
+                                    )
+                                    .when(extra > 0, |group| {
+                                        group.child(
+                                            div()
+                                                .flex_none()
+                                                .text_size(rems(META_MONO))
+                                                .text_color(cx.theme().muted_foreground)
+                                                .font_family(mono.clone())
+                                                .debug_selector(move || {
+                                                    format!("scm-graph-ref-overflow-{i}")
+                                                })
+                                                .child(format!("+{extra}")),
+                                        )
+                                    }),
+                            ),
                     ),
             )
-            .children(deco.map(|r| self.graph_ref_chip(r, extra, &mono, cx)))
-            // The age is a mono token, so its column is measured in characters:
-            // the widest it ever prints is four (`12mo`), and four of the mono
-            // face's advances at `META_MONO` is `4 × 11 × 0.6` = 26.4, rounded
-            // up to 27.
-            .when(deco.is_none(), |d| {
-                d.child(
-                    div()
-                        .flex_none()
-                        .min_w(px(27.))
-                        .text_size(rems(META_MONO))
-                        .font_family(mono.clone())
-                        .text_color(cx.theme().muted_foreground)
-                        .child(SharedString::from(relative_time(
-                            now,
-                            commit.author.at.unix,
-                        ))),
-                )
-            })
             .tooltip({
                 let text = commit_tooltip(commit, now);
                 move |window, cx| {
@@ -943,21 +889,14 @@ impl Tty7App {
             })
             .on_click(cx.listener({
                 let repo = repo.clone();
-                // The row already holds everything the detail view renders, so
-                // it hands its own commit over and no `git show` is run. The
-                // listener carries the page `Arc` and an index, not a clone of
-                // the commit: with up to 5000 rows a frame, one deep `Commit`
-                // clone per row (an 8KB body, refs) was most of the frame.
                 let page = page.clone();
-                move |this, _, _, cx| {
-                    let seed = page.commits[i].clone();
-                    this.graph_open_commit(repo.clone(), seed.oid.clone(), Some(seed), cx)
+                move |this, _, window, cx| {
+                    this.graph_open_commit(repo.clone(), page.commits[i].clone(), window, cx)
                 }
             }))
             .context_menu({
                 let app = cx.entity().downgrade();
                 let repo = repo.clone();
-                let oid = oid.clone();
                 move |menu, _window, cx| {
                     let danger = cx.theme().danger;
                     Tty7App::graph_row_context_menu(menu, &repo, &oid, danger, &app)
@@ -968,20 +907,54 @@ impl Tty7App {
 }
 
 impl Tty7App {
-    /// Select a row and hand its commit to the detail view.
-    ///
-    /// `seed` is the commit the row was drawn from. Passing it means the
-    /// detail view opens with its message, author and refs already in hand and
-    /// only reads the file list — a row click costs one git command, not two.
+    /// Select a commit in the existing diff viewer while keeping History open.
     fn graph_open_commit(
         &mut self,
         repo: RepoKey,
-        oid: String,
-        seed: Option<Commit>,
+        commit: Commit,
+        window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.scm.graph.selected = Some(oid.clone());
-        self.open_commit_detail(repo, oid, seed, cx);
+        use crate::terminal::git_diff::{CommitLabel, DiffSource};
+        let commit = Arc::new(commit);
+        self.scm.graph.selected = Some(commit.oid.clone());
+        self.scm.detail = None;
+        let source = DiffSource::Commit {
+            rev: commit.oid.clone(),
+            label: Some(CommitLabel {
+                subject: commit.summary.clone(),
+                author: commit.author.name.clone(),
+                at: commit.author.at.unix,
+            }),
+        };
+        // Re-selecting the same row keeps its diff open rather than toggling it shut.
+        if let Some(overlay) = self
+            .tabs
+            .get_mut(self.active)
+            .and_then(|tab| tab.diff_overlay.as_mut())
+        {
+            if overlay.host_id == repo.host && overlay.cwd == repo.root && overlay.source == source
+            {
+                overlay.commit = Some(commit.clone());
+                if overlay.focus.take().is_some() {
+                    overlay.file_views.clear();
+                    *overlay.anchor.borrow_mut() = None;
+                }
+                window.focus(&overlay.focus_handle, cx);
+                self.tabs[self.active].overlay_top = crate::ui::app::OverlayTop::Diff;
+                self.reveal_commit_document_tab();
+                cx.notify();
+                return;
+            }
+        }
+        self.open_diff_overlay(repo.host, repo.root, source, None, window, cx);
+        if let Some(overlay) = self
+            .tabs
+            .get_mut(self.active)
+            .and_then(|tab| tab.diff_overlay.as_mut())
+        {
+            overlay.commit = Some(commit);
+        }
     }
 }
 
@@ -1009,69 +982,24 @@ fn matches_query(commit: &Commit, query: &str) -> bool {
 }
 
 fn commit_tooltip(commit: &Commit, now: i64) -> SharedString {
+    let refs = commit
+        .refs
+        .iter()
+        .map(|r| r.full.as_str())
+        .collect::<Vec<_>>()
+        .join("\n");
     SharedString::from(format!(
-        "{}\n{} · {} · {}",
+        "{}\n{} \u{b7} {} \u{b7} {}{}{}",
         commit.summary,
         commit.short(),
         commit.author.name,
-        relative_time(now, commit.author.at.unix)
+        relative_time(now, commit.author.at.unix),
+        if refs.is_empty() { "" } else { "\n" },
+        refs
     ))
 }
 
-/// What ink a conventional-commit prefix is set in.
-///
-/// One rule rather than a palette, and the type is not what decides it. The
-/// lane gutter immediately to the left is already a column of colour, so a
-/// green `feat` beside a green lane dot adds a second colour column that says
-/// nothing the dot has not: the reader's eye is pulled twice and told the same
-/// thing once. Muting the whole vocabulary — `feat`, `fix`, `perf`, `docs` and
-/// whatever a repository invents — leaves the row with two levels of text
-/// emphasis, which is all a sidebar has ever needed.
-///
-/// The one exception is a breaking change. A `!` is the single thing in a
-/// subject line worth shouting about, whatever the type in front of it says.
-fn type_tone(breaking: bool, cx: &gpui::App) -> Hsla {
-    let theme = cx.theme();
-    match breaking {
-        true => theme.danger,
-        false => theme.muted_foreground,
-    }
-}
-
 impl Tty7App {
-    /// The prefix, set inline as the first word of the subject.
-    ///
-    /// Deliberately not a chip. A filled pill on every row is a colour column
-    /// running down the panel right beside the one the lanes already draw, and
-    /// because the types are different lengths — `fix`, `chore`, `refactor` —
-    /// the pills gave every subject a different left edge, so nothing in the
-    /// list lined up vertically. With no fill and no padding of its own, the
-    /// two halves read as one sentence and the column starts where the prefix
-    /// does.
-    ///
-    /// Level with the subject at 12px and told apart by tone alone. The two
-    /// halves are one sentence, and a size change mid-sentence is a seam: the
-    /// muting already says which half a reader is meant to skip, and saying it
-    /// twice buys nothing but a ragged line.
-    ///
-    /// Not mono either, for the same reason it is not a chip: the subject
-    /// beside it is not, and a family change mid-run is a seam where the point
-    /// is continuity.
-    fn graph_type_prefix(&self, kind: &str, breaking: bool, cx: &mut Context<Self>) -> AnyElement {
-        div()
-            // Never the part that truncates. It is a handful of characters, and
-            // clipping them to buy the subject the same handful is not a trade
-            // — a half-eaten `refac…` costs a reader more than it gives back.
-            .flex_none()
-            .text_size(rems(TEXT))
-            .text_color(type_tone(breaking, cx))
-            .child(SharedString::from(match breaking {
-                true => format!("{kind}!"),
-                false => kind.to_string(),
-            }))
-            .into_any_element()
-    }
-
     /// The highest-priority ref on a commit, plus a count of the rest.
     ///
     /// `load_page` already sorted them HEAD → local → tag → remote, so the
@@ -1079,7 +1007,6 @@ impl Tty7App {
     fn graph_ref_chip(
         &self,
         deco: &RefDeco,
-        extra: usize,
         mono: &SharedString,
         cx: &mut Context<Self>,
     ) -> AnyElement {
@@ -1112,21 +1039,26 @@ impl Tty7App {
                 gpui::FontWeight::NORMAL,
             ),
         };
-        let label = match extra {
-            0 => elide_middle(&deco.short, GRAPH_REF_CHARS).into_owned(),
-            n => format!("{} +{n}", elide_middle(&deco.short, GRAPH_REF_CHARS)),
-        };
-        // A hard cap, because the chip is the one part of the row whose width
-        // comes from a branch name someone else chose. `GRAPH_REF_CHARS` elides
-        // the middle first; this is the backstop for the widths that survive
-        // it — fourteen characters of `info_chip`'s 10.5px mono plus its
-        // padding, which is about 72.
-        div()
-            .flex_none()
+        h_flex()
+            .min_w_0()
+            .flex_shrink(1.)
             .max_w(px(72.))
-            .truncate()
+            .px(px(5.))
+            .py(px(1.5))
+            .gap(px(2.))
+            .rounded(px(4.))
+            .bg(bg)
+            .text_size(rems(META_MONO))
+            .font_family(mono.clone())
+            .text_color(fg)
             .font_weight(weight)
-            .child(info_chip(&label, bg, fg, mono))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .child(elide_middle(&deco.short, GRAPH_REF_CHARS).into_owned()),
+            )
             .into_any_element()
     }
 
@@ -1296,6 +1228,9 @@ impl Tty7App {
             .map(|(_, names)| names.clone())
             .unwrap_or_default();
         let scope = self.scm.graph.scope.clone();
+        let remote_avatars = cx
+            .global::<crate::core::config::Config>()
+            .scm_remote_avatars;
 
         move |menu, _window, _cx| {
             let mut menu = menu.min_w(px(180.));
@@ -1329,7 +1264,27 @@ impl Tty7App {
                         .on_click(pick(&app, next)),
                 );
             }
-            menu
+            menu.separator().item(
+                PopupMenuItem::new(t(L10nKey::ScmGraphRemoteAvatars))
+                    .checked(remote_avatars)
+                    .on_click({
+                        let app = app.clone();
+                        move |_, _, cx| {
+                            let _ = app.update(cx, |this, cx| {
+                                {
+                                    let config = cx.global_mut::<crate::core::config::Config>();
+                                    config.scm_remote_avatars = !remote_avatars;
+                                    config.save();
+                                }
+                                if remote_avatars {
+                                    this.scm.graph.avatar_watch = None;
+                                    this.scm.graph.avatars = None;
+                                }
+                                cx.notify();
+                            });
+                        }
+                    }),
+            )
         }
     }
 
@@ -1386,6 +1341,20 @@ impl Tty7App {
 
         let mut menu = menu
             .min_w(px(200.))
+            .item(
+                PopupMenuItem::new(t(L10nKey::ScmViewCommitDetails)).on_click({
+                    let app = app.clone();
+                    let repo = repo.clone();
+                    let oid = oid.to_string();
+                    move |_, _, cx| {
+                        let _ = app.update(cx, |this, cx| {
+                            this.scm.graph.selected = Some(oid.clone());
+                            this.open_commit_detail(repo.clone(), oid.clone(), None, cx);
+                        });
+                    }
+                }),
+            )
+            .separator()
             .item(
                 PopupMenuItem::new(t(L10nKey::ScmCheckoutCommit))
                     .on_click(op(app, repo, |rev| GitOp::CheckoutDetached { rev })),
@@ -1755,7 +1724,7 @@ mod tests {
         let rows = |h: f32| (h - GRAPH_HEADER_H) / GRAPH_ROW_H;
         let resting = rows(GRAPH_H_DEFAULT);
         assert!(
-            (9.5..10.0).contains(&resting),
+            (5.0..5.8).contains(&resting),
             "the resting section shows {resting} commits"
         );
         // In pixels, because "a visible sliver" is a pixel count and not a
@@ -1769,7 +1738,7 @@ mod tests {
         );
         let floor = rows(GRAPH_H_MIN);
         assert!(
-            floor >= 3.,
+            floor >= 2.,
             "dragged all the way shut the section shows {floor} commits, which \
              is not enough of a graph to be one"
         );
@@ -1795,88 +1764,6 @@ mod tests {
         // And a hollow node keeps a hole: a stroke that eats the radius is a
         // filled dot wearing a ring's name.
         assert!(GRAPH_DOT_R - GRAPH_LINE_W >= 1.);
-        // The node also has to be worth the row it sits in: a 6px dot in a 24px
-        // row is a quarter of it, and a bead much smaller than that stops
-        // reading as one on a string. This is the floor, and the row is
-        // currently sitting on it — a taller row wants a larger dot, not the
-        // same one with more air around it.
-        assert!(GRAPH_DOT_R * 2. >= GRAPH_ROW_H * 0.25);
-    }
-
-    #[test]
-    fn conventional_prefixes_come_off_and_prose_does_not() {
-        assert_eq!(
-            split_conventional("feat(terminal): localize the menu"),
-            (Some(("feat", false)), "localize the menu")
-        );
-        assert_eq!(
-            split_conventional("fix: a thing"),
-            (Some(("fix", false)), "a thing")
-        );
-        assert_eq!(
-            split_conventional("feat!: drop the old dialect"),
-            (Some(("feat", true)), "drop the old dialect")
-        );
-        assert_eq!(
-            split_conventional("refactor(ui/scm)!: one entry point"),
-            (Some(("refactor", true)), "one entry point")
-        );
-        for prose in [
-            "no prefix here",
-            // Capitalised is not a conventional type.
-            "Merge pull request #1 from x",
-            // No space after the colon.
-            "fix:it",
-            // A bare URL must not be cut at its scheme.
-            "see https://example.invalid for why",
-            // An empty scope is malformed, not a prefix.
-            "feat(): nothing",
-            // Nothing left after the colon is not a subject.
-            "chore: ",
-            "",
-        ] {
-            assert_eq!(
-                split_conventional(prose),
-                (None, prose),
-                "{prose:?} should have been left alone"
-            );
-        }
-    }
-
-    #[test]
-    fn a_chinese_subject_survives_the_split_intact() {
-        // Byte indexing over a multibyte subject is exactly how this goes
-        // wrong, so the assertion is on the value, not on not panicking.
-        let subject = "修复终端右键菜单的本地化";
-        assert_eq!(split_conventional(subject), (None, subject));
-        let prefixed = "fix(terminal): 修复终端右键菜单的本地化";
-        assert_eq!(
-            split_conventional(prefixed),
-            (Some(("fix", false)), "修复终端右键菜单的本地化")
-        );
-    }
-
-    /// The prefix carries one bit of colour, not six.
-    ///
-    /// A green `feat` beside a green lane dot was exactly the noise this row
-    /// was cleaned up to lose, and `type_tone` no longer being handed the type
-    /// is most of the guard against it coming back. What is left to pin is the
-    /// one exception: a breaking change has to stay visibly apart from
-    /// everything else, or the exception is not worth making.
-    #[gpui::test]
-    fn only_a_breaking_prefix_gets_a_colour(cx: &mut TestAppContext) {
-        crate::core::config::pin_test_config_dir();
-        let (_app, mut vcx) = harness(cx);
-
-        vcx.update(|_, cx| {
-            assert_eq!(type_tone(false, cx), cx.theme().muted_foreground);
-            assert_eq!(type_tone(true, cx), cx.theme().danger);
-            assert_ne!(
-                type_tone(true, cx),
-                type_tone(false, cx),
-                "a `!` that looks like every other prefix is not a warning"
-            );
-        });
     }
 
     /// `4 → node 0 → 4` should be one line bending, not two lines drawn twice.
@@ -1938,30 +1825,308 @@ mod tests {
     }
 
     #[gpui::test]
-    fn opening_a_row_hands_that_commit_to_the_detail_view(cx: &mut TestAppContext) {
+    fn selecting_history_opens_the_existing_diff_without_replacing_history(
+        cx: &mut TestAppContext,
+    ) {
+        let (app, mut vcx) = harness(cx);
+        let seed = commit_named("fix(editor): preserve the full scope", "Ada", "deadbeef");
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = 0;
+            app.scm.graph.expanded = true;
+            app.graph_open_commit(repo(), seed.clone(), window, cx);
+        });
+        app.read_with(&vcx, |app, cx| {
+            let overlay = app.tabs[0]
+                .diff_overlay
+                .as_ref()
+                .expect("selecting a commit opens the existing Git Diff View");
+            let crate::terminal::git_diff::DiffSource::Commit { rev, label } = &overlay.source
+            else {
+                panic!("History must open a commit diff, not the working tree");
+            };
+            assert_eq!(rev, &seed.oid);
+            assert_eq!(overlay.cwd, repo().root);
+            let label = label
+                .as_ref()
+                .expect("the shared viewer receives commit metadata");
+            assert_eq!(label.subject, seed.summary);
+            assert_eq!(label.author, "Ada");
+            assert!(
+                app.scm.detail.is_none(),
+                "History stays available in the sidebar"
+            );
+            assert_eq!(app.scm.graph.selected.as_deref(), Some(seed.oid.as_str()));
+            assert!(app.scm.graph.expanded);
+            assert_eq!(
+                cx.global::<crate::core::config::Config>().diff_view,
+                crate::core::config::DiffViewMode::Split,
+                "commit selection must preserve the existing diff preference"
+            );
+        });
+        app.update_in(&mut vcx, |app, window, cx| {
+            window.focus(&app.home_focus, cx);
+            app.graph_open_commit(repo(), seed.clone(), window, cx);
+            assert!(
+                app.tabs[0]
+                    .diff_overlay
+                    .as_ref()
+                    .unwrap()
+                    .focus_handle
+                    .is_focused(window),
+                "reselecting the same commit restores the existing viewer's keyboard focus"
+            );
+        });
+    }
+
+    struct HistoryRows {
+        app: gpui::Entity<Tty7App>,
+        page: Arc<CommitPage>,
+    }
+
+    struct SelectedCommit(gpui::Entity<Tty7App>);
+
+    impl gpui::Render for SelectedCommit {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().children(self.0.update(cx, |app, cx| {
+                app.render_diff_overlay(
+                    crate::ui::document_column::DocumentChrome::Dock,
+                    window,
+                    cx,
+                )
+            }))
+        }
+    }
+
+    #[gpui::test]
+    fn selected_commit_shows_message_details_above_the_existing_diff(cx: &mut TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        let mut seed = commit_named(
+            "fix(editor): retain the complete message",
+            "Ada Lovelace",
+            "0123456789abcdef",
+        );
+        seed.body = (1..=20)
+            .map(|n| format!("Commit rationale line {n}."))
+            .collect::<Vec<_>>()
+            .join("\n");
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = 0;
+            app.graph_open_commit(repo(), seed.clone(), window, cx);
+        });
+        vcx.update(|window, cx| {
+            window.replace_root(cx, |_, _| SelectedCommit(app.clone()));
+        });
+        vcx.simulate_resize(gpui::size(px(760.), px(600.)));
+        vcx.run_until_parked();
+        let header = vcx
+            .debug_bounds("diff-commit-details")
+            .expect("selecting a commit shows the prototype's message-detail header");
+        let title = vcx.debug_bounds("diff-commit-title").unwrap();
+        let author = vcx.debug_bounds("diff-commit-author").unwrap();
+        let body = vcx.debug_bounds("diff-commit-body").unwrap();
+        assert!(title.top() < author.top() && author.bottom() <= body.top());
+        assert!(body.size.height <= px(88.));
+        assert!(
+            header.bottom() < px(500.),
+            "details leave room for the existing diff"
+        );
+        let copy = vcx.debug_bounds("diff-commit-copy").unwrap();
+        vcx.simulate_click(copy.center(), gpui::Modifiers::none());
+        assert_eq!(
+            vcx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+                .as_deref(),
+            Some(seed.oid.as_str())
+        );
+        let expand = vcx.debug_bounds("diff-commit-body-toggle").unwrap();
+        vcx.simulate_click(
+            gpui::point(expand.left() + px(12.), expand.center().y),
+            gpui::Modifiers::none(),
+        );
+        let expanded = vcx.debug_bounds("diff-commit-body").unwrap();
+        assert!(expanded.size.height > body.size.height && expanded.size.height <= px(160.));
+        app.read_with(&vcx, |app, _| {
+            let overlay = app.tabs[0].diff_overlay.as_ref().unwrap();
+            assert_eq!(overlay.commit.as_deref(), Some(&seed));
+            assert!(overlay.commit_message_expanded);
+        });
+        app.update(&mut vcx, |app, cx| {
+            use crate::terminal::git_diff::{DiffSnapshot, FileDiff, FileStatus};
+            let overlay = app.tabs[0].diff_overlay.as_mut().unwrap();
+            overlay.load = crate::ui::diff_overlay::DiffLoad::Ready(Arc::new(DiffSnapshot {
+                root: repo().root,
+                source: overlay.source.clone(),
+                branch: "main".into(),
+                files: ["first.rs", "second.rs"]
+                    .into_iter()
+                    .map(|path| FileDiff {
+                        path: path.into(),
+                        old_path: None,
+                        status: FileStatus::Modified,
+                        added: 1,
+                        removed: 0,
+                        binary: false,
+                        truncated: None,
+                        hunks: vec![],
+                    })
+                    .collect(),
+                untracked: vec![],
+                untracked_total: 0,
+                read_failed: false,
+            }));
+            overlay.focus = Some("first.rs".into());
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        let back = vcx
+            .debug_bounds("commit-document-unfocus")
+            .expect("focused commit files retain their back-to-all-files action");
+        vcx.simulate_click(back.center(), gpui::Modifiers::none());
+        assert!(app.read_with(&vcx, |app, _| {
+            app.tabs[0].diff_overlay.as_ref().unwrap().focus.is_none()
+        }));
+    }
+
+    impl gpui::Render for HistoryRows {
+        fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .w(px(260.))
+                .h(px(220.))
+                .child(self.app.update(cx, |app, cx| {
+                    app.graph_body(&repo(), &self.page, None, 220., cx)
+                }))
+        }
+    }
+
+    #[gpui::test]
+    fn narrow_rendered_rows_keep_metadata_and_click_the_correct_commit(cx: &mut TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        let mut seed = commit_named(
+            "fix(editor): preserve the full commit scope",
+            "A very long author name",
+            "deadbeef",
+        );
+        seed.refs = vec![
+            RefDeco {
+                kind: RefKind::Head,
+                short: "a-very-long-branch-name".into(),
+                full: "refs/heads/a-very-long-branch-name".into(),
+                is_head: true,
+                upstream: None,
+            },
+            RefDeco {
+                kind: RefKind::Tag,
+                short: "v0.8.2-very-long-tag".into(),
+                full: "refs/tags/v0.8.2-very-long-tag".into(),
+                is_head: false,
+                upstream: None,
+            },
+            RefDeco {
+                kind: RefKind::RemoteBranch,
+                short: "fork/main".into(),
+                full: "refs/remotes/fork/main".into(),
+                is_head: false,
+                upstream: None,
+            },
+        ];
+        let mut page = empty_page();
+        page.commits = (0..5000)
+            .map(|i| {
+                let mut commit = seed.clone();
+                commit.oid = format!("commit-{i}");
+                commit
+            })
+            .collect();
+        page.commits[0].refs.extend((0..1997).map(|i| RefDeco {
+            kind: RefKind::RemoteBranch,
+            full: format!("refs/remotes/fork/branch-{i}"),
+            short: format!("fork/branch-{i}"),
+            is_head: false,
+            upstream: None,
+        }));
+        page.rows = (0..5000)
+            .map(|_| GraphRow {
+                node: 0,
+                color: 0,
+                parents: 1,
+                edges: smallvec![],
+            })
+            .collect();
+        page.max_lanes = 5;
+        app.update(&mut vcx, |app, cx| {
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = 0;
+            app.scm.graph.expanded = true;
+            let config = cx.global_mut::<crate::core::config::Config>();
+            config.right_panel_width = 260.;
+            config.scm_remote_avatars = false;
+        });
+        vcx.update(|window, cx| {
+            window.replace_root(cx, |_, _| HistoryRows {
+                app: app.clone(),
+                page: Arc::new(page),
+            });
+        });
+        vcx.run_until_parked();
+        let row = vcx
+            .debug_bounds("scm-graph-row-0")
+            .expect("the real row is rendered");
+        let subject = vcx.debug_bounds("scm-graph-subject-0").unwrap();
+        let author = vcx.debug_bounds("scm-graph-author-0").unwrap();
+        let age = vcx.debug_bounds("scm-graph-age-0").unwrap();
+        let count = vcx.debug_bounds("scm-graph-ref-overflow-0").unwrap();
+        assert_eq!(row.size.height, px(44.));
+        assert!(subject.size.width > px(100.));
+        assert!(author.size.width >= px(20.) && age.size.width > px(10.));
+        assert!(author.bottom() <= row.bottom() && subject.bottom() <= author.top());
+        assert!(
+            count.size.width > px(10.) && count.right() <= px(260.),
+            "overflow counts remain visible beside clipped ref names"
+        );
+        assert!(
+            vcx.debug_bounds("scm-graph-row-40").is_none(),
+            "offscreen history is not materialized"
+        );
+        vcx.simulate_click(row.center(), gpui::Modifiers::none());
+        app.read_with(&vcx, |app, _| {
+            let overlay = app.tabs[0]
+                .diff_overlay
+                .as_ref()
+                .expect("clicking the rendered row opens the shared viewer");
+            let crate::terminal::git_diff::DiffSource::Commit { rev, label } = &overlay.source
+            else {
+                panic!("commit source")
+            };
+            assert_eq!(rev, "commit-0");
+            assert_eq!(label.as_ref().unwrap().subject, seed.summary);
+            assert!(app.scm.graph.expanded && app.scm.detail.is_none());
+        });
+    }
+
+    #[gpui::test]
+    fn commit_details_still_accept_seeded_and_unseeded_commits(cx: &mut TestAppContext) {
         crate::core::config::pin_test_config_dir();
         let (app, mut vcx) = harness(cx);
 
-        // Unseeded first: a click that cannot hand a commit over still opens
-        // the view, and the read that fills it is dispatched later.
+        // The context-menu detail view can fetch an unseeded commit.
         app.update(&mut vcx, |app, cx| {
-            app.graph_open_commit(repo(), "deadbeef".into(), None, cx)
+            app.open_commit_detail(repo(), "deadbeef".into(), None, cx)
         });
-        let (selected, detail) = app.read_with(&vcx, |app, _| {
-            (app.scm.graph.selected.clone(), app.scm.detail.clone())
-        });
-        assert_eq!(selected.as_deref(), Some("deadbeef"));
-        let detail = detail.expect("the row opened a commit");
+        let detail = app
+            .read_with(&vcx, |app, _| app.scm.detail.clone())
+            .expect("the detail view opened a commit");
         assert_eq!(detail.oid, "deadbeef");
         assert_eq!(detail.repo, repo());
         assert!(detail.commit.is_none(), "nothing was handed over");
 
-        // Seeded: the row draws from a commit it already holds, so the detail
-        // view opens with it and only the file list is left to read. This is
-        // the path every real click takes.
+        // Other callers can still supply a seed to avoid fetching it again.
         let seed = commit_named("a subject", "someone", "deadbeef");
         app.update(&mut vcx, |app, cx| {
-            app.graph_open_commit(repo(), "deadbeef".into(), Some(seed.clone()), cx)
+            app.open_commit_detail(repo(), "deadbeef".into(), Some(seed.clone()), cx)
         });
         let detail = app
             .read_with(&vcx, |app, _| app.scm.detail.clone())
