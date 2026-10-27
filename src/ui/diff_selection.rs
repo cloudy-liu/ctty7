@@ -524,6 +524,62 @@ pub(crate) fn selectable_viewport(
         .into_any_element()
 }
 
+/// A label owns its selection separately from the diff content. Build its
+/// keyed state during rendering, including when the file card is collapsed.
+#[derive(gpui::IntoElement)]
+pub(crate) struct SelectableLabel {
+    pub(crate) id: SharedString,
+    pub(crate) text: SharedString,
+    pub(crate) font: Font,
+    pub(crate) font_size: Pixels,
+}
+
+impl gpui::RenderOnce for SelectableLabel {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let state = window.use_keyed_state(self.id.clone(), cx, |_, cx| DiffSelection::new(cx));
+        state.update(cx, |selection, _| {
+            selection.configure(DiffViewMode::Unified, vec![vec![self.text.clone()]]);
+        });
+        let scroll = ScrollHandle::new();
+        let display: SharedString = self.text.replace('\t', "    ").into();
+        let text = SelectionLine {
+            state: state.clone(),
+            column: 0,
+            row: 0,
+            font: self.font.clone(),
+            font_size: self.font_size,
+        }
+        .attach_label(
+            gpui::div()
+                .w_full()
+                .truncate()
+                .text_size(self.font_size)
+                .font_family(self.font.family),
+            display.clone(),
+        )
+        .child(display);
+        selectable_card(
+            gpui::div().w_full().min_w_0().child(selectable_viewport(
+                gpui::div()
+                    .id(self.id)
+                    .relative()
+                    .w_full()
+                    .overflow_hidden()
+                    .track_scroll(&scroll)
+                    .on_click(|_, _, cx| cx.stop_propagation())
+                    .child(text),
+                &state,
+                0,
+                scroll,
+                None,
+                cx,
+            )),
+            &state,
+            cx,
+        )
+    }
+}
+
 pub(crate) struct SelectionLine {
     pub(crate) state: Entity<DiffSelection>,
     pub(crate) column: usize,
@@ -534,20 +590,33 @@ pub(crate) struct SelectionLine {
 
 impl SelectionLine {
     pub(crate) fn attach(self, text: Div, display: SharedString, prefix: usize) -> Div {
+        self.attach_inner(text, display, prefix, true)
+    }
+
+    fn attach_label(self, text: Div, display: SharedString) -> Div {
+        self.attach_inner(text, display, 0, false)
+    }
+
+    fn attach_inner(self, text: Div, display: SharedString, prefix: usize, content: bool) -> Div {
         let geometry = self.state.clone();
         let state = self.state;
         let column = self.column;
         let row = self.row;
         text.relative().child(
             gpui::div()
-                .debug_selector(move || format!("diff-selection-text-{column}-{row}"))
+                .debug_selector(move || {
+                    let kind = if content { "text" } else { "label" };
+                    format!("diff-selection-{kind}-{column}-{row}")
+                })
                 .absolute()
                 .inset_0()
                 .child(
                     canvas(
                         move |bounds, window, cx| {
                             #[cfg(test)]
-                            geometry_probe::record();
+                            if content {
+                                geometry_probe::record();
+                            }
                             let raw = geometry.read(cx).columns[column].lines[row].clone();
                             let line = window.text_system().shape_line(
                                 display.clone(),
