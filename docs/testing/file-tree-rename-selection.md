@@ -38,7 +38,8 @@ verifies the pasted text rather than search indexing.
 - `mouse_selection_in_a_folder_rename_input_can_be_copied` checks that dragging
   keeps editing active, does not focus the tree or collapse the folder, creates
   a nonempty selection, and copies exactly that selection to the clipboard.
-- `rustfmt --check src/ui/file_tree.rs` and `git diff --check`: passed.
+- `rustfmt --edition 2024 --check src/ui/file_tree.rs` and `git diff --check`:
+  passed.
 - `cargo build --locked --bin tty7-app` succeeded for both native captures.
 
 ## Known limitations
