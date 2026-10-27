@@ -1147,7 +1147,16 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::EditorWrapOn => "折り返し: オン",
         L10nKey::EditorWrapOff => "折り返し: オフ",
         L10nKey::EditorFileTooLarge => "「{path}」はエディタで開くには大きすぎます（{size} MB）",
-        L10nKey::EditorBinaryFile => "「{path}」はバイナリファイルのようです",
+        L10nKey::EditorBinaryFile => {
+            "「{path}」はテキストファイルではないため、内蔵エディターで開けません。"
+        }
+        L10nKey::EditorPreviewUnsupported => "このファイルはプレビューできません",
+        L10nKey::EditorDontShowBinaryNotice => "今後この種類のヒントを表示しない",
+        L10nKey::EditorPreviewDismiss => "わかりました",
+        L10nKey::SettingsBinaryFileNotice => "プレビュー非対応のヒントを表示",
+        L10nKey::SettingsBinaryFileNoticeDesc => {
+            "圧縮ファイルなど、テキスト以外のファイルを開く際に説明を表示します。読み取りエラーは常に表示されます。"
+        }
         L10nKey::PanelInfoTitle => "情報",
         L10nKey::PanelChangesTitle => "ソース管理",
         L10nKey::PanelScmTitle => "ソース管理",
@@ -1342,6 +1351,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::DiffPreviousChange => "前の変更",
         L10nKey::DiffMoreAbove => "上に最大20行を表示",
         L10nKey::DiffMoreBelow => "下に最大20行を表示",
+        L10nKey::DiffExpandGap => "この区間の非表示行をすべて展開",
         L10nKey::PendingConnecting => "{machine} に接続中…",
         L10nKey::PendingUnreachable => "{machine} に到達できませんでした",
         L10nKey::WorktreePromptNeedsName => "ワークツリーには名前が必要です",
