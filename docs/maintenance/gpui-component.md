@@ -17,12 +17,13 @@ The `ctty7` branch contains upstream updates plus reusable UI behavior that ctty
 ctty7 pins an exact commit from the fork's `ctty7` branch. It does not depend on `main` or on a moving branch in release builds. `gpui-component`, `gpui-component-assets`, and `gpui-component-macros` must resolve from the same component revision.
 
 The current application pin is
-`9572b7fab9c0fcf73e34c6118f8a9f10f083f928`.
+`f95e3b89b9a9ec704f9e3e502e4dc0e02cca636e`, which includes the per-input
+scrollbar policy used by the source editor's overflow controls.
 
 ```toml
 gpui-component = {
     git = "https://github.com/cloudy-liu/gpui-component",
-    rev = "9572b7fab9c0fcf73e34c6118f8a9f10f083f928",
+    rev = "f95e3b89b9a9ec704f9e3e502e4dc0e02cca636e",
     version = "0.5.2",
 }
 ```

@@ -43,7 +43,9 @@ source line being read when it remains available; collapsed context returns
 to the nearest retained line.
 
 At a gap, the up/down arrows reveal up to 20 more unchanged lines on that
-edge. Full-file reads use the original worktree, index, commit or range
+edge. A short gap uses one combined control to reveal all remaining lines.
+Each hunk header keeps its background across the full column as you scroll.
+Full-file reads use the original worktree, index, commit or range
 comparison on the file's host. They do not read historical files from the
 current working tree. Only the selected file is fetched, with a 50,000-line
 retention limit and an explicit truncation notice. Binary files have no
@@ -51,6 +53,10 @@ context toggle. A failed read keeps the compact diff available and shows an
 error.
 
 ## Selecting and copying code
+
+File names in Diff headers are selectable too. Drag across the name and copy
+with <kbd>Ctrl</kbd>+<kbd>C</kbd> or <kbd>Cmd</kbd>+<kbd>C</kbd>; the same selection
+works in docked and expanded views without selecting the header's controls.
 
 Code can be selected at any character boundary, including across lines, and
 copied with <kbd>Ctrl</kbd>+<kbd>C</kbd> or <kbd>Cmd</kbd>+<kbd>C</kbd> on macOS.

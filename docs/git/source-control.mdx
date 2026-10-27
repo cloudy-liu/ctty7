@@ -80,8 +80,15 @@ bottom.
 **Git: Toggle Commit History** does the same from the keyboard. It ships with no
 default key — bind one under **Settings → Keyboard Shortcuts**.
 
-Click a commit for its detail view — message, parents, and the files it touched,
-each openable as a diff. From a commit's menu:
+History rows show the commit subject above its author and age, with an author
+photo or local initials beside the graph. **Load Author Avatars** in the History
+menu controls remote photos (`scm_remote_avatars`, enabled by default). Cached
+photos remain available offline; unavailable photos use initials.
+
+Click a commit to open an independent **Commit changes** document tab beside
+your open files. It shows the author, date, copyable full SHA, refs, expandable
+complete message and file changes. Its breadcrumb carries the same split/unified
+and fill/dock controls as other diffs. From a commit's menu:
 
 | | |
 |---|---|

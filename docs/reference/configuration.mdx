@@ -90,6 +90,7 @@ their id from the file name. [More about themes →](/customization/themes)
 | `document_layout` | enum | `"dock"` | Where an open file or diff is drawn: `dock` beside the terminal, or `fill` over the workspace. What a fresh tab starts as — each tab keeps its own from there. |
 | `document_ratio` | number | `0.5` | The docked column’s share of the terminal column (0.2–0.8). Named widths are `0.333`, `0.5`, `0.667`. |
 | `scm_graph_expanded` | bool | `false` | Whether the history section starts open. |
+| `scm_remote_avatars` | bool | `true` | Load author photos in Git History. Turn off **Load Author Avatars** in the History menu to use local initials; cached photos provide an offline fallback while enabled. |
 | `show_tray_icon` | bool | `true` | The tray / menu bar status item. |
 
 ## Terminal
@@ -157,6 +158,7 @@ angle brackets, and a tab:
 | `notify_on_command_finish` | enum | `"unfocused"` | Desktop notifications for command completion and Agent done/input events: `never`, `unfocused`, `always`. Agent events check focus across the whole app. |
 | `agent_notification_sound` | enum | `"unfocused"` | Independent Agent done/input sound policy on Windows, macOS and Linux: `never`, `unfocused`, `always`. Uses the bundled Default sound; `unfocused` means no tty7 window is active. |
 | `notify_threshold_secs` | number | `10` | How long a normal command must run to qualify (1–3600). Agent done/input alerts do not use this threshold. |
+| `show_binary_file_notice` | bool | `true` | Show an explanatory hint for archives and other unsupported binary previews. The hint's checkbox and **Got it** save an opt-out; **Window & Tabs → Notifications → Show unsupported preview hints** restores it. Read and encoding errors remain visible. |
 
 ## Agents
 

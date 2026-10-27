@@ -1,6 +1,6 @@
 # Project status
 
-Checked on 2026-10-27 against GitHub and the release candidate checkout.
+Checked on 2026-10-28 against GitHub and the release candidate checkout.
 This is a dated snapshot; query GitHub again before merging or preparing a release.
 
 ## Open work
@@ -9,7 +9,9 @@ The latest published release at preparation time is v0.8.2, published on
 2026-10-25. The v0.8.3 candidate includes Git History author photos and
 independent complete commit documents (#209), source overflow scrollbars (#210),
 GitHub-style Diff context controls (#206), and optional unsupported-preview
-hints (#211). All four PRs are merged into fork main. See its
+hints (#211), installed Windows taskbar reminders (#212), selectable Diff file
+names (#213), and folder-rename text selection (#214). PRs #206 and #209–#213
+are merged into fork main; #214 is completing native acceptance and CI. See its
 [English notes](../releases/v0.8.3.md) and
 [preserved-change audit](../testing/local-change-audit-v0.8.3.md).
 
@@ -17,8 +19,8 @@ PR #209 passed all ten source CI checks before squash merge at `635eddd9`.
 Release preparation changes only version metadata and documentation. The final
 candidate's source CI and Release workflow must pass, and all downloaded assets
 and checksums must be verified while the Release remains a draft. Ongoing local
-custom-name hover and background taskbar changes remain preserved outside this
-candidate.
+custom-name hover and Mermaid-control simplification remain preserved outside
+this candidate; the taskbar correction is included through #212.
 
 Issue #175 is closed for the delivered native HTML preview implementation.
 PR #178 implements macOS preview; both architecture-specific native CI artifacts
