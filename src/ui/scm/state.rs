@@ -177,6 +177,8 @@ impl ScmPanelState {
 
 #[derive(Default)]
 pub(crate) struct GraphState {
+    pub(crate) avatars: Option<Entity<super::avatars::AvatarCache>>,
+    pub(crate) avatar_watch: Option<gpui::Subscription>,
     /// Mirrors `Config::scm_graph_expanded`, which starts `false`: the history
     /// section unfurling on first open would make the panel look like a mess
     /// nobody asked for.

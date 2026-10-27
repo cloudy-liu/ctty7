@@ -7,6 +7,7 @@
 // The graph and the commit detail view both have callers now, so their allows
 // are gone. What is left is `status_rank`, which is the file tree's to use.
 pub(crate) mod actions;
+pub(crate) mod avatars;
 pub(crate) mod detail;
 pub(crate) mod graph;
 pub(crate) mod panel;

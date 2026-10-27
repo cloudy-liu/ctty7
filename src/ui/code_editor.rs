@@ -76,7 +76,7 @@ pub(crate) struct OpenFile {
 }
 
 impl OpenFile {
-    fn prepare_source(&self, cx: &mut Context<Tty7App>) {
+    fn prepare_source(&self, cx: &mut gpui::App) {
         if !self.source_highlighter_ready.replace(true) {
             self.input.update(cx, |input, cx| {
                 input.set_highlighter(crate::ui::editor_theme::language("markdown"), cx);
@@ -380,6 +380,11 @@ fn settle_save(ok: bool, wrote_seq: u64, current_seq: u64, pending: bool) -> Sav
 }
 
 impl Tty7App {
+    pub(crate) fn reveal_commit_document_tab(&self) {
+        if let Some(code) = self.tab_code() {
+            code.tab_scroll.scroll_to_item(code.files.len());
+        }
+    }
     pub(crate) fn tab_code(&self) -> Option<&TabCode> {
         self.tabs.get(self.active)?.code.as_deref()
     }
@@ -971,7 +976,10 @@ impl Tty7App {
         }
     }
 
-    fn focus_editor(&self, window: &mut Window, cx: &mut Context<Self>) {
+    pub(crate) fn focus_editor(&self, window: &mut Window, cx: &mut gpui::App) {
+        if let Some(code) = self.tab_code() {
+            code.tab_scroll.scroll_to_item(code.active);
+        }
         if let Some(f) = self.tab_code().and_then(|c| c.active_file()) {
             #[cfg(any(windows, target_os = "macos"))]
             if f.preview && can_preview_html(f) {
@@ -1630,12 +1638,31 @@ impl Tty7App {
         .detach();
     }
 
-    pub(crate) fn editor_close_active_if_focused(
+    pub(crate) fn document_close_active_if_focused(
         &mut self,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.editor_has_focus(window, cx) {
+        let header_focused = self.has_commit_document()
+            && self
+                .tabs
+                .get(self.active)
+                .and_then(|tab| tab.diff_overlay.as_ref())
+                .is_some_and(|overlay| overlay.document_header_focus.contains_focused(window, cx));
+        if self.has_commit_document()
+            && self.document_front() == Some(crate::ui::app::OverlayTop::Diff)
+            && self
+                .tabs
+                .get(self.active)
+                .and_then(|tab| tab.diff_overlay.as_ref())
+                .is_some_and(|overlay| {
+                    overlay.focus_handle.contains_focused(window, cx) || header_focused
+                })
+        {
+            self.close_diff_overlay(window, cx);
+            return true;
+        }
+        if !self.editor_has_focus(window, cx) && !header_focused {
             return false;
         }
         let Some(code) = self.tab_code_mut() else {
@@ -1682,7 +1709,7 @@ impl Tty7App {
             code.visible = false;
         }
         if tab_ix == self.active {
-            if empty {
+            if empty || self.document_front() == Some(crate::ui::app::OverlayTop::Diff) {
                 self.focus_active(window, cx);
             } else {
                 self.focus_editor(window, cx);
@@ -1815,6 +1842,11 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        if self.has_commit_document()
+            && self.document_front() == Some(crate::ui::app::OverlayTop::Diff)
+        {
+            return None;
+        }
         if !self.code_panel_visible() {
             return None;
         }
@@ -1967,9 +1999,21 @@ impl Tty7App {
         let surface = cx.global::<crate::ui::presets::Surfaces>().window;
         let content_background = surface.base;
         let inactive_tab = surface.hover;
+        let commit_document = self.has_commit_document();
+        let commit_front =
+            commit_document && self.document_front() == Some(crate::ui::app::OverlayTop::Diff);
+        let header_focus = commit_document.then(|| {
+            self.tabs[self.active]
+                .diff_overlay
+                .as_ref()
+                .unwrap()
+                .document_header_focus
+                .clone()
+        });
         let font = gpui::font(cx.theme().font_family.clone());
         let rem = window.rem_size().as_f32();
         row.flex_none()
+            .when_some(header_focus, |row, handle| row.track_focus(&handle))
             .min_w_0()
             .h(px(crate::ui::app::TITLE_BAR_HEIGHT))
             .items_center()
@@ -2033,11 +2077,11 @@ impl Tty7App {
                                     .border_color(cx.theme().border)
                                     .text_size(rems(FILE_TAB_TEXT))
                                     .cursor_pointer()
-                                    .when(ix == code.active, |tab| {
+                                    .when(ix == code.active && !commit_front, |tab| {
                                         tab.bg(gpui::rgb(content_background))
                                             .text_color(gpui::rgb(surface.text_selected))
                                     })
-                                    .when(ix != code.active, |tab| {
+                                    .when(ix != code.active || commit_front, |tab| {
                                         tab.bg(gpui::rgb(inactive_tab))
                                             .text_color(gpui::rgb(surface.text_resting))
                                             .hover(|tab| tab.bg(gpui::rgb(surface.selected)))
@@ -2058,6 +2102,12 @@ impl Tty7App {
                                         {
                                             code.active = ix;
                                             code.tab_scroll.scroll_to_item(ix);
+                                        }
+                                        if let Some(tab) = app.tabs.get_mut(app.active) {
+                                            tab.overlay_top = crate::ui::app::OverlayTop::Code;
+                                            if let Some(code) = tab.code.as_mut() {
+                                                code.visible = true;
+                                            }
                                         }
                                         app.focus_editor(window, cx);
                                         cx.notify();
@@ -2115,25 +2165,92 @@ impl Tty7App {
                                     )
                             }),
                         )
+                    })
+                    .when(commit_document, |strip| {
+                        strip.child(
+                            h_flex()
+                                .id("editor-commit-tab")
+                                .debug_selector(|| "editor-commit-tab".into())
+                                .occlude()
+                                .flex_none()
+                                .h_full()
+                                .w(px(168.))
+                                .max_w_full()
+                                .px_2()
+                                .gap_1p5()
+                                .border_r_1()
+                                .border_color(cx.theme().border)
+                                .text_size(rems(FILE_TAB_TEXT))
+                                .cursor_pointer()
+                                .bg(gpui::rgb(if commit_front {
+                                    content_background
+                                } else {
+                                    inactive_tab
+                                }))
+                                .when(!commit_front, |tab| {
+                                    tab.hover(|tab| tab.bg(gpui::rgb(surface.selected)))
+                                })
+                                .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
+                                    cx.stop_propagation()
+                                })
+                                .on_click(cx.listener(|app, _, window, cx| {
+                                    if let Some(tab) = app.tabs.get_mut(app.active)
+                                        && let Some(overlay) = &tab.diff_overlay
+                                    {
+                                        let handle = overlay.focus_handle.clone();
+                                        tab.overlay_top = crate::ui::app::OverlayTop::Diff;
+                                        window.focus(&handle, cx);
+                                        cx.notify();
+                                    }
+                                }))
+                                .child(
+                                    gpui::svg()
+                                        .path("icons/git-commit.svg")
+                                        .size(px(crate::ui::file_icons::ROW_ICON)),
+                                )
+                                .child(
+                                    div()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .truncate()
+                                        .child(t(L10nKey::ScmCommitChanges)),
+                                )
+                                .child(
+                                    Button::new("editor-commit-close")
+                                        .debug_selector(|| "editor-commit-close".into())
+                                        .icon(IconName::Close)
+                                        .ghost()
+                                        .xsmall()
+                                        .tooltip(t(L10nKey::Close))
+                                        .flex_none()
+                                        .w(px(crate::ui::tab_strip::MIN_TARGET))
+                                        .h(px(crate::ui::tab_strip::MIN_TARGET))
+                                        .on_click(cx.listener(|app, _, window, cx| {
+                                            cx.stop_propagation();
+                                            app.close_diff_overlay(window, cx);
+                                        })),
+                                ),
+                        )
                     }),
             )
-            .child(self.document_fill_button(cx))
-            .child(
-                div().occlude().flex_shrink_0().child(
-                    crate::ui::tab_strip::chrome_tile_sized(
-                        Button::new("editor-panel-close").icon(Icon::new(IconName::Close)),
-                        crate::ui::app::TILE_SIZE,
-                        crate::ui::app::TILE_GLYPH_LINE,
-                        false,
-                        cx,
-                    )
-                    .rounded_lg()
-                    .tooltip(t(L10nKey::EditorBackToTerminal))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.toggle_code_panel(window, cx);
-                    })),
-                ),
-            )
+            .when(!commit_front, |row| {
+                row.child(self.document_fill_button(cx)).child(
+                    div().occlude().flex_shrink_0().child(
+                        crate::ui::tab_strip::chrome_tile_sized(
+                            Button::new("editor-panel-close").icon(Icon::new(IconName::Close)),
+                            crate::ui::app::TILE_SIZE,
+                            crate::ui::app::TILE_GLYPH_LINE,
+                            false,
+                            cx,
+                        )
+                        .rounded_lg()
+                        .tooltip(t(L10nKey::EditorBackToTerminal))
+                        .on_click(cx.listener(|this, _, window, cx| {
+                            this.toggle_code_panel(window, cx);
+                        })),
+                    ),
+                )
+            })
             .context_menu(move |menu, _window, cx| {
                 Tty7App::document_header_menu(menu, &menu_app, cx)
             })
@@ -2497,6 +2614,186 @@ mod tests {
             cx.notify();
         });
         (app, vcx)
+    }
+
+    #[gpui::test]
+    fn commit_changes_is_a_separate_document_tab_beside_open_files(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                "/work/README.md".into(),
+                "# Preserve this document\n".into(),
+                None,
+                window,
+                cx,
+            );
+            app.tabs[app.active].document_layout = Some(crate::core::config::DocumentLayout::Fill);
+            app.open_diff_overlay(
+                HostId::LOCAL,
+                "/work".into(),
+                crate::terminal::git_diff::DiffSource::Commit {
+                    rev: "0123456789abcdef".into(),
+                    label: Some(crate::terminal::git_diff::CommitLabel {
+                        subject: "fix(ui): open a commit document".into(),
+                        author: "Ada".into(),
+                        at: 0,
+                    }),
+                },
+                None,
+                window,
+                cx,
+            );
+        });
+        vcx.run_until_parked();
+        let commit_tab = vcx
+            .debug_bounds("editor-commit-tab")
+            .expect("a commit has its own document tab");
+        let breadcrumb = vcx
+            .debug_bounds("commit-document-breadcrumb")
+            .expect("the commit document has a breadcrumb row");
+        let details = vcx.debug_bounds("diff-commit-details").unwrap();
+        assert!(commit_tab.bottom() <= breadcrumb.top() && breadcrumb.bottom() <= details.top());
+        let readme = vcx.debug_bounds("editor-file-tab-0").unwrap();
+        vcx.simulate_click(readme.center(), gpui::Modifiers::none());
+        app.read_with(&vcx, |app, _| {
+            assert_eq!(app.document_front(), Some(crate::ui::app::OverlayTop::Code));
+            assert_eq!(
+                app.tab_code().unwrap().active_file().unwrap().path,
+                Path::new("/work/README.md")
+            );
+            assert!(
+                app.tabs[app.active].diff_overlay.is_some(),
+                "changing documents retains the commit page"
+            );
+        });
+        let commit_tab = vcx.debug_bounds("editor-commit-tab").unwrap();
+        vcx.simulate_click(commit_tab.center(), gpui::Modifiers::none());
+        assert_eq!(
+            app.read_with(&vcx, |app, _| app.document_front()),
+            Some(crate::ui::app::OverlayTop::Diff)
+        );
+        let close = vcx.debug_bounds("editor-commit-close").unwrap();
+        vcx.simulate_click(close.center(), gpui::Modifiers::none());
+        app.read_with(&vcx, |app, _| {
+            assert!(app.tabs[app.active].diff_overlay.is_none());
+            assert_eq!(app.document_front(), Some(crate::ui::app::OverlayTop::Code));
+            assert_eq!(app.tab_code().unwrap().files.len(), 1);
+        });
+        app.update_in(&mut vcx, |app, window, cx| {
+            assert!(
+                app.editor_has_focus(window, cx),
+                "closing the commit document returns focus to the retained file"
+            );
+        });
+        vcx.simulate_resize(gpui::size(px(1100.), px(700.)));
+        for layout in [
+            crate::core::config::DocumentLayout::Fill,
+            crate::core::config::DocumentLayout::Dock,
+        ] {
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.tabs[app.active].document_layout = Some(layout);
+                app.open_diff_overlay(
+                    HostId::LOCAL,
+                    "/work".into(),
+                    crate::terminal::git_diff::DiffSource::Commit {
+                        rev: "keyboard-close".into(),
+                        label: Some(Default::default()),
+                    },
+                    None,
+                    window,
+                    cx,
+                );
+            });
+            vcx.run_until_parked();
+            app.update_in(&mut vcx, |app, window, cx| {
+                if layout == crate::core::config::DocumentLayout::Dock {
+                    assert!(app.document_dock_px(window, cx).is_some());
+                }
+                window.focus(
+                    &app.tabs[app.active]
+                        .diff_overlay
+                        .as_ref()
+                        .unwrap()
+                        .document_header_focus,
+                    cx,
+                );
+            });
+            vcx.simulate_keystrokes(if cfg!(target_os = "macos") {
+                "secondary-w"
+            } else {
+                "secondary-shift-w"
+            });
+            app.read_with(&vcx, |app, _| {
+                assert_eq!(
+                    app.tabs.len(),
+                    1,
+                    "closing from the document header preserves the terminal"
+                );
+                assert!(app.tabs[app.active].diff_overlay.is_none());
+                assert_eq!(app.tab_code().unwrap().files.len(), 1);
+            });
+        }
+    }
+
+    #[gpui::test]
+    fn selected_commit_tab_is_revealed_after_many_open_files(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        vcx.simulate_resize(gpui::size(px(1100.), px(700.)));
+        let source = crate::terminal::git_diff::DiffSource::Commit {
+            rev: "many-files".into(),
+            label: Some(Default::default()),
+        };
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.tabs[app.active].document_layout = Some(crate::core::config::DocumentLayout::Fill);
+            for n in 0..18 {
+                app.editor_install_file(
+                    tty7_core::host::local::LocalHost::new(),
+                    format!("/work/file-{n}.rs").into(),
+                    "fn main() {}".into(),
+                    None,
+                    window,
+                    cx,
+                );
+            }
+            app.editor_activate_open(HostId::LOCAL, Path::new("/work/file-0.rs"), window, cx);
+        });
+        vcx.run_until_parked();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.open_diff_overlay(
+                HostId::LOCAL,
+                "/work".into(),
+                source.clone(),
+                None,
+                window,
+                cx,
+            );
+        });
+        for _ in 0..2 {
+            vcx.run_until_parked();
+            let tab = vcx.debug_bounds("editor-commit-tab").unwrap();
+            let strip = vcx.debug_bounds("editor-file-tabs").unwrap();
+            assert!(
+                tab.left() + px(1.) >= strip.left() && tab.right() <= strip.right() + px(1.),
+                "the active commit tab is revealed: tab={tab:?}, strip={strip:?}"
+            );
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.editor_activate_open(HostId::LOCAL, Path::new("/work/file-0.rs"), window, cx);
+            });
+            vcx.run_until_parked();
+            let first = vcx.debug_bounds("editor-file-tab-0").unwrap();
+            vcx.simulate_click(first.center(), gpui::Modifiers::none());
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.open_diff_overlay(
+                    HostId::LOCAL,
+                    "/work".into(),
+                    source.clone(),
+                    None,
+                    window,
+                    cx,
+                );
+            });
+        }
     }
 
     #[gpui::test]
@@ -4765,7 +5062,7 @@ mod tests {
         });
         assert_eq!(std::fs::read_to_string(&path).unwrap(), saved);
         app.update_in(&mut vcx, |app, window, cx| {
-            assert!(app.editor_close_active_if_focused(window, cx));
+            assert!(app.document_close_active_if_focused(window, cx));
             assert!(app.tab_code().unwrap().files.is_empty());
         });
     }

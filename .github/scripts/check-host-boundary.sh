@@ -58,6 +58,10 @@ src/ui/presets.rs|std::fs::
 src/ui/presets.rs|.is_absolute()
 src/ui/app.rs|std::fs::create_dir_all
 
+# Author avatars are app-owned cache files under the local config directory;
+# commit identity comes from Host data, but photos never use workspace paths.
+src/ui/scm/avatars.rs|std::fs::
+
 # Reading a private key off *this* machine to hash it into a keychain account
 # (`core::keychain`). The key is the client's credential; the far side never
 # sees the file, only the resulting auth.
