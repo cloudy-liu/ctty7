@@ -3406,6 +3406,14 @@ impl Tty7App {
             window.focus(&self.home_focus, cx);
             return;
         };
+        if self.document_front() == Some(OverlayTop::Code)
+            && self
+                .tab_code()
+                .is_some_and(|code| code.active_file().is_some())
+        {
+            self.focus_editor(window, cx);
+            return;
+        }
         if let Some(overlay) = tab.diff_overlay.as_ref() {
             window.focus(&overlay.focus_handle, cx);
             return;
@@ -7963,7 +7971,7 @@ impl Render for Tty7App {
                     this.open_workspace_form(window, cx);
                 }))
                 .on_action(cx.listener(|this, _: &CloseActiveTab, window, cx| {
-                    if !this.editor_close_active_if_focused(window, cx) {
+                    if !this.document_close_active_if_focused(window, cx) {
                         this.close_pane(window, cx)
                     }
                 }))

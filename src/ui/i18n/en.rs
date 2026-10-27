@@ -1183,6 +1183,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::ScmGraphCurrentBranch => "Current Branch",
         L10nKey::ScmGraphRemoteAvatars => "Load Author Avatars",
         L10nKey::ScmViewCommitDetails => "Commit Details",
+        L10nKey::ScmCommitChanges => "Commit changes",
         L10nKey::ScmCheckoutCommit => "Checkout Commit",
         L10nKey::ScmCreateBranchHere => "Create Branch Here…",
         L10nKey::ScmResetSoft => "Reset (Soft)",

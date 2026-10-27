@@ -879,6 +879,7 @@ l10n_keys! {
     ScmGraphCurrentBranch,
     ScmGraphRemoteAvatars,
     ScmViewCommitDetails,
+    ScmCommitChanges,
     ScmCheckoutCommit,
     ScmCreateBranchHere,
     ScmResetSoft,

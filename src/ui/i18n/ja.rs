@@ -1253,6 +1253,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::ScmGraphCurrentBranch => "現在のブランチ",
         L10nKey::ScmGraphRemoteAvatars => "作成者のアバターを読み込む",
         L10nKey::ScmViewCommitDetails => "コミットの詳細",
+        L10nKey::ScmCommitChanges => "コミットの変更",
         L10nKey::ScmCheckoutCommit => "このコミットをチェックアウト",
         L10nKey::ScmCreateBranchHere => "ここにブランチを作成…",
         L10nKey::ScmResetSoft => "リセット（ソフト）",

@@ -5,6 +5,34 @@ Tracks [spec #207](https://github.com/cloudy-liu/ctty7/issues/207) and the singl
 
 ## Native visual evidence
 
+The selected commit now opens as an independent **Commit changes** document
+tab, beside existing files. Its breadcrumb owns the existing diff-mode/fill
+controls. The page shows the message-detail header before the shared diff
+content: title, cached author photo/name, authored date, copyable full SHA,
+refs, expandable message body, and loaded file/line totals.
+
+The dedicated-page pairs below use the same real multiline commit `34740588`,
+viewport/theme/scale and History state. Before is the previous PR head
+`b2cf52af`; After includes the document-page correction. Reproduce this fixture
+with `prepare-git-history-captures.py <new-directory> --download-avatars --detail-body`.
+
+**Before: the compact Diff toolbar had no standalone commit document.**
+
+![Before: selected commit in the compact overlay](images/git-history-avatars/before-message-detail-light.jpg)
+
+**After: independent tab, breadcrumb, full message details and reused Diff.**
+
+![After: independent commit message detail page](images/git-history-avatars/after-message-detail-light.jpg)
+
+| Dark, 260px Before | Dark, 260px After |
+| --- | --- |
+| ![Before: compact commit toolbar](images/git-history-avatars/before-message-detail-dark.jpg) | ![After: independent commit document](images/git-history-avatars/after-message-detail-dark.jpg) |
+
+The older list-only pairs below still compare the original one-line History
+with the avatar rows. The earlier compact commit-selection pair is archived
+as the intermediate implementation; the standalone page above is the current
+accepted layout.
+
 The screenshots are captures of the running Windows GPUI application through
 LCU/Sky. The image bytes are saved unchanged, without cropping, overlays or
 redrawing. The same real, isolated Git repository contains eleven commits,
@@ -36,19 +64,26 @@ light/320px state. Inspect the center document, History selection, and existing
 red/green diff-mode icon. The retained Commit Details view is available from the
 commit's context menu.
 
-| Commit selection Before | Commit selection After |
+| Original commit selection | Intermediate commit selection at b2cf52af |
 | --- | --- |
 | ![Commit details in the sidebar](images/git-history-avatars/before-commit-light-320.jpg) | ![Existing Git Diff View with History still available](images/git-history-avatars/after-commit-light-320.jpg) |
 
 ## Automated acceptance
 
-The full Windows workspace run passed **3,168 tests, zero failures, 12 ignored**.
-After the final ref-overflow/layout adjustment, the focused SCM run passed all
-**71 tests**, including the actual rendered-row interaction at 260px with five
+The final Windows workspace run passed **3,172 tests, zero failures, 12 ignored**.
+It includes the actual rendered-row interaction at 260px with five
 lanes, a long author, long branch/tag names, 2,000 refs (`+1998`), and a 5,000-row
 page. It checks 44px row bounds, visible author/age and overflow count, no distant
 offscreen row allocation, and the correct commit source after a real row click.
 Reselecting the same commit also restores the existing viewer's keyboard focus.
+
+The document regressions also verify switching between README and the commit
+tab, closing the tab and returning focus to the retained file, closing through
+the shared header in both Fill and genuine Dock layouts, revealing the active
+commit tab beside 18 already-open files, full-SHA copying, bounded expandable
+messages, and returning from a focused file to all changed files. Authored-date
+tests cover timezone midnight and leap-day boundaries using the shared calendar
+conversion already used by crash records. No calendar dependency was added.
 
 Avatar entry-point tests cover normalized author sharing, decoded BGRA colors,
 96px normalization, warm memory/disk reuse, stale images while offline,
@@ -68,6 +103,10 @@ focus, and ref chips crowding out metadata) were fixed. A follow-up large-count
 edge case was fixed by giving the exact overflow count its own nonshrinking
 space outside the shrinking ref names. The cleanup-policy duplication judgement
 call was addressed by one deferred-disposal function. No remaining finding.
+The document follow-up additionally resolved hoisted-header focus ownership,
+focused-file back navigation and active-tab visibility. Shared diff actions
+were extracted so both breadcrumbs retain identical mode/context/navigation
+eligibility rules. The review rechecked these fixes with no remaining finding.
 
 ## Spec
 
@@ -75,6 +114,9 @@ The independent Spec review found four gaps: clipped overflow counts, missing
 rendered-row interaction coverage, current-window GPU cleanup, and narrow
 metadata collapse. All were corrected and the affected SCM tests pass. It found
 no material scope creep. No remaining finding.
+The follow-up review confirmed separate tab/breadcrumb ownership, terminal-safe
+document closing, full ref-name/overflow access, shared controls, preserved
+metadata, and a scrollable header capped at 55% of the available content height.
 
 ## Performance method
 
@@ -110,17 +152,22 @@ GeForce GTX 1650 / AMD Radeon graphics.
 
 | Native metric (median of 3 runs) | Before | After | Change |
 | --- | ---: | ---: | ---: |
-| Scroll CPU wall time, median | 15.91 ms | 17.19 ms | +1.28 ms (+8.0%) |
-| Scroll CPU wall time, P95 | 20.08 ms | 19.79 ms | -0.29 ms (-1.4%) |
-| Process private memory | 356.68 MiB | 381.80 MiB | +25.12 MiB (+7.0%) |
-| Process working set | 275.32 MiB | 301.30 MiB | +25.98 MiB (+9.4%) |
+| Scroll CPU wall time, median | 21.39 ms | 21.98 ms | +0.60 ms (+2.8%) |
+| Scroll CPU wall time, P95 | 27.37 ms | 29.41 ms | +2.04 ms (+7.5%) |
+| Process private memory | 357.34 MiB | 340.82 MiB | -16.52 MiB (-4.6%) |
+| Process working set | 275.66 MiB | 259.48 MiB | -16.18 MiB (-5.9%) |
 
 
-The raw data also preserves the earlier exploratory runs. Their wider tail
-variation is why a fresh matched comparison was collected after the final
-layout fixes. Background compilation recurred on the shared machine during
-the comparison; wall-clock variation is retained in the results. This is a small local sample; it
-does not establish a cross-machine performance guarantee.
+The table uses the final document-page build in three fresh alternating pairs
+on 2026-10-27, under `final_document` in the raw JSON. The History scroll fixture
+keeps README active in both builds, so it measures scanning the list rather
+than loading a selected commit. Earlier cohorts remain in the raw data.
+Shared-machine native UI activity continued during this comparison. The second
+After run reached a 35.42ms median / 47.31ms P95, versus 21.31/29.41ms and
+21.98/28.02ms in the other two After runs; all samples are retained.
+After private-memory snapshots range from 340.29 to 381.46MiB. The lower
+aggregate memory value does not establish an avatar memory reduction.
+This small local sample does not establish a cross-machine performance guarantee.
 
 ## Avatar boundary measurements
 
@@ -178,12 +225,13 @@ matching an arbitrary Git email to a GitHub account and requires no login.
 
 Raw per-run data, including all exploratory cohorts: [performance JSON](git-history-performance.json).
 
-The aggregate median increased by 1.28ms (8.0%) and private memory by 25.12MiB
-(7.0%). P95 overlaps the baseline and varies substantially between runs; the
-small difference is not evidence of a tail-latency improvement. The fixed cache
-limits and request-sharing tests establish bounded work independently of these
-noisy whole-process measurements. These results are not an optimized-release
-FPS or isolated-avatar memory claim.
+The final-build aggregate median increased by 0.60ms (2.8%) and P95 by
+2.04ms (7.5%). Private memory decreased by 16.52MiB in this cohort, but the
+wide per-run spread prevents an isolated-memory claim. The earlier avatar-only
+cohort recorded +1.28ms median and +25.12MiB private memory, illustrating this
+whole-process variation. The cache limits and request-sharing tests establish
+bounded work independently of these noisy measurements. These results are not
+optimized-release FPS or isolated-avatar memory measurements.
 
 The native JPEG captures are 1282 x 801 including the window frame. The scroll
 tail additionally verifies the hollow root node and v0.8.1 release label:

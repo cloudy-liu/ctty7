@@ -16,7 +16,8 @@ AUTHORS = [
 ]
 
 
-def prepare(destination: Path, download_avatars: bool, profile_commits: int = 0) -> None:
+def prepare(destination: Path, download_avatars: bool, profile_commits: int = 0,
+            detail_body: bool = False) -> None:
     if destination.exists():
         raise SystemExit("Refusing to reuse an existing evidence directory")
     root = destination / "history-workspace"
@@ -74,7 +75,14 @@ def prepare(destination: Path, download_avatars: bool, profile_commits: int = 0)
     git("commit", "-m", "feat(avatars): reuse images across repeated authors", author=2)
     (root / "avatars.txt").write_text("Shared author images, with an offline cache.\n")
     git("add", ".")
-    git("commit", "-m", "fix(avatars): retain cached photos while offline", author=1)
+    message = ["-m", "fix(avatars): retain cached photos while offline"]
+    if detail_body:
+        message += ["-m", "Keep the last successful author photo available when a refresh fails.\n"
+                    "Repeated commits from the same author share one cached image.\n\n"
+                    "The selected commit opens in the existing Git Diff View.\n"
+                    "History stays available for reviewing the next commit.\n"
+                    "The existing unified and split controls remain in the toolbar."]
+    git("commit", *message, author=1)
     git("checkout", "main")
     for i, subject in enumerate([
         "fix(diff): use the existing unified and side-by-side controls",
@@ -161,5 +169,6 @@ if __name__ == "__main__":
     parser.add_argument("destination", type=Path)
     parser.add_argument("--download-avatars", action="store_true")
     parser.add_argument("--profile-commits", type=int, default=0)
+    parser.add_argument("--detail-body", action="store_true")
     args = parser.parse_args()
-    prepare(args.destination, args.download_avatars, args.profile_commits)
+    prepare(args.destination, args.download_avatars, args.profile_commits, args.detail_body)

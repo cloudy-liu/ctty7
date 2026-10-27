@@ -58,3 +58,12 @@ test result: ok. 71 passed; 0 failed; 0 ignored; 0 measured; 1735 filtered out; 
 
 WORKSPACE
 3168 passed; 0 failed; 12 ignored (17 targets).
+
+FINAL COMMIT-DOCUMENT FOLLOW-UP (2026-10-26, verified after the last Rust edit)
+test ui::code_editor::tests::commit_changes_is_a_separate_document_tab_beside_open_files ... ok
+test ui::code_editor::tests::selected_commit_tab_is_revealed_after_many_open_files ... ok
+test ui::scm::graph::tests::selected_commit_shows_message_details_above_the_existing_diff ... ok
+test core::date::tests::dates_respect_the_authored_timezone_and_calendar_boundaries ... ok
+Workspace: 3172 passed; 0 failed; 12 ignored (17 targets).
+Native fixture build: release / locked / markdown-visual-tests, same final Rust source.
+rustfmt, host-boundary guard, Python syntax and whitespace checks passed again on resume.

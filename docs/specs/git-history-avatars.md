@@ -19,6 +19,11 @@ selection, hover, filtering, paging, and resizing.
 Selecting a commit opens its changes in the existing Git Diff View and leaves
 History available for selecting another commit. Reuse its existing view-mode
 icon, unified/side-by-side preference, navigation, and document controls.
+The view is an independent `Commit changes` document tab alongside open files,
+with its own breadcrumb and message-detail header. The header shows the full
+subject, author photo/name, authored date, copyable SHA, refs, message body and
+loaded change totals. Switching back to a file retains both documents; closing
+the commit page or using the document-close shortcut preserves the terminal.
 
 ## User Stories
 
@@ -93,6 +98,10 @@ icon, unified/side-by-side preference, navigation, and document controls.
   revision, and commit label. Preserve existing context-menu Git actions.
 - Keep the current History section's default footprint; taller rows intentionally
   show fewer commits, and the existing height divider remains available.
+- Follow-up clarification: preserve the prototype's separate document page,
+  rather than presenting only the existing compact Diff toolbar. Reuse file-tab
+  chrome and the diff renderer; selecting another commit updates the commit
+  document. Bound long titles/messages and allow the message body to expand.
 
 ## Testing Decisions
 

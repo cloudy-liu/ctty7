@@ -916,13 +916,14 @@ impl Tty7App {
         cx: &mut Context<Self>,
     ) {
         use crate::terminal::git_diff::{CommitLabel, DiffSource};
+        let commit = Arc::new(commit);
         self.scm.graph.selected = Some(commit.oid.clone());
         self.scm.detail = None;
         let source = DiffSource::Commit {
-            rev: commit.oid,
+            rev: commit.oid.clone(),
             label: Some(CommitLabel {
-                subject: commit.summary,
-                author: commit.author.name,
+                subject: commit.summary.clone(),
+                author: commit.author.name.clone(),
                 at: commit.author.at.unix,
             }),
         };
@@ -934,17 +935,26 @@ impl Tty7App {
         {
             if overlay.host_id == repo.host && overlay.cwd == repo.root && overlay.source == source
             {
+                overlay.commit = Some(commit.clone());
                 if overlay.focus.take().is_some() {
                     overlay.file_views.clear();
                     *overlay.anchor.borrow_mut() = None;
                 }
                 window.focus(&overlay.focus_handle, cx);
                 self.tabs[self.active].overlay_top = crate::ui::app::OverlayTop::Diff;
+                self.reveal_commit_document_tab();
                 cx.notify();
                 return;
             }
         }
         self.open_diff_overlay(repo.host, repo.root, source, None, window, cx);
+        if let Some(overlay) = self
+            .tabs
+            .get_mut(self.active)
+            .and_then(|tab| tab.diff_overlay.as_mut())
+        {
+            overlay.commit = Some(commit);
+        }
     }
 }
 
@@ -1873,6 +1883,111 @@ mod tests {
     struct HistoryRows {
         app: gpui::Entity<Tty7App>,
         page: Arc<CommitPage>,
+    }
+
+    struct SelectedCommit(gpui::Entity<Tty7App>);
+
+    impl gpui::Render for SelectedCommit {
+        fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div().size_full().children(self.0.update(cx, |app, cx| {
+                app.render_diff_overlay(
+                    crate::ui::document_column::DocumentChrome::Dock,
+                    window,
+                    cx,
+                )
+            }))
+        }
+    }
+
+    #[gpui::test]
+    fn selected_commit_shows_message_details_above_the_existing_diff(cx: &mut TestAppContext) {
+        let (app, mut vcx) = harness(cx);
+        let mut seed = commit_named(
+            "fix(editor): retain the complete message",
+            "Ada Lovelace",
+            "0123456789abcdef",
+        );
+        seed.body = (1..=20)
+            .map(|n| format!("Commit rationale line {n}."))
+            .collect::<Vec<_>>()
+            .join("\n");
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.tabs
+                .push(crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty));
+            app.active = 0;
+            app.graph_open_commit(repo(), seed.clone(), window, cx);
+        });
+        vcx.update(|window, cx| {
+            window.replace_root(cx, |_, _| SelectedCommit(app.clone()));
+        });
+        vcx.simulate_resize(gpui::size(px(760.), px(600.)));
+        vcx.run_until_parked();
+        let header = vcx
+            .debug_bounds("diff-commit-details")
+            .expect("selecting a commit shows the prototype's message-detail header");
+        let title = vcx.debug_bounds("diff-commit-title").unwrap();
+        let author = vcx.debug_bounds("diff-commit-author").unwrap();
+        let body = vcx.debug_bounds("diff-commit-body").unwrap();
+        assert!(title.top() < author.top() && author.bottom() <= body.top());
+        assert!(body.size.height <= px(88.));
+        assert!(
+            header.bottom() < px(500.),
+            "details leave room for the existing diff"
+        );
+        let copy = vcx.debug_bounds("diff-commit-copy").unwrap();
+        vcx.simulate_click(copy.center(), gpui::Modifiers::none());
+        assert_eq!(
+            vcx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text()))
+                .as_deref(),
+            Some(seed.oid.as_str())
+        );
+        let expand = vcx.debug_bounds("diff-commit-body-toggle").unwrap();
+        vcx.simulate_click(
+            gpui::point(expand.left() + px(12.), expand.center().y),
+            gpui::Modifiers::none(),
+        );
+        let expanded = vcx.debug_bounds("diff-commit-body").unwrap();
+        assert!(expanded.size.height > body.size.height && expanded.size.height <= px(160.));
+        app.read_with(&vcx, |app, _| {
+            let overlay = app.tabs[0].diff_overlay.as_ref().unwrap();
+            assert_eq!(overlay.commit.as_deref(), Some(&seed));
+            assert!(overlay.commit_message_expanded);
+        });
+        app.update(&mut vcx, |app, cx| {
+            use crate::terminal::git_diff::{DiffSnapshot, FileDiff, FileStatus};
+            let overlay = app.tabs[0].diff_overlay.as_mut().unwrap();
+            overlay.load = crate::ui::diff_overlay::DiffLoad::Ready(Arc::new(DiffSnapshot {
+                root: repo().root,
+                source: overlay.source.clone(),
+                branch: "main".into(),
+                files: ["first.rs", "second.rs"]
+                    .into_iter()
+                    .map(|path| FileDiff {
+                        path: path.into(),
+                        old_path: None,
+                        status: FileStatus::Modified,
+                        added: 1,
+                        removed: 0,
+                        binary: false,
+                        truncated: None,
+                        hunks: vec![],
+                    })
+                    .collect(),
+                untracked: vec![],
+                untracked_total: 0,
+                read_failed: false,
+            }));
+            overlay.focus = Some("first.rs".into());
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        let back = vcx
+            .debug_bounds("commit-document-unfocus")
+            .expect("focused commit files retain their back-to-all-files action");
+        vcx.simulate_click(back.center(), gpui::Modifiers::none());
+        assert!(app.read_with(&vcx, |app, _| {
+            app.tabs[0].diff_overlay.as_ref().unwrap().focus.is_none()
+        }));
     }
 
     impl gpui::Render for HistoryRows {

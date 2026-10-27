@@ -1135,6 +1135,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::ScmGraphCurrentBranch => "当前分支",
         L10nKey::ScmGraphRemoteAvatars => "加载作者头像",
         L10nKey::ScmViewCommitDetails => "提交详情",
+        L10nKey::ScmCommitChanges => "提交变更",
         L10nKey::ScmCheckoutCommit => "检出此提交",
         L10nKey::ScmCreateBranchHere => "在此创建分支…",
         L10nKey::ScmResetSoft => "重置（保留暂存）",

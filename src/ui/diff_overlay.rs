@@ -5,6 +5,9 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::Arc;
 
+#[path = "diff_commit.rs"]
+mod commit;
+
 #[cfg(feature = "markdown-visual-tests")]
 #[path = "diff_profile.rs"]
 pub(crate) mod profile;
@@ -114,6 +117,9 @@ pub(crate) struct DiffOverlayState {
     /// Which patch this overlay is showing. Part of its identity, not a
     /// setting: two sources over one directory are two different overlays.
     pub(crate) source: DiffSource,
+    pub(crate) commit: Option<Arc<tty7_core::core::git::log::Commit>>,
+    pub(crate) commit_message_expanded: bool,
+    pub(crate) document_header_focus: FocusHandle,
     pub(crate) focus_handle: FocusHandle,
     pub(crate) load: DiffLoad,
     pub(crate) loading: bool,
@@ -589,6 +595,17 @@ impl Tty7App {
         cx: &mut Context<Self>,
     ) {
         let active = self.active;
+        let commit_document = matches!(&source, DiffSource::Commit { label: Some(_), .. });
+        let commit = self
+            .scm
+            .detail
+            .as_ref()
+            .filter(|detail| {
+                detail.repo.host == host
+                    && detail.repo.root == cwd
+                    && matches!(&source, DiffSource::Commit { rev, .. } if *rev == detail.oid)
+            })
+            .and_then(|detail| detail.commit.clone());
         let was_front = self.tabs.get(active).is_some_and(|t| {
             t.overlay_top == crate::ui::app::OverlayTop::Diff || !self.code_panel_visible()
         });
@@ -609,11 +626,17 @@ impl Tty7App {
                 return;
             }
             Some(o) => {
+                if commit.is_some() {
+                    o.commit = commit;
+                }
                 o.file_views.clear();
                 o.focus = focus;
                 *o.anchor.borrow_mut() = None;
                 let handle = o.focus_handle.clone();
                 window.focus(&handle, cx);
+                if commit_document {
+                    self.reveal_commit_document_tab();
+                }
                 cx.notify();
                 return;
             }
@@ -628,6 +651,9 @@ impl Tty7App {
             host_id: host,
             cwd,
             source,
+            commit,
+            commit_message_expanded: false,
+            document_header_focus: cx.focus_handle(),
             focus_handle: focus_handle.clone(),
             // Every open starts at Loading until its own probe lands. The old
             // panel-snapshot seeding died with the panel that held a snapshot
@@ -645,6 +671,9 @@ impl Tty7App {
             anchor: Rc::default(),
         });
         window.focus(&focus_handle, cx);
+        if commit_document {
+            self.reveal_commit_document_tab();
+        }
         self.spawn_diff_probe(cx);
         cx.notify();
     }
@@ -859,6 +888,11 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        if self.has_commit_document()
+            && self.document_front() == Some(crate::ui::app::OverlayTop::Code)
+        {
+            return None;
+        }
         self.spawn_untracked_preview_if_needed(cx);
         let overlay = self.tabs.get(self.active)?.diff_overlay.as_ref()?;
 
@@ -902,11 +936,18 @@ impl Tty7App {
             .w_full()
             .bg(palette.background)
             .text_color(palette.foreground)
+            .children(self.diff_commit_details(overlay, cx))
             .child(content);
 
-        let header = chrome
-            .renders_own_header()
-            .then(|| self.diff_header(overlay, chrome, window, cx));
+        let commit_document = self.has_commit_document();
+        let header = chrome.renders_own_header().then(|| {
+            if commit_document {
+                self.render_editor_header_only(chrome, window, cx)
+            } else {
+                self.diff_header(overlay, chrome, window, cx)
+                    .into_any_element()
+            }
+        });
         let focus_handle = overlay.focus_handle.clone();
 
         let shell = v_flex().debug_selector(|| "diff-panel".into());
@@ -945,6 +986,7 @@ impl Tty7App {
                     }
                 }))
                 .children(header)
+                .children(commit_document.then(|| self.commit_document_breadcrumb(overlay, cx)))
                 .child(content)
                 .into_any_element(),
         )
@@ -957,6 +999,9 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Option<AnyElement> {
+        if self.has_commit_document() {
+            return Some(self.render_editor_header_only(chrome, window, cx));
+        }
         let overlay = self.tabs.get(self.active)?.diff_overlay.as_ref()?;
         Some(
             self.diff_header(overlay, chrome, window, cx)
@@ -1065,21 +1110,12 @@ impl Tty7App {
                     // have, which is why that one is skipped when a label is present:
                     // two `flex_1` siblings split the line in half and the subject
                     // would truncate with empty space beside it.
-                    .when_some(subject.label.as_ref(), |bar, label| {
+                    .when_some(subject.label.as_ref(), |bar, _| {
                         bar.child(
                             div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
                                 .text_sm()
-                                .child(SharedString::from(label.subject.clone())),
-                        )
-                        .child(
-                            div()
-                                .flex_shrink_0()
-                                .text_xs()
                                 .text_color(cx.theme().muted_foreground)
-                                .child(label_byline(label, now_unix())),
+                                .child(t(L10nKey::ScmViewCommitDetails)),
                         )
                     })
                     .when_some(focused_name(overlay), |bar, name| {
@@ -1087,7 +1123,8 @@ impl Tty7App {
                             div().occlude().flex_1().min_w_0().child(
                                 h_flex()
                                     .id("diff-overlay-unfocus")
-                                    .w_full().min_w_0()
+                                    .w_full()
+                                    .min_w_0()
                                     .items_center()
                                     .gap_1()
                                     .px_1p5()
@@ -1114,7 +1151,8 @@ impl Tty7App {
                                     )
                                     .child(
                                         div()
-                                            .min_w_0().truncate()
+                                            .min_w_0()
+                                            .truncate()
                                             .text_xs()
                                             .font_family(self.font_family.clone())
                                             .child(name),
@@ -1123,7 +1161,9 @@ impl Tty7App {
                         )
                     })
                     .when(
-                        matches!(overlay.load, DiffLoad::Ready(_)) && overlay.focus.is_none(),
+                        matches!(overlay.load, DiffLoad::Ready(_))
+                            && overlay.focus.is_none()
+                            && subject.label.is_none(),
                         |bar| {
                             let mut summary = t_plural(L10nKey::DiffChangedFiles, files, &[]);
                             if untracked > 0 {
@@ -1177,16 +1217,7 @@ impl Tty7App {
                         bar.child(div().flex_1())
                     }),
             )
-            .child(self.diff_view_button(cx))
-            .when_some(focused_name(overlay).filter(|path| {
-                matches!(&overlay.load, DiffLoad::Ready(s) if s.files.iter().any(|f| f.path == *path && !f.binary))
-                    && !overlay.file_views.get(path)
-                        .and_then(|v| v.full.as_ref()).is_some_and(|f| f.binary)
-            }), |bar, path| bar
-                .child(self.diff_context_button(&path, cx))
-                .child(self.diff_change_button(false, cx))
-                .child(self.diff_change_button(true, cx)))
-            .child(self.document_fill_button(cx))
+            .child(self.diff_document_actions(overlay, cx))
             .child(
                 div().occlude().flex_shrink_0().child(
                     crate::ui::tab_strip::chrome_tile_sized(
@@ -1206,6 +1237,25 @@ impl Tty7App {
             .context_menu(move |menu, _window, cx| {
                 Tty7App::document_header_menu(menu, &menu_app, cx)
             })
+    }
+
+    fn diff_document_actions(
+        &self,
+        overlay: &DiffOverlayState,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        h_flex().flex_none().items_center().gap_2()
+            .child(self.diff_view_button(cx))
+            .when_some(focused_name(overlay).filter(|path| {
+                matches!(&overlay.load, DiffLoad::Ready(s) if s.files.iter().any(|f| f.path == *path && !f.binary))
+                    && !overlay.file_views.get(path)
+                        .and_then(|v| v.full.as_ref()).is_some_and(|f| f.binary)
+            }), |bar, path| bar
+                .child(self.diff_context_button(&path, cx))
+                .child(self.diff_change_button(false, cx))
+                .child(self.diff_change_button(true, cx)))
+            .child(self.document_fill_button(cx))
+            .into_any_element()
     }
 
     /// Dispatch the byte read behind an untracked file's preview, at most
@@ -3705,6 +3755,9 @@ mod github_theme_gpui_tests {
                 host_id: crate::ui::host_ops::HostId::LOCAL,
                 cwd: PathBuf::from("/fixture"),
                 source: DiffSource::Staged,
+                commit: None,
+                commit_message_expanded: false,
+                document_header_focus: cx.focus_handle(),
                 focus_handle: cx.focus_handle(),
                 load: DiffLoad::Ready(snapshot),
                 loading: false,
@@ -3809,6 +3862,9 @@ mod github_theme_gpui_tests {
                     host_id: crate::ui::host_ops::HostId::LOCAL,
                     cwd: PathBuf::from("/fixture"),
                     source: DiffSource::Staged,
+                    commit: None,
+                    commit_message_expanded: false,
+                    document_header_focus: cx.focus_handle(),
                     focus: Some("context.rs".into()),
                     focus_handle: cx.focus_handle(),
                     load: DiffLoad::Loading,
