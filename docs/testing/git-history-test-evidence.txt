@@ -67,3 +67,30 @@ test core::date::tests::dates_respect_the_authored_timezone_and_calendar_boundar
 Workspace: 3172 passed; 0 failed; 12 ignored (17 targets).
 Native fixture build: release / locked / markdown-visual-tests, same final Rust source.
 rustfmt, host-boundary guard, Python syntax and whitespace checks passed again on resume.
+
+AFTER INTEGRATING fork/main 98aa012e (2026-10-27)
+cargo test --release --locked --workspace --features markdown-visual-tests
+  --config 'profile.release.package.tty7.opt-level=0'
+  --config 'profile.release.package.tty7.codegen-units=16'
+Workspace: 3176 passed; 0 failed; 12 ignored (17 targets).
+
+Verified integrated workspace output (17 targets):
+test result: ok. 1805 passed; 0 failed; 7 ignored; 0 measured; 0 filtered out; finished in 24.52s
+test result: ok. 138 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.41s
+test result: ok. 1214 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out; finished in 31.20s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.80s
+test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 6.77s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 4 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 3.21s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 5.47s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+Integrated native build completed after the workspace run, using the same Rust source and locked dependencies.

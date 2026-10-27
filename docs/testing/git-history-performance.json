@@ -1228,5 +1228,261 @@
         "label": "final-document-after-3"
       }
     ]
+  },
+  "integrated_document": {
+    "baseline": "98aa012e2c7f2ca136c3aea3cd7fa23ec97fabab with only the native History fixture patch",
+    "after": [
+      {
+        "ready": true,
+        "title": "ctty7 Git History acceptance",
+        "os": "windows",
+        "scale_factor": 1.75,
+        "width": 1280.0,
+        "height": 800.0,
+        "dark": false,
+        "dock": false,
+        "right_panel": true,
+        "readme": false,
+        "history": true,
+        "history_width": 320.0,
+        "history_height": 400.0,
+        "history_profile": {
+          "scroll_samples": 120,
+          "scroll_cpu_median_ms": 23.5157,
+          "scroll_cpu_p95_ms": 29.9357,
+          "scroll_cpu_max_ms": 42.876,
+          "min_scroll_offset": -9600.0,
+          "measurement": "native event dispatch and GPUI CPU layout/prepaint/paint; excludes GPU execution and presentation",
+          "warmup_frames": 20,
+          "scroll_step_px": 120
+        },
+        "history_commits": 5000,
+        "files": [
+          "\\\\?\\D:\\gh-prj\\ctty7-git-history\\.scratch\\git-history-perf\\history-workspace\\README.md"
+        ],
+        "active": "\\\\?\\D:\\gh-prj\\ctty7-git-history\\.scratch\\git-history-perf\\history-workspace\\README.md",
+        "preview": true,
+        "open_files": 1,
+        "capture": "No GPU image requested",
+        "process_memory": {
+          "PrivateMemorySize64": 400470016,
+          "WorkingSet64": 316047360
+        },
+        "run": 1,
+        "label": "integrated-document-after-1"
+      },
+      {
+        "ready": true,
+        "title": "ctty7 Git History acceptance",
+        "os": "windows",
+        "scale_factor": 1.75,
+        "width": 1280.0,
+        "height": 800.0,
+        "dark": false,
+        "dock": false,
+        "right_panel": true,
+        "readme": false,
+        "history": true,
+        "history_width": 320.0,
+        "history_height": 400.0,
+        "history_profile": {
+          "scroll_samples": 120,
+          "scroll_cpu_median_ms": 25.1675,
+          "scroll_cpu_p95_ms": 33.953700000000005,
+          "scroll_cpu_max_ms": 44.6243,
+          "min_scroll_offset": -9600.0,
+          "measurement": "native event dispatch and GPUI CPU layout/prepaint/paint; excludes GPU execution and presentation",
+          "warmup_frames": 20,
+          "scroll_step_px": 120
+        },
+        "history_commits": 5000,
+        "files": [
+          "\\\\?\\D:\\gh-prj\\ctty7-git-history\\.scratch\\git-history-perf\\history-workspace\\README.md"
+        ],
+        "active": "\\\\?\\D:\\gh-prj\\ctty7-git-history\\.scratch\\git-history-perf\\history-workspace\\README.md",
+        "preview": true,
+        "open_files": 1,
+        "capture": "No GPU image requested",
+        "process_memory": {
+          "PrivateMemorySize64": 401002496,
+          "WorkingSet64": 316321792
+        },
+        "run": 1,
+        "label": "integrated-document-after-2"
+      },
+      {
+        "ready": true,
+        "title": "ctty7 Git History acceptance",
+        "os": "windows",
+        "scale_factor": 1.75,
+        "width": 1280.0,
+        "height": 800.0,
+        "dark": false,
+        "dock": false,
+        "right_panel": true,
+        "readme": false,
+        "history": true,
+        "history_width": 320.0,
+        "history_height": 400.0,
+        "history_profile": {
+          "scroll_samples": 120,
+          "scroll_cpu_median_ms": 22.9782,
+          "scroll_cpu_p95_ms": 29.1291,
+          "scroll_cpu_max_ms": 36.1397,
+          "min_scroll_offset": -9600.0,
+          "measurement": "native event dispatch and GPUI CPU layout/prepaint/paint; excludes GPU execution and presentation",
+          "warmup_frames": 20,
+          "scroll_step_px": 120
+        },
+        "history_commits": 5000,
+        "files": [
+          "\\\\?\\D:\\gh-prj\\ctty7-git-history\\.scratch\\git-history-perf\\history-workspace\\README.md"
+        ],
+        "active": "\\\\?\\D:\\gh-prj\\ctty7-git-history\\.scratch\\git-history-perf\\history-workspace\\README.md",
+        "preview": true,
+        "open_files": 1,
+        "capture": "No GPU image requested",
+        "process_memory": {
+          "PrivateMemorySize64": 401584128,
+          "WorkingSet64": 316739584
+        },
+        "run": 1,
+        "label": "integrated-document-after-3"
+      }
+    ],
+    "method": "Three alternating Before/After pairs on 2026-10-27; fresh process per run; 5000 commits, 3 authors; identical locked dependencies, build options, viewport and cached author images.",
+    "aggregate": {
+      "before": {
+        "median_ms": 22.901500000000002,
+        "p95_ms": 38.964,
+        "private_mib": 356.51171875,
+        "working_set_mib": 274.7734375
+      },
+      "after": {
+        "median_ms": 23.5157,
+        "p95_ms": 29.9357,
+        "private_mib": 382.42578125,
+        "working_set_mib": 301.66796875
+      }
+    },
+    "before": [
+      {
+        "ready": true,
+        "title": "ctty7 Git History acceptance",
+        "os": "windows",
+        "scale_factor": 1.75,
+        "width": 1280.0,
+        "height": 800.0,
+        "dark": false,
+        "dock": false,
+        "right_panel": true,
+        "readme": false,
+        "history": true,
+        "history_width": 320.0,
+        "history_height": 400.0,
+        "history_profile": {
+          "scroll_samples": 120,
+          "scroll_cpu_median_ms": 33.0171,
+          "scroll_cpu_p95_ms": 42.009299999999996,
+          "scroll_cpu_max_ms": 43.6234,
+          "min_scroll_offset": -9600.0,
+          "measurement": "native event dispatch and GPUI CPU layout/prepaint/paint; excludes GPU execution and presentation",
+          "warmup_frames": 20,
+          "scroll_step_px": 120
+        },
+        "history_commits": 5000,
+        "files": [
+          "\\\\?\\D:\\gh-prj\\ctty7-git-history\\.scratch\\git-history-perf\\history-workspace\\README.md"
+        ],
+        "active": "\\\\?\\D:\\gh-prj\\ctty7-git-history\\.scratch\\git-history-perf\\history-workspace\\README.md",
+        "preview": true,
+        "open_files": 1,
+        "capture": "No GPU image requested",
+        "process_memory": {
+          "PrivateMemorySize64": 402251776,
+          "WorkingSet64": 333172736
+        },
+        "run": 1,
+        "label": "integrated-document-before-1"
+      },
+      {
+        "ready": true,
+        "title": "ctty7 Git History acceptance",
+        "os": "windows",
+        "scale_factor": 1.75,
+        "width": 1280.0,
+        "height": 800.0,
+        "dark": false,
+        "dock": false,
+        "right_panel": true,
+        "readme": false,
+        "history": true,
+        "history_width": 320.0,
+        "history_height": 400.0,
+        "history_profile": {
+          "scroll_samples": 120,
+          "scroll_cpu_median_ms": 22.901500000000002,
+          "scroll_cpu_p95_ms": 29.570800000000002,
+          "scroll_cpu_max_ms": 34.017199999999995,
+          "min_scroll_offset": -9600.0,
+          "measurement": "native event dispatch and GPUI CPU layout/prepaint/paint; excludes GPU execution and presentation",
+          "warmup_frames": 20,
+          "scroll_step_px": 120
+        },
+        "history_commits": 5000,
+        "files": [
+          "\\\\?\\D:\\gh-prj\\ctty7-git-history\\.scratch\\git-history-perf\\history-workspace\\README.md"
+        ],
+        "active": "\\\\?\\D:\\gh-prj\\ctty7-git-history\\.scratch\\git-history-perf\\history-workspace\\README.md",
+        "preview": true,
+        "open_files": 1,
+        "capture": "No GPU image requested",
+        "process_memory": {
+          "PrivateMemorySize64": 373829632,
+          "WorkingSet64": 288120832
+        },
+        "run": 1,
+        "label": "integrated-document-before-2"
+      },
+      {
+        "ready": true,
+        "title": "ctty7 Git History acceptance",
+        "os": "windows",
+        "scale_factor": 1.75,
+        "width": 1280.0,
+        "height": 800.0,
+        "dark": false,
+        "dock": false,
+        "right_panel": true,
+        "readme": false,
+        "history": true,
+        "history_width": 320.0,
+        "history_height": 400.0,
+        "history_profile": {
+          "scroll_samples": 120,
+          "scroll_cpu_median_ms": 19.5247,
+          "scroll_cpu_p95_ms": 38.964,
+          "scroll_cpu_max_ms": 41.9925,
+          "min_scroll_offset": -9600.0,
+          "measurement": "native event dispatch and GPUI CPU layout/prepaint/paint; excludes GPU execution and presentation",
+          "warmup_frames": 20,
+          "scroll_step_px": 120
+        },
+        "history_commits": 5000,
+        "files": [
+          "\\\\?\\D:\\gh-prj\\ctty7-git-history\\.scratch\\git-history-perf\\history-workspace\\README.md"
+        ],
+        "active": "\\\\?\\D:\\gh-prj\\ctty7-git-history\\.scratch\\git-history-perf\\history-workspace\\README.md",
+        "preview": true,
+        "open_files": 1,
+        "capture": "No GPU image requested",
+        "process_memory": {
+          "PrivateMemorySize64": 333586432,
+          "WorkingSet64": 247889920
+        },
+        "run": 1,
+        "label": "integrated-document-before-3"
+      }
+    ]
   }
 }

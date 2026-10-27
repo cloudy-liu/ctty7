@@ -41,9 +41,10 @@ photos are preseeded in the app's ordinary avatar cache for reproducible capture
 No fixture data is injected into the production renderer.
 
 Both versions use a 1280 x 800 logical viewport, display scale 1.75, a 400px
-History section, and the same theme/sidebar width within each pair. The baseline
-is `ee23f9d623e406fdf02484299287a3d916ad817d` with only the opt-in native fixture
-extension in [this patch](git-history-before-fixture.patch). Separate config
+History section, and the same theme/sidebar width within each pair. The older
+list-only Before captures use `ee23f9d623e406fdf02484299287a3d916ad817d`
+with only the opt-in native fixture extension in
+[this patch](git-history-before-fixture.patch). Separate config
 directories keep the user's real sessions and preferences out of the fixture.
 
 Inspect the original scope in each subject, circular photos, author/age on the
@@ -70,7 +71,7 @@ commit's context menu.
 
 ## Automated acceptance
 
-The final Windows workspace run passed **3,172 tests, zero failures, 12 ignored**.
+The final Windows workspace run passed **3,176 tests, zero failures, 12 ignored**.
 It includes the actual rendered-row interaction at 260px with five
 lanes, a long author, long branch/tag names, 2,000 refs (`+1998`), and a 5,000-row
 page. It checks 44px row bounds, visible author/age and overflow count, no distant
@@ -107,6 +108,8 @@ The document follow-up additionally resolved hoisted-header focus ownership,
 focused-file back navigation and active-tab visibility. Shared diff actions
 were extracted so both breadcrumbs retain identical mode/context/navigation
 eligibility rules. The review rechecked these fixes with no remaining finding.
+A final integration audit against `fork/main` (`98aa012e`) also found no
+remaining issue after preserving both sets of adjacent editor regressions.
 
 ## Spec
 
@@ -152,22 +155,25 @@ GeForce GTX 1650 / AMD Radeon graphics.
 
 | Native metric (median of 3 runs) | Before | After | Change |
 | --- | ---: | ---: | ---: |
-| Scroll CPU wall time, median | 21.39 ms | 21.98 ms | +0.60 ms (+2.8%) |
-| Scroll CPU wall time, P95 | 27.37 ms | 29.41 ms | +2.04 ms (+7.5%) |
-| Process private memory | 357.34 MiB | 340.82 MiB | -16.52 MiB (-4.6%) |
-| Process working set | 275.66 MiB | 259.48 MiB | -16.18 MiB (-5.9%) |
+| Scroll CPU wall time, median | 22.90 ms | 23.52 ms | +0.61 ms (+2.7%) |
+| Scroll CPU wall time, P95 | 38.96 ms | 29.94 ms | -9.03 ms (-23.2%) |
+| Process private memory | 356.51 MiB | 382.43 MiB | +25.91 MiB (+7.3%) |
+| Process working set | 274.77 MiB | 301.67 MiB | +26.89 MiB (+9.8%) |
 
 
-The table uses the final document-page build in three fresh alternating pairs
-on 2026-10-27, under `final_document` in the raw JSON. The History scroll fixture
-keeps README active in both builds, so it measures scanning the list rather
-than loading a selected commit. Earlier cohorts remain in the raw data.
-Shared-machine native UI activity continued during this comparison. The second
-After run reached a 35.42ms median / 47.31ms P95, versus 21.31/29.41ms and
-21.98/28.02ms in the other two After runs; all samples are retained.
-After private-memory snapshots range from 340.29 to 381.46MiB. The lower
-aggregate memory value does not establish an avatar memory reduction.
-This small local sample does not establish a cross-machine performance guarantee.
+The table uses the final document-page build after integrating `fork/main`
+(`98aa012e`), in three fresh alternating pairs on 2026-10-27. Every per-run
+sample is preserved under `integrated_document` in the raw JSON. Both versions
+use the updated dependency lock. The History scroll fixture keeps README active
+in both builds, so it measures scanning the list rather than loading a selected
+commit. Earlier cohorts remain available separately in the raw data.
+
+Before per-run medians range from 19.52 to 33.02ms and P95 from 29.57 to
+42.01ms; After medians range from 22.98 to 25.17ms and P95 from 29.13 to
+33.95ms. The lower aggregate P95 does not establish a tail-latency improvement.
+Whole-process private-memory medians rise from 356.51 to 382.43MiB; these
+snapshots do not isolate avatar memory. Shared-machine activity and the small
+sample prevent a cross-machine performance guarantee.
 
 ## Avatar boundary measurements
 
@@ -201,16 +207,21 @@ python scripts/prepare-git-history-captures.py .scratch/history-visual --downloa
 python scripts/prepare-git-history-captures.py .scratch/history-perf --download-avatars --profile-commits 5000
 
 # Preserve each built executable at a separate path before the next build.
-python scripts/measure-git-history-native.py <before.exe> .scratch/history-perf/light-320.json --label before --runs 3
-python scripts/measure-git-history-native.py <after.exe> .scratch/history-perf/light-320.json --label after --runs 3
+foreach ($pair in 1..3) {
+  python scripts/measure-git-history-native.py <before.exe> .scratch/history-perf/light-320.json --label "before-$pair" --runs 1
+  python scripts/measure-git-history-native.py <after.exe> .scratch/history-perf/light-320.json --label "after-$pair" --runs 1
+}
 
 # Launch matching light/320px or dark/260px cases and capture with LCU.
 <after.exe> --config-dir .scratch/history-visual/light-320-config --document-visual .scratch/history-visual/light-320.json
 ```
 
-For the baseline, create a checkout at the pinned commit and apply only the
-linked fixture patch. The preparation and measurement scripts can be run from
-this checkout against either executable. Do not apply the production UI/cache
+For the performance baseline, create a checkout at `98aa012e` and apply only
+the linked fixture patch. The older list-only visual pairs retain their pinned
+`ee23f9d6` baseline. Use separate Cargo target directories when switching between
+worktrees to avoid stale workspace-library artifacts. The preparation and
+measurement scripts can be run from this checkout against either executable.
+Do not apply the production UI/cache
 changes to the baseline.
 
 ## Known limitations
@@ -225,13 +236,12 @@ matching an arbitrary Git email to a GitHub account and requires no login.
 
 Raw per-run data, including all exploratory cohorts: [performance JSON](git-history-performance.json).
 
-The final-build aggregate median increased by 0.60ms (2.8%) and P95 by
-2.04ms (7.5%). Private memory decreased by 16.52MiB in this cohort, but the
-wide per-run spread prevents an isolated-memory claim. The earlier avatar-only
-cohort recorded +1.28ms median and +25.12MiB private memory, illustrating this
-whole-process variation. The cache limits and request-sharing tests establish
-bounded work independently of these noisy measurements. These results are not
-optimized-release FPS or isolated-avatar memory measurements.
+After integration, the aggregate median increased by 0.61ms (2.7%) and private
+memory by 25.91MiB (7.3%). P95 varies substantially across the three baseline
+runs; its lower aggregate is not evidence of an improvement. The cache limits
+and request-sharing tests establish bounded work independently of these noisy
+whole-process measurements. These results are not optimized-release FPS or
+isolated-avatar memory measurements.
 
 The native JPEG captures are 1282 x 801 including the window frame. The scroll
 tail additionally verifies the hollow root node and v0.8.1 release label:
