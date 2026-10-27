@@ -38,6 +38,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v0.8.3
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt
@@ -64,6 +66,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v0.8.3
       - run: bash .github/scripts/check-host-boundary.sh
 
   build:
@@ -88,6 +92,8 @@ jobs:
     steps:
       - name: Checkout tty7
         uses: actions/checkout@v4
+        with:
+          ref: v0.8.3
 
       # gpui-component is a git dependency (see Cargo.toml), so no sibling
       # checkout is needed. The Windows backend (gpui_windows + DirectWrite/D3D)
@@ -262,6 +268,8 @@ jobs:
       RUSTFLAGS: -C strip=symbols
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v0.8.3
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -352,6 +360,8 @@ jobs:
       RUSTFLAGS: -C strip=symbols
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v0.8.3
 
       - uses: dtolnay/rust-toolchain@stable
         with:
