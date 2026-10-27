@@ -60,6 +60,14 @@ pub(super) fn render_taskbar(size: u32) -> Option<RgbaImage> {
     Some(to_rgba(&pixmap))
 }
 
+#[cfg(target_os = "windows")]
+pub(super) fn attention_mark(size: u32) -> Option<RgbaImage> {
+    let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
+    let s = size as f32;
+    paint_attention(&mut pixmap, s / 2.0, s / 2.0, s * 0.46, 0.22);
+    Some(to_rgba(&pixmap))
+}
+
 pub(super) fn agent_avatar(
     agent: crate::core::cli_agent::CLIAgent,
     status: crate::core::cli_agent::AgentStatus,
@@ -280,6 +288,23 @@ pub(super) fn render_argb(attention: bool) -> Option<(Vec<u8>, u32)> {
 mod tests {
     use super::*;
     use crate::core::cli_agent::{AgentStatus, CLIAgent};
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn shortcut_taskbar_overlay_is_a_standalone_attention_mark() {
+        for size in [16, 32, 48] {
+            let image = attention_mark(size).unwrap();
+            let pixel = |x: u32, y: u32| {
+                let offset = ((y * size + x) * 4) as usize;
+                <[u8; 4]>::try_from(&image.data[offset..offset + 4]).unwrap()
+            };
+            assert_eq!(pixel(size / 2, size / 2), [255, 255, 255, 255]);
+            assert_eq!(pixel(size / 4, size / 2), [52, 52, 52, 255]);
+            for (x, y) in [(0, 0), (0, size - 1), (size - 1, 0), (size - 1, size - 1)] {
+                assert_eq!(pixel(x, y), [0, 0, 0, 0]);
+            }
+        }
+    }
 
     #[cfg(target_os = "windows")]
     #[test]
