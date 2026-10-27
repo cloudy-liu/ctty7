@@ -37,7 +37,7 @@ const MAX_PREVIEW_BYTES: u64 = 4 * 1024 * 1024;
 use crate::ui::app::Tty7App;
 use crate::ui::diff_rows::{Side, SplitCell, SplitRow, UnifiedRow, split_hunk, unified_rows};
 use crate::ui::diff_selection::{
-    DiffSelection, SelectionLine, selectable_card, selectable_viewport,
+    DiffSelection, SelectableLabel, SelectionLine, selectable_card, selectable_viewport,
 };
 use crate::ui::document_column::DocumentChrome;
 use crate::ui::i18n::{L10nKey, t, t_fmt, t_plural};
@@ -1524,6 +1524,7 @@ impl Tty7App {
         );
         let mut header = h_flex()
             .id(("diff-file-header", idx))
+            .debug_selector(move || format!("diff-file-header:{idx}"))
             .w_full()
             .items_center()
             .gap_2()
@@ -1567,12 +1568,18 @@ impl Tty7App {
             )
             .child(
                 div()
+                    .debug_selector(move || format!("diff-file-name:{idx}"))
                     .flex_1()
                     .min_w_0()
-                    .truncate()
-                    .text_xs()
-                    .font_family(self.font_family.clone())
-                    .child(shown_path),
+                    .child(SelectableLabel {
+                        id: format!("diff-file-name-selection:{}", file.path).into(),
+                        text: shown_path.into(),
+                        font: gpui::Font {
+                            family: self.font_family.clone().into(),
+                            ..Default::default()
+                        },
+                        font_size: px(window.rem_size().as_f32() * 0.75),
+                    }),
             );
         if file.binary {
             header = header.child(
@@ -4128,6 +4135,160 @@ mod github_theme_gpui_tests {
             failures.is_empty(),
             "partial diff selection failed: {failures:?}"
         );
+    }
+
+    #[gpui::test]
+    fn diff_file_names_support_selection_and_copy(cx: &mut TestAppContext) {
+        let (app, _) = test_window::harness(cx);
+        for mode in [DiffViewMode::Split, DiffViewMode::Unified] {
+            let path = "src/目录/selected.rs";
+            let file = git_diff::synthesize_added(
+                path,
+                b"body only\n",
+                &git_diff::DiffBudget::SINGLE_FILE,
+            );
+            let (_, vcx) = cx.add_window_view(|_, _| LongDiff {
+                app: app.clone(),
+                file,
+                mode,
+                vertical: gpui::ScrollHandle::new(),
+            });
+            vcx.run_until_parked();
+            vcx.update(|_, cx| {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string("UNCHANGED".into()));
+            });
+            let bounds = vcx.debug_bounds("diff-file-name:0").expect("file name");
+            let (start_x, end_x) = vcx.update(|window, cx| {
+                let font = gpui::Font {
+                    family: app.read(cx).font_family.clone().into(),
+                    ..Default::default()
+                };
+                let size = window.rem_size().as_f32() * 0.75;
+                let width = |text: &str| {
+                    crate::ui::tab_strip::measure_text(window.text_system(), &font, size, text)
+                };
+                (width("src/目录/"), width(path))
+            });
+            let start = point(bounds.left() + px(start_x), bounds.center().y);
+            let end = point(bounds.left() + px(end_x), bounds.center().y);
+            vcx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.simulate_mouse_move(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+            vcx.run_until_parked();
+            vcx.simulate_keystrokes("secondary-c");
+            assert_eq!(
+                vcx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())),
+                Some("selected.rs".into()),
+                "dragging a file name must copy its selected characters in {mode:?}"
+            );
+            vcx.simulate_keystrokes("secondary-a secondary-c");
+            assert_eq!(
+                vcx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())),
+                Some(path.into()),
+                "file-name Select All must include the full path"
+            );
+            vcx.update(|_, cx| {
+                cx.write_to_clipboard(gpui::ClipboardItem::new_string("UNCHANGED".into()));
+            });
+            vcx.simulate_mouse_down(start, gpui::MouseButton::Right, gpui::Modifiers::none());
+            vcx.simulate_mouse_up(start, gpui::MouseButton::Right, gpui::Modifiers::none());
+            vcx.run_until_parked();
+            vcx.simulate_keystrokes("down enter");
+            assert_eq!(
+                vcx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())),
+                Some(path.into()),
+                "the file-name context menu must copy the selected path"
+            );
+            let body_selector = match mode {
+                DiffViewMode::Split => "diff-new-text",
+                DiffViewMode::Unified => "diff-unified-text",
+            };
+            let body = vcx.debug_bounds(body_selector).unwrap().center();
+            vcx.simulate_click(body, gpui::Modifiers::none());
+            vcx.simulate_keystrokes("secondary-a secondary-c");
+            assert_eq!(
+                vcx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())),
+                Some("body only".into()),
+                "content copying must stay independent of the file name"
+            );
+        }
+    }
+
+    #[gpui::test]
+    fn selecting_a_diff_file_name_preserves_expansion(cx: &mut TestAppContext) {
+        let (app, mut initial_window) = test_window::harness(cx);
+        initial_window.update(|window, _| window.remove_window());
+        let (_, vcx) = cx.add_window_view(|_, _| ContextDiff(app.clone()));
+        vcx.simulate_resize(size(px(1000.), px(600.)));
+        app.update_in(vcx, |app, _, cx| {
+            app.tabs = vec![crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty)];
+            app.active = 0;
+            app.tabs[0].diff_overlay = Some(DiffOverlayState {
+                host_id: crate::ui::host_ops::HostId::LOCAL,
+                cwd: PathBuf::from("/fixture"),
+                source: DiffSource::Worktree,
+                commit: None,
+                commit_message_expanded: false,
+                document_header_focus: cx.focus_handle(),
+                focus_handle: cx.focus_handle(),
+                load: DiffLoad::Ready(Arc::new(DiffSnapshot {
+                    files: vec![git_diff::synthesize_added(
+                        "a.rs",
+                        b"body only\n",
+                        &git_diff::DiffBudget::SINGLE_FILE,
+                    )],
+                    ..Default::default()
+                })),
+                loading: false,
+                expanded: HashMap::from([("a.rs".into(), true)]),
+                focus: None,
+                preview: None,
+                preview_loading: None,
+                scroll: gpui::ScrollHandle::new(),
+                epoch: None,
+                file_views: HashMap::new(),
+                geometry: Rc::default(),
+                anchor: Rc::default(),
+            });
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        let name = vcx.debug_bounds("diff-file-name:0").unwrap();
+        let start = point(name.left() + px(1.), name.center().y);
+        let end = point(name.left() + px(60.), name.center().y);
+        vcx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.simulate_mouse_move(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.run_until_parked();
+        vcx.simulate_keystrokes("secondary-a secondary-c");
+        assert_eq!(
+            vcx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())),
+            Some("a.rs".into())
+        );
+        assert!(app.read_with(vcx, |app, _| {
+            app.tabs[app.active].diff_overlay.as_ref().unwrap().expanded["a.rs"]
+        }));
+
+        let header = vcx.debug_bounds("diff-file-header:0").unwrap();
+        vcx.simulate_click(
+            point(header.left() + px(17.), header.center().y),
+            gpui::Modifiers::none(),
+        );
+        vcx.run_until_parked();
+        assert!(!app.read_with(vcx, |app, _| {
+            app.tabs[app.active].diff_overlay.as_ref().unwrap().expanded["a.rs"]
+        }));
+        let name = vcx.debug_bounds("diff-file-name:0").unwrap();
+        vcx.simulate_click(name.center(), gpui::Modifiers::none());
+        vcx.simulate_keystrokes("secondary-a secondary-c");
+        assert_eq!(
+            vcx.update(|_, cx| cx.read_from_clipboard().and_then(|item| item.text())),
+            Some("a.rs".into()),
+            "collapsed file names must remain selectable"
+        );
+        assert!(!app.read_with(vcx, |app, _| {
+            app.tabs[app.active].diff_overlay.as_ref().unwrap().expanded["a.rs"]
+        }));
     }
 
     struct LongDiff {
