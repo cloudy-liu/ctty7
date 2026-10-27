@@ -1,4 +1,4 @@
-//! Compose attention into the window icon so every taskbar keeps it upper-right.
+//! Compose window attention and deliver shortcut-backed taskbar reminders to Explorer.
 use super::{TraySnapshot, icon};
 use anyhow::Context as _;
 use gpui::App;
@@ -6,11 +6,17 @@ use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use std::collections::HashMap;
 use windows::Win32::{
     Foundation::{HWND, LPARAM, WPARAM},
-    UI::WindowsAndMessaging::{
-        CreateIconFromResourceEx, DestroyIcon, GCLP_HICON, GCLP_HICONSM, GetClassLongPtrW, HICON,
-        ICON_BIG, ICON_SMALL, IsWindow, LR_DEFAULTCOLOR, SendMessageW, WM_GETICON, WM_SETICON,
+    System::Com::{CLSCTX_INPROC_SERVER, CoCreateInstance},
+    UI::{
+        Shell::{ITaskbarList3, TaskbarList},
+        WindowsAndMessaging::{
+            CreateIconFromResourceEx, DestroyIcon, GCLP_HICON, GCLP_HICONSM, GetClassLongPtrW,
+            HICON, ICON_BIG, ICON_SMALL, IsWindow, LR_DEFAULTCOLOR, SendMessageW, WM_GETICON,
+            WM_SETICON,
+        },
     },
 };
+use windows::core::w;
 
 const KINDS: [u32; 2] = [ICON_SMALL, ICON_BIG];
 
@@ -19,6 +25,11 @@ struct Icon(HICON);
 impl Icon {
     fn new(size: u32) -> anyhow::Result<Self> {
         let image = icon::render_taskbar(size).context("could not render attention icon")?;
+        Self::from_image(image)
+    }
+
+    fn from_image(image: icon::RgbaImage) -> anyhow::Result<Self> {
+        let size = image.width;
         let mut png = std::io::Cursor::new(Vec::new());
         image::RgbaImage::from_raw(image.width, image.height, image.data)
             .context("invalid attention icon")?
@@ -47,20 +58,51 @@ impl Drop for Icon {
 
 pub(super) struct Taskbar {
     icon: Icon,
+    overlay: Option<(ITaskbarList3, Icon)>,
     originals: HashMap<isize, [HICON; 2]>,
 }
 
 impl Taskbar {
     fn new() -> anyhow::Result<Self> {
+        // Explorer uses the registered shortcut's icon for the installed
+        // AppUserModelID, ignoring WM_SETICON on the grouped taskbar button.
+        // Keep the upper-right artwork for windows/Alt+Tab and dev builds;
+        // only shortcut-backed groups also need the shell's status overlay.
+        let overlay = if std::env::current_exe()
+            .is_ok_and(|exe| crate::core::aumid::taskbar_app_id(&exe) == crate::core::aumid::AUMID)
+        {
+            // GPUI initializes COM on its Windows UI thread. Keep the window
+            // artwork available even if Explorer's overlay channel fails.
+            (|| -> anyhow::Result<_> {
+                let list: ITaskbarList3 =
+                    unsafe { CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)? };
+                unsafe { list.HrInit()? };
+                let image = icon::attention_mark(32).context("could not render taskbar overlay")?;
+                Ok((list, Icon::from_image(image)?))
+            })()
+            .map_err(|error| log::debug!("taskbar overlay unavailable: {error:#}"))
+            .ok()
+        } else {
+            None
+        };
         Ok(Self {
             // Explorer may ignore a small bitmap for ICON_SMALL at high DPI.
             // Let Windows scale the full-resolution artwork for both slots.
             icon: Icon::new(256)?,
+            overlay,
             originals: HashMap::new(),
         })
     }
 
     fn apply(&mut self, hwnd: HWND, attention: bool) {
+        if let Some((list, icon)) = &self.overlay {
+            let mark = if attention { icon.0 } else { HICON::default() };
+            // Reapply even when the window artwork is unchanged, including
+            // after Explorer has recreated the group's taskbar button.
+            if let Err(error) = unsafe { list.SetOverlayIcon(hwnd, mark, w!("Agent attention")) } {
+                log::debug!("could not update taskbar attention overlay: {error}");
+            }
+        }
         if attention {
             let current = KINDS.map(|kind| unsafe {
                 let icon = SendMessageW(hwnd, WM_GETICON, WPARAM(kind as usize), LPARAM(0)).0;
@@ -130,6 +172,10 @@ impl Drop for Taskbar {
     fn drop(&mut self) {
         // WM_SETICON borrows the HICON. Detach it before freeing its pixels.
         for (&hwnd, &original) in &self.originals {
+            if let Some((list, _)) = &self.overlay {
+                let _ =
+                    unsafe { list.SetOverlayIcon(HWND(hwnd as *mut _), HICON::default(), w!("")) };
+            }
             self.restore(HWND(hwnd as *mut _), original);
         }
     }

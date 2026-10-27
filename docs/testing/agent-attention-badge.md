@@ -265,3 +265,84 @@ The native comparison above closes that coverage gap for this environment.
 Vertical taskbars, live orientation changes, other taskbar customizations and
 Explorer recreation remain unverified; these screenshots do not claim those
 checks passed.
+
+## Installed taskbar group regression on 2026-10-27
+
+PR #189 replaced the native taskbar overlay with `WM_SETICON` to move the
+reminder into the upper-right of the window artwork. Installed applications
+use the `com.github.tty7` AppUserModelID and its registered shortcut. In this
+environment that taskbar group kept the shortcut's plain icon, even while the
+Agent result was `done`, `unread: true`, and aggregate `attention: true`.
+Directly launched, unbranded fixtures displayed the window artwork, masking
+the installed-application regression.
+
+The correction also submits a standalone attention mark through
+`ITaskbarList3::SetOverlayIcon` for the installed application identity. Cargo
+builds retain their separate development identity and window artwork. The
+existing poll reapplies the native overlay and clears it when aggregate
+attention ends. Overlay initialization failure is logged without disabling
+the window artwork. The shell chooses the taskbar overlay's position; this
+does not promise an upper-right position on every taskbar configuration.
+
+The native fixture now sets the same process identity as normal startup,
+before creating windows, without creating or rewriting the user's shortcut.
+Run its executable outside Cargo's build directory to exercise the installed
+identity. Running directly from `target/debug` intentionally selects the
+development identity and cannot accept this regression.
+
+### Matched native Before/After
+
+Both captures use the same two-window `--agent-attention-visual` fixture,
+configuration, `com.github.tty7` process identity, selected unrelated terminal,
+and Agent report sequence. Window 2's Agent A completes while the application
+is inactive. The Before executable uses the corrected fixture identity with
+only native overlay delivery disabled; its `WM_SETICON` behavior matches
+main. This isolates overlay delivery from the fixture-identity correction.
+The After executable enables the overlay. The small
+[baseline patch](background-agent-attention-before.patch) reproduces that
+single-variable experiment against this change.
+
+These are lossless 90 by 90 crops at `(1435, 1510)` from native full-desktop
+captures through LCU and Windows Screenshot Tool on Windows 11 build 22000,
+a 2560 by 1600 display, 175% scaling, and the bottom horizontal taskbar.
+The existing installed application remains running in the same taskbar group.
+
+| Before: unread result, no taskbar mark | After: same unread result, mark visible | After viewing the result |
+| --- | --- | --- |
+| ![Installed taskbar group missing attention](images/background-agent-attention/before-grouped-taskbar.png) | ![Installed taskbar group shows attention](images/background-agent-attention/after-grouped-taskbar.png) | ![Taskbar attention clears after reading](images/background-agent-attention/after-read-taskbar.png) |
+
+| Tray icon disabled: unread result | Tray icon disabled: after reading |
+| --- | --- |
+| ![Taskbar attention works with tray disabled](images/background-agent-attention/after-tray-disabled-taskbar.png) | ![Taskbar attention clears with tray disabled](images/background-agent-attention/after-tray-disabled-read-taskbar.png) |
+
+### Local verification
+
+The [12 native state observations](background-agent-attention-results.ndjson)
+record only fixture state. LCU performs the actual tab clicks, minimize and
+restore; the control file supplies Agent reports without manipulating focus
+or unread state. The observations cover:
+
+- Background completion and clearing when its result is selected.
+- Completion in the already-selected pane while minimized, followed by
+  reading it on restore.
+- Unread results in two windows; reading one retains the other window's
+  attention, and new work clears an obsolete completion.
+- Waiting-for-input attention in the focused pane and clearing on resume.
+- Taskbar delivery and clearing with the tray icon disabled.
+
+`cargo test --offline --locked --workspace --target-dir D:/gh-prj/ctty7/target`
+passes 3,177 tests, with 12 ignored and no failures. This includes the
+background unread, activation, notification-channel and native icon tests,
+plus the standalone overlay artwork regression. The native-feature build,
+normal production build, rustfmt, whitespace and Host boundary checks pass.
+
+### Known limitations
+
+This acceptance exercises production terminal views, Agent reports, polling,
+application identity and Explorer delivery through a deterministic fixture.
+It does not run a live coding Agent, and fixture sound/toast channels are
+disabled. The screenshots accept this Windows taskbar configuration only.
+Explorer restart, vertical/custom taskbars, small-icon mode, and native
+macOS/Linux interaction were not verified in this run. Windows controls
+overlay placement and can suppress native overlays in small-icon mode.
+See Microsoft's [SetOverlayIcon documentation](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-itaskbarlist3-setoverlayicon).
