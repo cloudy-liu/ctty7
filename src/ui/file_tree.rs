@@ -1895,7 +1895,13 @@ impl Tty7App {
 
         let label: AnyElement = if renaming {
             let input = self.file_tree.editing.as_ref().unwrap().input().clone();
-            Input::new(&input).xsmall().into_any_element()
+            div()
+                .flex_1()
+                .min_w_0()
+                .debug_selector(|| "file-tree-edit-input".into())
+                .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                .child(Input::new(&input).xsmall())
+                .into_any_element()
         } else {
             div()
                 .flex_1()
@@ -2460,6 +2466,132 @@ mod tests {
             app.active = app.tabs.len() - 1;
         });
         (app, vcx)
+    }
+
+    fn files_panel(
+        cx: &mut gpui::TestAppContext,
+        root: &Path,
+    ) -> (
+        Entity<Tty7App>,
+        gpui::VisualTestContext,
+        crate::daemon::transport::Stream,
+    ) {
+        use crate::ui::app::{Tab, test_window};
+        use crate::ui::pane::{Pane, PaneSlot};
+
+        let (app, mut vcx) = test_window::harness(cx);
+        let mut pane = app.update_in(&mut vcx, |app, window, cx| {
+            let (view, pane) = crate::terminal::view::quiet_test_pane(1, window, cx);
+            app.tabs.push(Tab::new(Pane::leaf(PaneSlot::Ready(view))));
+            app.active = app.tabs.len() - 1;
+            app.right_panel_visible = true;
+            app.right_panel_tab = RightPanelTab::Files;
+            cx.notify();
+            pane
+        });
+        crate::daemon::protocol::DaemonMsg::Cwd(root.to_path_buf())
+            .encode(&mut pane)
+            .expect("the test pane accepts its working directory");
+
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        loop {
+            vcx.background_executor.run_until_parked();
+            let rooted = app.update_in(&mut vcx, |app, window, cx| {
+                app.file_tree_refresh_roots(window, cx);
+                app.tab_code()
+                    .map(|code| code.roots.clone())
+                    .unwrap_or_default()
+                    == vec![root.to_path_buf()]
+            });
+            if rooted {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the pane never reported its working directory"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        loop {
+            app.update_in(&mut vcx, |_, _, cx| cx.notify());
+            vcx.background_executor.run_until_parked();
+            if app.update_in(&mut vcx, |app, _, _| {
+                app.file_tree.children.get(HostId::LOCAL, root).is_some()
+            }) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the file tree never listed the working directory"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        (app, vcx, pane)
+    }
+
+    #[gpui::test]
+    fn mouse_selection_in_a_folder_rename_input_can_be_copied(cx: &mut gpui::TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let folder = root.path().join("folder-to-rename");
+        std::fs::create_dir(&folder).unwrap();
+        let (app, mut vcx, _pane) = files_panel(cx, root.path());
+
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.file_tree_begin_edit(TreeEditKind::Rename, &folder, true, window, cx);
+        });
+        vcx.run_until_parked();
+
+        let input_bounds = vcx
+            .debug_bounds("file-tree-edit-input")
+            .expect("the folder rename input is visible");
+        let input = app.read_with(&vcx, |app, _| {
+            app.file_tree.editing.as_ref().unwrap().input().clone()
+        });
+        vcx.update(|_, cx| {
+            cx.write_to_clipboard(gpui::ClipboardItem::new_string("UNCHANGED".into()))
+        });
+        let start = gpui::point(input_bounds.left() + gpui::px(10.), input_bounds.center().y);
+        let end = gpui::point(input_bounds.left() + gpui::px(82.), input_bounds.center().y);
+        vcx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.simulate_mouse_move(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.run_until_parked();
+
+        let (editing_open, tree_focused, folder_expanded) =
+            app.update_in(&mut vcx, |app, window, _| {
+                (
+                    app.file_tree.editing.is_some(),
+                    app.file_tree.focus_handle.is_focused(window),
+                    app.tab_code().unwrap().expanded.contains(&folder),
+                )
+            });
+        assert!(
+            editing_open,
+            "dragging in the input must keep renaming active"
+        );
+        assert!(
+            !tree_focused,
+            "dragging in the input must not focus the tree"
+        );
+        assert!(
+            folder_expanded,
+            "dragging in the input must not activate the folder row"
+        );
+        let expected = input.read_with(&vcx, |input, _| {
+            let range = input.selected_range();
+            assert!(
+                !range.is_empty(),
+                "dragging should select part of the folder name"
+            );
+            input.value()[range].to_string()
+        });
+        vcx.simulate_keystrokes("secondary-c");
+        let copied = vcx.update(|_, cx| {
+            cx.read_from_clipboard()
+                .and_then(|item| item.text())
+                .unwrap_or_default()
+        });
+        assert_eq!(copied, expected, "copy should use the mouse-selected text");
     }
 
     #[gpui::test]
