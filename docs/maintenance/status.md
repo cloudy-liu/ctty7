@@ -1,22 +1,24 @@
 # Project status
 
-Checked on 2026-10-25 against GitHub and the local checkout.
+Checked on 2026-10-27 against GitHub and the release candidate checkout.
 This is a dated snapshot; query GitHub again before merging or preparing a release.
 
 ## Open work
 
-The latest published release at preparation time is v0.8.1, published on
-2026-10-25. The v0.8.2 candidate exposes command search and settings directly
-in the titlebar, keeps preview icons transparent, compacts preview controls and
-project breadcrumbs, and prevents native Windows HTML preview from covering
-tooltips. See its [English notes](../releases/v0.8.2.md) and
-[preserved-change audit](../testing/local-change-audit-v0.8.2.md).
+The latest published release at preparation time is v0.8.2, published on
+2026-10-25. The v0.8.3 candidate includes Git History author photos and
+independent complete commit documents (#209), source overflow scrollbars (#210),
+GitHub-style Diff context controls (#206), and optional unsupported-preview
+hints (#211). All four PRs are merged into fork main. See its
+[English notes](../releases/v0.8.3.md) and
+[preserved-change audit](../testing/local-change-audit-v0.8.3.md).
 
-PR #204 is merged into fork main. Release PR #205 contains the direct titlebar
-and transparent preview controls with native Windows screenshot evidence and
-the v0.8.2 version metadata. Source CI and the Release workflow must pass for
-the frozen candidate; package and checksum verification must finish while the
-Release is still a draft.
+PR #209 passed all ten source CI checks before squash merge at `635eddd9`.
+Release preparation changes only version metadata and documentation. The final
+candidate's source CI and Release workflow must pass, and all downloaded assets
+and checksums must be verified while the Release remains a draft. Ongoing local
+custom-name hover and background taskbar changes remain preserved outside this
+candidate.
 
 Issue #175 is closed for the delivered native HTML preview implementation.
 PR #178 implements macOS preview; both architecture-specific native CI artifacts
@@ -32,13 +34,15 @@ restoration and closes #188. See the
 history and remaining checks.
 
 The component fork `cloudy-liu/gpui-component` has a `ctty7` stable integration
-branch. The application pins its exact commit; see
+branch. The application now pins `f95e3b89b9a9ec704f9e3e502e4dc0e02cca636e`,
+including the per-input scrollbar policy used by #210; see
 [gpui-component maintenance](gpui-component.md).
 
 ## Completed work
 
 | Work | Completion |
 | --- | --- |
+| v0.8.2 publication | Published on 2026-10-25 and set Latest, with direct titlebar actions and compact preview/tooltip controls through PRs #204 and #205. |
 | v0.8.1 publication | Published on 2026-10-25 and set Latest. Mermaid reading, compact document headers, menu icons, and Windows attention and HTML navigation corrections are included. |
 | v0.7.1 publication | Published on 2026-10-21. Default Windows HTML preview and terminal block-fill corrections are included through PR #176. |
 | v0.6.0 publication | Published on 2026-10-18 and set Latest. Sidebar groups, full-file diffs, rendering improvements, and the stable component pin are included. |
@@ -77,7 +81,9 @@ these are verification gaps, not additional open GitHub tickets.
 
 ## Source and release state
 
-- Published tag `v0.8.1` is the release-preparation baseline. Its [English notes](../releases/v0.8.1.md) and [local-change audit](../testing/local-change-audit-v0.8.1.md) record the included changes and verification limits.
+- Published tag `v0.8.2` is the release-preparation baseline. Its [English notes](../releases/v0.8.2.md) and [local-change audit](../testing/local-change-audit-v0.8.2.md) record the included changes and verification limits.
+
+- Published tag `v0.8.1` remains available. Its [English notes](../releases/v0.8.1.md) and [local-change audit](../testing/local-change-audit-v0.8.1.md) record the included changes and verification limits.
 
 - Published tag `v0.8.0` remains available. Its [English notes](../releases/v0.8.0.md) and [local-change audit](../testing/local-change-audit-v0.8.0.md) record the included changes and verification limits.
 
@@ -95,7 +101,7 @@ these are verification gaps, not additional open GitHub tickets.
 - All nine [PR #90 CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/37444566340) passed on `73e99d52` before its merge.
 - All nine [PR #92 CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/37450774839) passed on `ffa76e55` before its merge. Local tests passed 2,985 cases with eight ignored.
 - All nine [PR #93 CI jobs](https://github.com/cloudy-liu/ctty7/actions/runs/37452292509) passed before the documentation merge.
-- The current component pin, `9572b7fab9c0fcf73e34c6118f8a9f10f083f928`, is the first pushed commit on the fork's `ctty7` integration branch. It combines the existing component integration line with the Markdown table, virtualization, and aligned-selection fixes; ctty7's locked metadata, dependency tree, build, and workspace tests pass. The component workspace's 309 component tests and macro test pass on Windows with `RUST_MIN_STACK=8388608`; without it, the queued-update test overflows the default test-thread stack.
+- The historical component integration pin, `9572b7fab9c0fcf73e34c6118f8a9f10f083f928`, is the first pushed commit on the fork's `ctty7` integration branch. It combines the existing component integration line with the Markdown table, virtualization, and aligned-selection fixes; ctty7's locked metadata, dependency tree, build, and workspace tests pass. The component workspace's 309 component tests and macro test pass on Windows with `RUST_MIN_STACK=8388608`; without it, the queued-update test overflows the default test-thread stack.
 - [v0.2.2](https://github.com/cloudy-liu/ctty7/releases/tag/v0.2.2), published on 2026-10-10, remains available with 12 program assets plus `checksums.txt`. Downloaded bytes, package layouts, versions, and public URLs were verified at publication.
 - [v0.2.1](https://github.com/cloudy-liu/ctty7/releases/tag/v0.2.1), published on 2026-10-09, remains available with its original assets and checksums.
 - [v0.2.0](https://github.com/cloudy-liu/ctty7/releases/tag/v0.2.0), published on 2026-10-08, remains available with its original assets and checksums.
