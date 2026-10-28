@@ -2233,6 +2233,19 @@ impl Tty7App {
                         )
                     }),
             )
+            .when(
+                commit_front
+                    && self.tabs[self.active]
+                        .diff_overlay
+                        .as_ref()
+                        .is_some_and(crate::ui::diff_overlay::commit_has_diff_actions),
+                |row| {
+                    row.child(self.diff_document_actions(
+                        self.tabs[self.active].diff_overlay.as_ref().unwrap(),
+                        cx,
+                    ))
+                },
+            )
             .child(self.document_fill_button(cx))
             .child(
                 div().occlude().flex_shrink_0().child(
@@ -2663,11 +2676,66 @@ mod tests {
             fill.bottom() <= breadcrumb.top(),
             "layout controls belong to the tab strip"
         );
-        let tools = vcx.debug_bounds("commit-diff-toolbar").unwrap();
         assert!(
-            details.bottom() <= tools.top(),
-            "diff tools follow the message"
+            vcx.debug_bounds("commit-diff-toolbar").is_none(),
+            "diff controls must not take a row"
         );
+        app.update(&mut vcx, |app, cx| {
+            let overlay = app.tabs[app.active].diff_overlay.as_mut().unwrap();
+            overlay.load = crate::ui::diff_overlay::DiffLoad::Ready(std::sync::Arc::new(
+                crate::terminal::git_diff::DiffSnapshot::default(),
+            ));
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        assert!(
+            vcx.debug_bounds("diff-view-toggle").is_none(),
+            "empty diff has no view toggle"
+        );
+        app.update(&mut vcx, |app, cx| {
+            let overlay = app.tabs[app.active].diff_overlay.as_mut().unwrap();
+            let file = crate::terminal::git_diff::synthesize_added(
+                "fixture.rs",
+                b"hello\n",
+                &crate::terminal::git_diff::DiffBudget::SINGLE_FILE,
+            );
+            overlay.load = crate::ui::diff_overlay::DiffLoad::Ready(std::sync::Arc::new(
+                crate::terminal::git_diff::DiffSnapshot {
+                    files: vec![file],
+                    source: overlay.source.clone(),
+                    ..Default::default()
+                },
+            ));
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        let toggle = vcx
+            .debug_bounds("diff-view-toggle")
+            .expect("text diff has a view toggle");
+        assert!(
+            toggle.bottom() <= breadcrumb.top() && toggle.right() <= fill.left(),
+            "diff toggle is in the tab strip before layout actions"
+        );
+        app.update(&mut vcx, |app, cx| {
+            let overlay = app.tabs[app.active].diff_overlay.as_mut().unwrap();
+            if let crate::ui::diff_overlay::DiffLoad::Ready(snapshot) = &mut overlay.load {
+                std::sync::Arc::make_mut(snapshot).files[0].binary = true;
+            }
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        assert!(
+            vcx.debug_bounds("diff-view-toggle").is_none(),
+            "binary-only diff has no view toggle"
+        );
+        app.update(&mut vcx, |app, cx| {
+            let overlay = app.tabs[app.active].diff_overlay.as_mut().unwrap();
+            if let crate::ui::diff_overlay::DiffLoad::Ready(snapshot) = &mut overlay.load {
+                std::sync::Arc::make_mut(snapshot).files[0].binary = false;
+            }
+            cx.notify();
+        });
+        vcx.run_until_parked();
         let divider = vcx.debug_bounds("commit-details-resize").unwrap();
         let start = divider.center();
         let end = start - gpui::point(px(0.), px(50.));
@@ -2698,6 +2766,10 @@ mod tests {
             );
         });
         vcx.run_until_parked();
+        assert!(
+            vcx.debug_bounds("diff-view-toggle").is_none(),
+            "ordinary files hide the diff toggle"
+        );
         assert_eq!(
             vcx.debug_bounds("document-fill-toggle").unwrap(),
             fill,
@@ -2720,9 +2792,9 @@ mod tests {
         vcx.simulate_keystrokes("end");
         vcx.run_until_parked();
         let largest = vcx.debug_bounds("diff-commit-details").unwrap();
-        let tools = vcx.debug_bounds("commit-diff-toolbar").unwrap();
+        let divider = vcx.debug_bounds("commit-details-resize").unwrap();
         assert!(
-            tools.bottom() + px(100.) <= vcx.update(|window, _| window.viewport_size().height),
+            divider.bottom() + px(100.) <= vcx.update(|window, _| window.viewport_size().height),
             "divider leaves room for the diff"
         );
         let viewport = vcx.update(|window, _| window.viewport_size());

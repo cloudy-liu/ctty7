@@ -1,12 +1,21 @@
 # Commit detail layout B
 
-The approved B direction keeps shared layout actions on the document tab strip,
-places diff tools immediately above the diff, and lets the existing fine separator
-allocate space between commit metadata and diff content. Existing icons are retained.
+The commit document keeps shared layout actions in its tab strip. The diff mode
+and focused-file controls now share that strip instead of taking a separate row;
+the mode icon appears when the active commit document contains a text diff.
+The existing fine separator still resizes the message and diff regions, and the
+existing icon artwork is retained.
+
+The native screenshots below document the preceding revision `3e2de8f8` before
+the latest toolbar move. The final placement has not been visually verified:
+LCU identified the acceptance window by its title and window ID, but twice
+returned an unrelated foreground window image. No input was sent to that window.
+The current PR must stay draft until matching final screenshots are captured.
 
 ## Native evidence
 
-Before is the production application at `cb0bc217`. After uses this change.
+Before is the production application at `cb0bc217`. After in this historical
+pair is revision `3e2de8f8`, before the later toolbar move.
 Both run the opt-in production document fixture on Windows with the same real
 Git repository, selected multiline commit `34740588`, 1280 x 800 logical viewport,
 1.75 display scale, light theme, 320px Source Control panel and 400px History.
@@ -95,6 +104,9 @@ the natural-height content wrapper received a follow-up Spec review with no find
 
 ## Known limitations
 
-Native visual acceptance is Windows/light-theme only. Other platforms and dark
-theme receive the same layout implementation and require their CI/manual checks.
+The latest toolbar placement and its dynamic visibility are visually unverified:
+LCU twice returned an unrelated foreground window screenshot despite binding the
+acceptance window. Capture matching Before and After screenshots before marking
+the draft PR ready. Prior revision screenshots cover Windows/light-theme only;
+macOS, Linux, and dark-theme visuals have not been manually exercised.
 The split is retained for the open commit document, not persisted across app restarts.
