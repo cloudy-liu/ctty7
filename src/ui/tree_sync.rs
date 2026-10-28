@@ -189,9 +189,12 @@ fn desired_node(pane: &Pane, remote_window: bool, cx: &App) -> Option<DesiredNod
                 pane: view.pane_id,
                 seed: PaneSeed {
                     pane: view.pane_id,
-                    cwd: view
-                        .spawnable_cwd()
-                        .map(|p| p.to_string_lossy().into_owned()),
+                    cwd: if ssh_spec.is_some() {
+                        view.cwd()
+                    } else {
+                        view.spawnable_cwd()
+                    }
+                    .map(|p| p.to_string_lossy().into_owned()),
                     ssh_spec,
                     agent,
                     // Only a pane this window spawned knows this; one it

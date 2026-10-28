@@ -158,6 +158,7 @@ pub struct NativeSshParts {
     terminal: RemoteTerminal,
     pane_id: u64,
     persist: Box<crate::daemon::protocol::NativeSshSpec>,
+    restored: bool,
 }
 
 /// What a pane is called when nothing running in it has said otherwise.
@@ -1095,19 +1096,30 @@ impl TerminalView {
     pub fn spawn_native_ssh_terminal(
         spec: Box<crate::daemon::protocol::NativeSshSpec>,
         working_directory: Option<std::path::PathBuf>,
+        restore_pane: Option<u64>,
     ) -> anyhow::Result<NativeSshParts> {
         let persist = Box::new(spec.without_secrets());
-        let (terminal, pane_id) = RemoteTerminal::spawn_native_ssh(
-            TermSize::new(80, 24),
-            8,
-            17,
-            working_directory,
-            spec,
-        )?;
+        let attached = restore_pane.and_then(|id| {
+            RemoteTerminal::attach(TermSize::new(80, 24), 8, 17, id)
+                .map(|terminal| (terminal, id))
+                .ok()
+        });
+        let restored = attached.is_some();
+        let (terminal, pane_id) = match attached {
+            Some(parts) => parts,
+            None => RemoteTerminal::spawn_native_ssh(
+                TermSize::new(80, 24),
+                8,
+                17,
+                working_directory,
+                spec,
+            )?,
+        };
         Ok(NativeSshParts {
             terminal,
             pane_id,
             persist,
+            restored,
         })
     }
 
@@ -1117,6 +1129,7 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut view = Self::with_terminal(parts.terminal, parts.pane_id, window, cx);
+        view.restored = parts.restored;
         view.remember_native_ssh_spec(parts.persist);
         view
     }
@@ -1814,11 +1827,17 @@ impl TerminalView {
         } else {
             command.to_string()
         };
-        let supported = crate::ui::tree_sync::control_for(cx, self.host_id).is_some_and(|client| {
-            client
-                .hello()
-                .has_feature(crate::daemon::protocol::FEATURE_AGENT_RESUME)
-        });
+        let supported = crate::ui::tree_sync::control_for(cx, self.host_id)
+            .map(|client| {
+                client
+                    .hello()
+                    .has_feature(crate::daemon::protocol::FEATURE_AGENT_RESUME)
+            })
+            .unwrap_or(self.ssh_spec.is_some());
+        if self.ssh_spec.is_some() && !supported {
+            log::warn!("native SSH agent restore requires a server with ResumeAgent support");
+            return;
+        }
         self.terminal.resume_agent(
             crate::daemon::protocol::AgentResume {
                 agent,

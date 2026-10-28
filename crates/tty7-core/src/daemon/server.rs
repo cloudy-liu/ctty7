@@ -776,7 +776,8 @@ fn handle_conn(stream: Stream, registry: Arc<Registry>) -> anyhow::Result<()> {
             stream_pane(pane, id, read_stream, write_stream, registry)
         }
 
-        ClientMsg::SpawnNativeSsh { cwd: _, size, spec } => {
+        ClientMsg::SpawnNativeSsh { cwd, size, spec } => {
+            let remote_start_dir = cwd.and_then(|path| path.into_os_string().into_string().ok());
             let id = registry.alloc_id();
             let on_dead = {
                 let registry = registry.clone();
@@ -789,7 +790,8 @@ fn handle_conn(stream: Stream, registry: Arc<Registry>) -> anyhow::Result<()> {
                         .ok();
                 }
             };
-            let pane = match DaemonPane::spawn_native_ssh(id, size, spec, on_dead) {
+            let pane = match DaemonPane::spawn_native_ssh(id, size, spec, remote_start_dir, on_dead)
+            {
                 Ok(p) => p,
                 Err(e) => {
                     let mut w = write_stream;

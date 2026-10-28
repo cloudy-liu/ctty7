@@ -736,6 +736,7 @@ struct PaneState {
     /// live session learned nothing and drew it as an unknown remote — no
     /// "connected" dot, and no warning before closing it.
     ssh_phase: Option<crate::daemon::protocol::SshPhase>,
+    pending_ssh_resume: Option<crate::daemon::protocol::AgentResume>,
     /// What this pane is running, for the machine tree to record. Distinct from
     /// `shell` above, which is the shell-integration state.
     shell_spec: Option<ShellSpec>,
@@ -1471,6 +1472,7 @@ impl DaemonPane {
                 osc_title: restored_title,
                 shell: ShellState::default(),
                 ssh_phase: None,
+                pending_ssh_resume: None,
                 shell_spec: spawn.shell.clone(),
                 remote: spawn.remote.clone(),
                 agent: None,
@@ -1702,10 +1704,12 @@ impl DaemonPane {
                 shell: ShellState {
                     active: carried.shell_active,
                     at_prompt: carried.at_prompt,
+                    prompt_ready: false,
                     last_exit_code: carried.last_exit,
                     command: None,
                 },
                 ssh_phase: None,
+                pending_ssh_resume: None,
                 remote: carried.remote,
                 agent: carried.agent,
                 foreground_app: carried.foreground_app,
@@ -1726,6 +1730,7 @@ impl DaemonPane {
         id: u64,
         size: WinSize,
         spec: Box<NativeSshSpec>,
+        remote_start_dir: Option<String>,
         on_dead: impl FnOnce() + Send + 'static,
     ) -> anyhow::Result<Arc<Self>> {
         let bridge = crate::daemon::ssh::session::make_bridge();
@@ -1756,10 +1761,11 @@ impl DaemonPane {
             // A native ssh pane is not running a shell of this machine's; what
             // it is, `ssh_spec` already says.
             shell_spec: None,
-            cwd: None,
+            cwd: remote_start_dir.as_ref().map(PathBuf::from),
             osc_title: None,
             shell: ShellState::default(),
             ssh_phase: None,
+            pending_ssh_resume: None,
             remote: Some(remote),
             agent: None,
             foreground_app: None,
@@ -1825,6 +1831,7 @@ impl DaemonPane {
         crate::daemon::ssh::SshManager::global().spawn_native_session(
             id,
             spec,
+            remote_start_dir,
             size,
             broker,
             bridge.data_tx,
@@ -2101,6 +2108,7 @@ impl DaemonPane {
                             // and only meaningful when a probe follows.
                             graphics.set_local(st.remote.is_none());
                             apply_probed_cwd(&mut st, probed_cwd);
+                            write_ready_ssh_resume(&mut st, &writer);
                             if let Some(tr1) = tr1 {
                                 tr_disp_t += tr1.elapsed();
                             }
@@ -2250,7 +2258,14 @@ impl DaemonPane {
             return;
         }
         dismiss_pending_restore_on_submit(self.id, bytes);
-        note_agent_input(&mut self.state.lock().unwrap(), bytes);
+        {
+            let mut state = self.state.lock().unwrap();
+            if !only_terminal_replies(bytes) && state.pending_ssh_resume.take().is_some() {
+                end_agent(&mut state);
+                crate::core::machine::observe_pane(self.id, |pane| pane.agent = None);
+            }
+            note_agent_input(&mut state, bytes);
+        }
         if let Ok(mut writer) = self.writer.lock() {
             let _ = writer.write_all(bytes);
             let _ = writer.flush();
@@ -2258,7 +2273,18 @@ impl DaemonPane {
     }
 
     pub fn resume_agent(&self, resume: &crate::daemon::protocol::AgentResume) -> io::Result<()> {
-        remember_agent_resume(&mut self.state.lock().unwrap(), resume)?;
+        let mut state = self.state.lock().unwrap();
+        remember_agent_resume(&mut state, resume)?;
+        if state
+            .remote
+            .as_ref()
+            .is_some_and(|remote| remote.kind == RemoteKind::NativeSsh)
+        {
+            state.pending_ssh_resume = Some(resume.clone());
+            write_ready_ssh_resume(&mut state, &self.writer);
+            return Ok(());
+        }
+        drop(state);
         self.write_input(format!("{}\r", resume.command).as_bytes());
         Ok(())
     }
@@ -2711,6 +2737,9 @@ impl ReplayRing {
 
 fn replay_state(st: &PaneState, subscriber: &Sender<DaemonMsg>) {
     st.ring.replay(subscriber);
+    if st.remote.is_some() {
+        let _ = subscriber.send(DaemonMsg::RemoteContext(st.remote.clone()));
+    }
     if let Some(cwd) = &st.cwd {
         let _ = subscriber.send(DaemonMsg::Cwd(cwd.clone()));
     }
@@ -2720,9 +2749,6 @@ fn replay_state(st: &PaneState, subscriber: &Sender<DaemonMsg>) {
             at_prompt: st.shell.at_prompt,
             last_exit: st.shell.last_exit_code,
         });
-    }
-    if st.remote.is_some() {
-        let _ = subscriber.send(DaemonMsg::RemoteContext(st.remote.clone()));
     }
     if let Some(phase) = &st.ssh_phase {
         let _ = subscriber.send(DaemonMsg::SshStatus {
@@ -3249,6 +3275,38 @@ fn dismiss_pending_restore_on_submit(pane: u64, bytes: &[u8]) {
     }
 }
 
+fn write_ready_ssh_resume(st: &mut PaneState, writer: &Mutex<Box<dyn Write + Send>>) {
+    // Login scripts can report complete command cycles before the first
+    // interactive prompt. Keep the queued identity through those reports.
+    if let Some(resume) = st.pending_ssh_resume.clone()
+        && (st.agent != Some(resume.agent)
+            || st
+                .agent_session
+                .as_ref()
+                .and_then(|s| s.session_id.as_deref())
+                != Some(resume.session_id.as_str()))
+    {
+        let _ = remember_agent_resume(st, &resume);
+    }
+    if !st.alive
+        || st.ssh_phase != Some(crate::daemon::protocol::SshPhase::Connected)
+        || !st.shell.active
+        || !st.shell.at_prompt
+        || !st.shell.prompt_ready
+    {
+        return;
+    }
+    let Some(resume) = st.pending_ssh_resume.take() else {
+        return;
+    };
+    let command = format!("{}\r", resume.command);
+    note_agent_input(st, command.as_bytes());
+    if let Ok(mut writer) = writer.lock() {
+        let _ = writer.write_all(command.as_bytes());
+        let _ = writer.flush();
+    }
+}
+
 fn remember_agent_resume(
     st: &mut PaneState,
     resume: &crate::daemon::protocol::AgentResume,
@@ -3632,6 +3690,8 @@ fn windows_agent_probe_signal(
 struct ShellState {
     active: bool,
     at_prompt: bool,
+    /// An actual prompt mark (A/B), rather than command completion (D).
+    prompt_ready: bool,
     last_exit_code: Option<i32>,
     command: Option<String>,
 }
@@ -3760,9 +3820,13 @@ impl OscSniffer {
 fn handle_osc133(shell: &mut ShellState, rest: &[u8]) -> bool {
     shell.active = true;
     match rest.first() {
-        Some(b'A') | Some(b'B') => shell.at_prompt = true,
+        Some(b'A') | Some(b'B') => {
+            shell.at_prompt = true;
+            shell.prompt_ready = true;
+        }
         Some(b'C') => {
             shell.at_prompt = false;
+            shell.prompt_ready = false;
             shell.command = rest
                 .strip_prefix(b"C;")
                 .map(|c| String::from_utf8_lossy(&percent_decode(c)).into_owned())
@@ -3770,6 +3834,7 @@ fn handle_osc133(shell: &mut ShellState, rest: &[u8]) -> bool {
         }
         Some(b'D') => {
             shell.at_prompt = true;
+            shell.prompt_ready = false;
             shell.command = None;
             shell.last_exit_code = rest
                 .strip_prefix(b"D;")
@@ -5193,6 +5258,120 @@ mod tests {
     }
 
     #[test]
+    fn native_ssh_resume_waits_for_the_remote_prompt_without_a_window() {
+        use crate::core::cli_agent::{CLIAgent, command_argv};
+        use crate::daemon::protocol::AgentResume;
+        use crate::daemon::ssh::session::ChannelCmd;
+
+        for cancelled in [false, true] {
+            let bridge = crate::daemon::ssh::session::make_bridge();
+            let mut commands = bridge.cmd_rx;
+            let mut state = test_state(true);
+            state.remote = Some(RemoteContext {
+                kind: RemoteKind::NativeSsh,
+                argv: Vec::new(),
+                target: "test-ssh".into(),
+            });
+            state.ssh_phase = Some(crate::daemon::protocol::SshPhase::Connected);
+            let state = Arc::new(Mutex::new(state));
+            let writer: Arc<Mutex<Box<dyn Write + Send>>> =
+                Arc::new(Mutex::new(Box::new(bridge.writer)));
+            let mut pane = DaemonPane {
+                id: 0,
+                owner: None,
+                backend: PaneBackend::NativeSsh(NativeSshBackend {
+                    handle: bridge.handle,
+                    connection: Arc::new(Mutex::new(Weak::new())),
+                }),
+                writer: writer.clone(),
+                shutting_down: Arc::new(AtomicBool::new(false)),
+                gate: Arc::new(OutputGate::new()),
+                state: state.clone(),
+                reader: Mutex::new(None),
+                broker: None,
+            };
+            let id = "0199c3f2-1b0e-7c3a-9f21-6d4b8e2a5c17";
+            let command = format!("codex resume {id} --yolo");
+            pane.resume_agent(&AgentResume {
+                agent: CLIAgent::Codex,
+                session_id: id.into(),
+                launch_argv: command_argv(&command),
+                command: command.clone(),
+            })
+            .unwrap();
+            assert!(
+                commands.try_recv().is_err(),
+                "authentication is not a ready shell"
+            );
+            {
+                let mut state = state.lock().unwrap();
+                let mut sniffer = OscSniffer::new();
+                apply_signals(&mut state, sniffer.feed(b"\x1b]133;C\x07\x1b]133;D;0\x07"));
+                write_ready_ssh_resume(&mut state, &writer);
+                assert!(
+                    commands.try_recv().is_err(),
+                    "command completion is not a prompt"
+                );
+                assert_eq!(
+                    state
+                        .agent_session
+                        .as_ref()
+                        .and_then(|s| s.session_id.as_deref()),
+                    Some(id),
+                    "startup command cycles must preserve the queued conversation"
+                );
+            }
+            if cancelled {
+                pane.write_input(b"echo manual\r");
+                assert!(
+                    matches!(commands.try_recv(), Ok(ChannelCmd::Data(bytes)) if bytes == b"echo manual\r")
+                );
+            }
+            let reader = DaemonPane::spawn_reader(
+                state,
+                pane.shutting_down.clone(),
+                pane.gate.clone(),
+                Box::new(bridge.reader),
+                writer,
+                |_| false,
+                ForegroundProbes {
+                    remote: Box::new(|| None),
+                    agent: Box::new(|| None),
+                    app: Box::new(|| None),
+                    cwd: Box::new(|| None),
+                },
+                Arc::new(DeathReporter::new(|| {})),
+            );
+            *pane.reader.get_mut().unwrap() = Some(reader);
+            bridge
+                .data_tx
+                .blocking_send(b"\x1b]133;A\x07$ \x1b]133;B\x07".to_vec())
+                .unwrap();
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_time()
+                .build()
+                .unwrap();
+            let next = runtime.block_on(async {
+                tokio::time::timeout(
+                    std::time::Duration::from_millis(if cancelled { 50 } else { 2000 }),
+                    commands.recv(),
+                )
+                .await
+            });
+            if cancelled {
+                assert!(next.is_err(), "user input cancels the queued restore");
+            } else {
+                assert!(
+                    matches!(next, Ok(Some(ChannelCmd::Data(bytes))) if bytes == format!("{command}\r").as_bytes())
+                );
+            }
+
+            assert!(commands.try_recv().is_err(), "resume is dispatched once");
+            drop(bridge.data_tx);
+        }
+    }
+
+    #[test]
     fn a_window_reattaching_to_an_ssh_pane_learns_it_is_connected() {
         use crate::daemon::protocol::SshPhase;
         let mut st = test_state(true);
@@ -5925,6 +6104,7 @@ mod tests {
             osc_title: None,
             shell: ShellState::default(),
             ssh_phase: None,
+            pending_ssh_resume: None,
             remote: None,
             agent: None,
             foreground_app: None,
@@ -8903,6 +9083,7 @@ mod tests {
                 shell: vec![ShellState {
                     active: true,
                     at_prompt: true,
+                    prompt_ready: true,
                     last_exit_code: Some(0),
                     command: None,
                 }],

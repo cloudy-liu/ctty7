@@ -3864,12 +3864,8 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let cwd = self.tabs.get(self.active).and_then(|t| {
-            t.pane
-                .focused_or_first(window, cx)
-                .and_then(|leaf| leaf.read(cx).cwd())
-        });
-        let view = match new_terminal_native(self.font_size, cwd, spec, window, cx) {
+        let cwd = None;
+        let view = match new_terminal_native(self.font_size, cwd, spec, None, window, cx) {
             Ok(view) => view,
             Err(e) => {
                 log::error!("native SSH spawn failed: {e}");
@@ -3901,8 +3897,9 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let saved = pane_to_session(&Pane::leaf(PaneSlot::Ready(dead.clone())), cx);
         let cwd = dead.read(cx).cwd();
-        let fresh = match new_terminal_native(self.font_size, cwd, spec, window, cx) {
+        let fresh = match new_terminal_native(self.font_size, cwd, spec, None, window, cx) {
             Ok(view) => view,
             Err(e) => {
                 log::error!("native SSH respawn failed: {e}");
@@ -3913,6 +3910,24 @@ impl Tty7App {
                 return;
             }
         };
+        if let SessionPane::Leaf {
+            agent,
+            agent_session_id,
+            agent_launch_argv,
+            agent_unstarted,
+            ..
+        } = saved
+        {
+            resume_agent_in_terminal(
+                &fresh,
+                &agent,
+                agent_session_id.as_deref(),
+                agent_launch_argv.as_deref(),
+                agent_unstarted,
+                window,
+                cx,
+            );
+        }
         for tab in &mut self.tabs {
             if tab
                 .pane
@@ -3970,7 +3985,7 @@ impl Tty7App {
         };
         let new = match spawn {
             SpawnAs::Ssh(spec) => {
-                match new_terminal_native(self.font_size, cwd, spec, window, cx) {
+                match new_terminal_native(self.font_size, cwd, spec, None, window, cx) {
                     Ok(view) => PaneSlot::Ready(view),
                     Err(e) => {
                         log::error!("native SSH split spawn failed: {e}");
@@ -8319,7 +8334,11 @@ fn pane_to_session(pane: &Pane, cx: &App) -> SessionPane {
             let view = view.read(cx);
             let pending = view.pending_agent_restore();
             SessionPane::Leaf {
-                cwd: view.spawnable_cwd(),
+                cwd: if view.ssh_spec().is_some() {
+                    view.cwd()
+                } else {
+                    view.spawnable_cwd()
+                },
                 pane_id: Some(view.pane_id),
                 // `None` for a pane this window attached to rather than
                 // spawned: it never knew what was on the other end. The tree
@@ -8380,6 +8399,17 @@ fn resume_agent_in_terminal(
     }) else {
         return;
     };
+    if let Some(spec) = terminal.read(cx).ssh_spec() {
+        if !spec.shell_integration
+            || unstarted
+            || !matches!(
+                agent,
+                crate::core::cli_agent::CLIAgent::Claude | crate::core::cli_agent::CLIAgent::Codex
+            )
+        {
+            return;
+        }
+    }
     terminal.update(cx, |terminal, cx| {
         if unstarted
             && let Some(command) = launch_argv.and_then(|argv| agent.unstarted_command(argv))
@@ -8533,11 +8563,8 @@ fn tabs_from_session(
 }
 
 /// Whether a native SSH pane can be attached to by its old id: only when the
-/// server lists it. A failed attach falls through to a fresh *local* shell,
-/// and after a server restart that put the user's own machine behind a tab
-/// that had been — and still looked like — a session on another one. Without
-/// a listing the host is dialled again: a second connection is recoverable,
-/// typing into the wrong machine is not.
+/// server lists it. Without a listing the host is dialled again. If the old
+/// pane exits after the listing, the native SSH constructor redials it too.
 fn native_ssh_pane_alive(
     alive: Option<&std::collections::HashMap<u64, Option<String>>>,
     id: u64,
@@ -8583,14 +8610,35 @@ fn session_to_pane(
                         && (ssh_spec.is_none() || native_ssh_pane_alive(alive, *id))
                 }),
             };
-            if restore.is_none() {
-                if let Some(spec) = ssh_spec.clone() {
-                    let resolved = crate::ui::ssh_connect::resolve_persisted_ssh_spec(spec, cx);
-                    match new_terminal_native(font_size, cwd.clone(), resolved, window, cx) {
-                        Ok(view) => return Some(Pane::leaf(PaneSlot::Ready(view))),
-                        Err(e) => log::error!("restoring native SSH pane failed: {e}"),
+            if let Some(spec) = ssh_spec.clone() {
+                let resolved = crate::ui::ssh_connect::resolve_persisted_ssh_spec(spec, cx);
+                return match new_terminal_native(
+                    font_size,
+                    cwd.clone(),
+                    resolved,
+                    restore,
+                    window,
+                    cx,
+                ) {
+                    Ok(view) => {
+                        if !view.read(cx).restored() {
+                            resume_agent_in_terminal(
+                                &view,
+                                agent,
+                                agent_session_id.as_deref(),
+                                agent_launch_argv.as_deref(),
+                                *agent_unstarted,
+                                window,
+                                cx,
+                            );
+                        }
+                        Some(Pane::leaf(PaneSlot::Ready(view)))
                     }
-                }
+                    Err(error) => {
+                        log::error!("restoring native SSH pane failed: {error}");
+                        None
+                    }
+                };
             }
             let view = match new_terminal(
                 workspace.cloned(),
@@ -8608,12 +8656,6 @@ fn session_to_pane(
                     return None;
                 }
             };
-            if let PaneSlot::Ready(terminal) = &view
-                && terminal.read(cx).restored()
-                && let Some(spec) = ssh_spec.clone()
-            {
-                terminal.update(cx, |terminal, _| terminal.remember_native_ssh_spec(spec));
-            }
             match &view {
                 PaneSlot::Ready(terminal)
                     if !terminal.read(cx).restored() || *agent_restore_pending =>
@@ -8631,7 +8673,6 @@ fn session_to_pane(
                 PaneSlot::Ready(_) => {}
                 PaneSlot::Connecting(pending) => {
                     pending.update(cx, |pending, _| {
-                        pending.ssh_spec = ssh_spec.clone();
                         pending.spawn.agent = *agent;
                         pending.spawn.agent_session_id = agent_session_id.clone();
                         pending.spawn.agent_launch_argv = agent_launch_argv.clone();
@@ -8819,10 +8860,11 @@ pub(crate) fn new_terminal_native(
     font_size: f32,
     working_directory: Option<std::path::PathBuf>,
     spec: Box<crate::daemon::protocol::NativeSshSpec>,
+    restore_pane: Option<u64>,
     window: &mut Window,
     cx: &mut Context<Tty7App>,
 ) -> anyhow::Result<Entity<TerminalView>> {
-    let parts = TerminalView::spawn_native_ssh_terminal(spec, working_directory)?;
+    let parts = TerminalView::spawn_native_ssh_terminal(spec, working_directory, restore_pane)?;
     let view = cx.new(|cx| {
         let mut view = TerminalView::from_native_ssh_parts(parts, window, cx);
         view.font_size = px(font_size);
@@ -9734,6 +9776,58 @@ mod tests {
             !native_ssh_pane_alive(None, 4),
             "no listing: dial, don't guess"
         );
+    }
+
+    #[gpui::test]
+    fn ineligible_native_ssh_agent_restores_leave_an_interactive_shell(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use crate::core::cli_agent::CLIAgent;
+        use crate::daemon::protocol::ClientMsg;
+        for case in 0..6 {
+            let (app, mut vcx) = super::test_window::harness(cx);
+            let mut daemon = app.update_in(&mut vcx, |_, window, cx| {
+                cx.global_mut::<crate::core::config::Config>()
+                    .restore_agent_sessions = case != 0;
+                let (view, daemon) = crate::terminal::view::quiet_test_pane(42, window, cx);
+                let mut spec: crate::daemon::protocol::NativeSshSpec = serde_json::from_str(
+                    r#"{"host":"test-ssh","port":22,"user":"me","auth_mode":"auto"}"#,
+                )
+                .unwrap();
+                spec.shell_integration = case != 1;
+                view.update(cx, |view, _| view.remember_native_ssh_spec(Box::new(spec)));
+                let agent = if case == 2 {
+                    CLIAgent::Gemini
+                } else {
+                    CLIAgent::Claude
+                };
+                let argv = if case == 3 {
+                    vec!["claude".into(), "--no-session-persistence".into()]
+                } else {
+                    vec!["claude".into()]
+                };
+                super::resume_agent_in_terminal(
+                    &view,
+                    &Some(agent),
+                    (case != 4).then_some("0199c3f2-1b0e-7c3a-9f21-6d4b8e2a5c17"),
+                    Some(&argv),
+                    case == 5,
+                    window,
+                    cx,
+                );
+                assert!(view.read(cx).agent_session().is_none());
+                daemon
+            });
+            daemon
+                .set_read_timeout(Some(std::time::Duration::from_millis(50)))
+                .unwrap();
+            while let Ok(message) = ClientMsg::read(&mut daemon) {
+                assert!(
+                    !matches!(message, ClientMsg::ResumeAgent(_) | ClientMsg::Input(_)),
+                    "case {case}"
+                );
+            }
+        }
     }
 
     #[test]
