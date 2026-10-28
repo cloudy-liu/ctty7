@@ -10,6 +10,27 @@ use std::{
 };
 use tty7_core::daemon::install::checksums::{hex, sha256};
 
+/// Use the preset's auto-sized initials box; pixel avatar sizes in the pinned
+/// component force a half-size text box and inherit an unrelated line height.
+pub(crate) fn author_avatar(
+    name: impl Into<gpui::SharedString>,
+    image: Option<Arc<RenderImage>>,
+    size: f32,
+) -> gpui_component::avatar::Avatar {
+    use gpui::{Styled as _, prelude::FluentBuilder as _, px};
+    use gpui_component::{Sizable as _, Size};
+    gpui_component::avatar::Avatar::new()
+        .name(name)
+        .with_size(Size::Medium)
+        .size(px(size))
+        .line_height(gpui::relative(1.))
+        .when_some(image, |avatar, image| {
+            avatar
+                .with_size(px(size))
+                .src(gpui::ImageSource::Render(image))
+        })
+}
+
 const PIXELS: u32 = 96;
 const MAX_RESPONSE: u64 = 256 * 1024;
 const MAX_ENTRIES: usize = 128;

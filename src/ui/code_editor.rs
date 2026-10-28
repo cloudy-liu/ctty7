@@ -2233,24 +2233,27 @@ impl Tty7App {
                         )
                     }),
             )
-            .when(!commit_front, |row| {
-                row.child(self.document_fill_button(cx)).child(
-                    div().occlude().flex_shrink_0().child(
-                        crate::ui::tab_strip::chrome_tile_sized(
-                            Button::new("editor-panel-close").icon(Icon::new(IconName::Close)),
-                            crate::ui::app::TILE_SIZE,
-                            crate::ui::app::TILE_GLYPH_LINE,
-                            false,
-                            cx,
-                        )
-                        .rounded_lg()
-                        .tooltip(t(L10nKey::EditorBackToTerminal))
-                        .on_click(cx.listener(|this, _, window, cx| {
+            .child(self.document_fill_button(cx))
+            .child(
+                div().occlude().flex_shrink_0().child(
+                    crate::ui::tab_strip::chrome_tile_sized(
+                        Button::new("editor-panel-close").icon(Icon::new(IconName::Close)),
+                        crate::ui::app::TILE_SIZE,
+                        crate::ui::app::TILE_GLYPH_LINE,
+                        false,
+                        cx,
+                    )
+                    .rounded_lg()
+                    .tooltip(t(L10nKey::EditorBackToTerminal))
+                    .on_click(cx.listener(|this, _, window, cx| {
+                        if this.document_front() == Some(crate::ui::app::OverlayTop::Diff) {
+                            this.close_diff_overlay(window, cx);
+                        } else {
                             this.toggle_code_panel(window, cx);
-                        })),
-                    ),
-                )
-            })
+                        }
+                    })),
+                ),
+            )
             .context_menu(move |menu, _window, cx| {
                 Tty7App::document_header_menu(menu, &menu_app, cx)
             })
@@ -2653,7 +2656,34 @@ mod tests {
             .debug_bounds("commit-document-breadcrumb")
             .expect("the commit document has a breadcrumb row");
         let details = vcx.debug_bounds("diff-commit-details").unwrap();
+        let title_height = vcx.debug_bounds("diff-commit-title").unwrap().size.height;
         assert!(commit_tab.bottom() <= breadcrumb.top() && breadcrumb.bottom() <= details.top());
+        let fill = vcx.debug_bounds("document-fill-toggle").unwrap();
+        assert!(
+            fill.bottom() <= breadcrumb.top(),
+            "layout controls belong to the tab strip"
+        );
+        let tools = vcx.debug_bounds("commit-diff-toolbar").unwrap();
+        assert!(
+            details.bottom() <= tools.top(),
+            "diff tools follow the message"
+        );
+        let divider = vcx.debug_bounds("commit-details-resize").unwrap();
+        let start = divider.center();
+        let end = start - gpui::point(px(0.), px(50.));
+        vcx.simulate_mouse_down(start, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.simulate_mouse_move(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.simulate_mouse_up(end, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.run_until_parked();
+        let resized = vcx.debug_bounds("diff-commit-details").unwrap();
+        assert!((details.size.height - resized.size.height - px(50.)).abs() <= px(2.));
+        vcx.simulate_keystrokes("down");
+        vcx.run_until_parked();
+        let adjusted = vcx.debug_bounds("diff-commit-details").unwrap();
+        assert!(
+            adjusted.size.height > resized.size.height,
+            "focused divider supports keyboard adjustment"
+        );
         let readme = vcx.debug_bounds("editor-file-tab-0").unwrap();
         vcx.simulate_click(readme.center(), gpui::Modifiers::none());
         app.read_with(&vcx, |app, _| {
@@ -2667,11 +2697,58 @@ mod tests {
                 "changing documents retains the commit page"
             );
         });
+        vcx.run_until_parked();
+        assert_eq!(
+            vcx.debug_bounds("document-fill-toggle").unwrap(),
+            fill,
+            "layout action stays put when switching documents"
+        );
         let commit_tab = vcx.debug_bounds("editor-commit-tab").unwrap();
         vcx.simulate_click(commit_tab.center(), gpui::Modifiers::none());
         assert_eq!(
             app.read_with(&vcx, |app, _| app.document_front()),
             Some(crate::ui::app::OverlayTop::Diff)
+        );
+        vcx.run_until_parked();
+        assert_eq!(
+            vcx.debug_bounds("diff-commit-details").unwrap().size.height,
+            adjusted.size.height,
+            "switching files preserves the split"
+        );
+        let divider = vcx.debug_bounds("commit-details-resize").unwrap();
+        vcx.simulate_click(divider.center(), gpui::Modifiers::none());
+        vcx.simulate_keystrokes("end");
+        vcx.run_until_parked();
+        let largest = vcx.debug_bounds("diff-commit-details").unwrap();
+        let tools = vcx.debug_bounds("commit-diff-toolbar").unwrap();
+        assert!(
+            tools.bottom() + px(100.) <= vcx.update(|window, _| window.viewport_size().height),
+            "divider leaves room for the diff"
+        );
+        let viewport = vcx.update(|window, _| window.viewport_size());
+        vcx.simulate_resize(gpui::size(viewport.width, px(400.)));
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            window.refresh();
+            let _ = window.draw(cx);
+        });
+        let clamped = vcx.debug_bounds("diff-commit-details").unwrap();
+        vcx.simulate_keystrokes("up");
+        vcx.run_until_parked();
+        let moved = vcx.debug_bounds("diff-commit-details").unwrap();
+        assert!(
+            (clamped.size.height - moved.size.height - px(8.)).abs() <= px(2.),
+            "the first inward arrow moves the divider after a window shrink: {clamped:?} -> {moved:?}"
+        );
+        vcx.simulate_resize(viewport);
+        vcx.simulate_keystrokes("home");
+        vcx.run_until_parked();
+        let smallest = vcx.debug_bounds("diff-commit-details").unwrap();
+        assert!(smallest.size.height >= px(99.) && smallest.size.height < largest.size.height);
+        assert_eq!(
+            vcx.debug_bounds("diff-commit-title").unwrap().size.height,
+            title_height,
+            "shrinking the message viewport must scroll rather than compress its contents"
         );
         let close = vcx.debug_bounds("editor-commit-close").unwrap();
         vcx.simulate_click(close.center(), gpui::Modifiers::none());

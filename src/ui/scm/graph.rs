@@ -786,12 +786,7 @@ impl Tty7App {
         } else {
             None
         };
-        let avatar = gpui_component::avatar::Avatar::new()
-            .name(commit.author.name.clone())
-            .with_size(px(28.))
-            .when_some(image, |avatar, image| {
-                avatar.src(gpui::ImageSource::Render(image))
-            });
+        let avatar = super::avatars::author_avatar(commit.author.name.clone(), image, 28.);
 
         h_flex()
             .id(SharedString::from(format!("scm-graph-row-{i}")))
@@ -1941,13 +1936,39 @@ mod tests {
                 .as_deref(),
             Some(seed.oid.as_str())
         );
+        vcx.simulate_event(gpui::ScrollWheelEvent {
+            position: header.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-2000.))),
+            ..Default::default()
+        });
+        vcx.run_until_parked();
         let expand = vcx.debug_bounds("diff-commit-body-toggle").unwrap();
         vcx.simulate_click(
             gpui::point(expand.left() + px(12.), expand.center().y),
             gpui::Modifiers::none(),
         );
         let expanded = vcx.debug_bounds("diff-commit-body").unwrap();
-        assert!(expanded.size.height > body.size.height && expanded.size.height <= px(160.));
+        assert!(expanded.size.height > body.size.height);
+        assert_eq!(
+            vcx.debug_bounds("diff-commit-details").unwrap().size.height,
+            header.size.height,
+            "expanding the message keeps the chosen split"
+        );
+        vcx.simulate_event(gpui::ScrollWheelEvent {
+            position: header.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-2000.))),
+            ..Default::default()
+        });
+        vcx.run_until_parked();
+        let scrolled_body = vcx.debug_bounds("diff-commit-body").unwrap();
+        assert!(
+            scrolled_body.top() < expanded.top(),
+            "the message section scrolls independently"
+        );
+        assert!(
+            scrolled_body.bottom() <= header.bottom(),
+            "the end of the full message is reachable"
+        );
         app.read_with(&vcx, |app, _| {
             let overlay = app.tabs[0].diff_overlay.as_ref().unwrap();
             assert_eq!(overlay.commit.as_deref(), Some(&seed));

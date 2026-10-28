@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 #[path = "diff_commit.rs"]
 mod commit;
+pub(crate) use commit::CommitSplit;
 
 #[cfg(feature = "markdown-visual-tests")]
 #[path = "diff_profile.rs"]
@@ -119,6 +120,7 @@ pub(crate) struct DiffOverlayState {
     pub(crate) source: DiffSource,
     pub(crate) commit: Option<Arc<tty7_core::core::git::log::Commit>>,
     pub(crate) commit_message_expanded: bool,
+    pub(crate) commit_split: CommitSplit,
     pub(crate) document_header_focus: FocusHandle,
     pub(crate) focus_handle: FocusHandle,
     pub(crate) load: DiffLoad,
@@ -666,6 +668,7 @@ impl Tty7App {
             source,
             commit,
             commit_message_expanded: false,
+            commit_split: crate::ui::diff_overlay::CommitSplit::new(cx),
             document_header_focus: cx.focus_handle(),
             focus_handle: focus_handle.clone(),
             // Every open starts at Loading until its own probe lands. The old
@@ -944,12 +947,29 @@ impl Tty7App {
 
         let palette = diff_palette(cx);
         let content = v_flex()
+            .relative()
             .flex_1()
             .min_h_0()
             .w_full()
             .bg(palette.background)
             .text_color(palette.foreground)
             .children(self.diff_commit_details(overlay, cx))
+            .when(self.has_commit_document(), |body| {
+                body.child(overlay.commit_split.backing()).child(
+                    h_flex()
+                        .id("commit-diff-toolbar")
+                        .debug_selector(|| "commit-diff-toolbar".into())
+                        .relative()
+                        .flex_none()
+                        .h(px(crate::ui::app::SECONDARY_BAR_HEIGHT))
+                        .px_4()
+                        .justify_end()
+                        .border_b_1()
+                        .border_color(cx.theme().border)
+                        .child(self.diff_document_actions(overlay, cx))
+                        .child(overlay.commit_split.divider(cx)),
+                )
+            })
             .child(content);
 
         let commit_document = self.has_commit_document();
@@ -1267,7 +1287,7 @@ impl Tty7App {
                 .child(self.diff_context_button(&path, cx))
                 .child(self.diff_change_button(false, cx))
                 .child(self.diff_change_button(true, cx)))
-            .child(self.document_fill_button(cx))
+            .when(!self.has_commit_document(), |bar| bar.child(self.document_fill_button(cx)))
             .into_any_element()
     }
 
@@ -3810,6 +3830,7 @@ mod github_theme_gpui_tests {
                 source: DiffSource::Staged,
                 commit: None,
                 commit_message_expanded: false,
+                commit_split: crate::ui::diff_overlay::CommitSplit::new(cx),
                 document_header_focus: cx.focus_handle(),
                 focus_handle: cx.focus_handle(),
                 load: DiffLoad::Ready(snapshot),
@@ -3917,6 +3938,7 @@ mod github_theme_gpui_tests {
                     source: DiffSource::Staged,
                     commit: None,
                     commit_message_expanded: false,
+                    commit_split: crate::ui::diff_overlay::CommitSplit::new(cx),
                     document_header_focus: cx.focus_handle(),
                     focus: Some("context.rs".into()),
                     focus_handle: cx.focus_handle(),
@@ -4229,6 +4251,7 @@ mod github_theme_gpui_tests {
                 source: DiffSource::Worktree,
                 commit: None,
                 commit_message_expanded: false,
+                commit_split: crate::ui::diff_overlay::CommitSplit::new(cx),
                 document_header_focus: cx.focus_handle(),
                 focus_handle: cx.focus_handle(),
                 load: DiffLoad::Ready(Arc::new(DiffSnapshot {
