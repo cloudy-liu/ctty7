@@ -3470,6 +3470,9 @@ impl Tty7App {
         let was_focused = pending.read(cx).focus_handle.contains_focused(window, cx);
         let restored = parts.restored;
         let view = build_terminal_view(parts, font_size, window, cx);
+        if restored && let Some(spec) = pending.read(cx).ssh_spec.clone() {
+            view.update(cx, |view, _| view.remember_native_ssh_spec(spec));
+        }
         if let Some(command) = pending.update(cx, |pending, _| pending.on_ready_command.take()) {
             view.read(cx).run_command_line(&command);
         }
@@ -8298,12 +8301,13 @@ fn tab_to_session(tab: &Tab, cx: &App) -> SessionTab {
 fn pane_to_session(pane: &Pane, cx: &App) -> SessionPane {
     match pane {
         Pane::Leaf(PaneSlot::Connecting(pending)) => {
-            let spawn = &pending.read(cx).spawn;
+            let pending = pending.read(cx);
+            let spawn = &pending.spawn;
             SessionPane::Leaf {
                 cwd: spawn.working_directory.clone(),
                 pane_id: spawn.restore_pane,
                 shell: spawn.shell.clone(),
-                ssh_spec: None,
+                ssh_spec: pending.ssh_spec.clone(),
                 agent: spawn.agent,
                 agent_session_id: spawn.agent_session_id.clone(),
                 agent_launch_argv: spawn.agent_launch_argv.clone(),
@@ -8604,6 +8608,12 @@ fn session_to_pane(
                     return None;
                 }
             };
+            if let PaneSlot::Ready(terminal) = &view
+                && terminal.read(cx).restored()
+                && let Some(spec) = ssh_spec.clone()
+            {
+                terminal.update(cx, |terminal, _| terminal.remember_native_ssh_spec(spec));
+            }
             match &view {
                 PaneSlot::Ready(terminal)
                     if !terminal.read(cx).restored() || *agent_restore_pending =>
@@ -8621,6 +8631,7 @@ fn session_to_pane(
                 PaneSlot::Ready(_) => {}
                 PaneSlot::Connecting(pending) => {
                     pending.update(cx, |pending, _| {
+                        pending.ssh_spec = ssh_spec.clone();
                         pending.spawn.agent = *agent;
                         pending.spawn.agent_session_id = agent_session_id.clone();
                         pending.spawn.agent_launch_argv = agent_launch_argv.clone();
@@ -11202,6 +11213,57 @@ mod pending_spawn_gpui_tests {
                 Some("agent fork")
             );
         });
+    }
+
+    #[gpui::test]
+    fn reattached_ssh_pane_keeps_its_connection_for_the_next_reconnect(cx: &mut TestAppContext) {
+        for restored in [true, false] {
+            let (app, mut vcx) = test_window::harness(cx);
+            let _daemon = app.update_in(&mut vcx, |app, window, cx| {
+                let spec = Box::new(
+                    serde_json::from_str::<crate::daemon::protocol::NativeSshSpec>(
+                        r#"{"host":"build-box","port":2222,"user":"me","auth_mode":"auto","display_name":"Build box"}"#,
+                    )
+                    .unwrap(),
+                );
+                let pending = pending(cx);
+                pending.update(cx, |p, _| {
+                    p.spawn.restore_pane = Some(42);
+                    p.ssh_spec = Some(spec.clone());
+                });
+                let id = pending.entity_id();
+                app.tabs
+                    .push(Tab::new(Pane::leaf(PaneSlot::Connecting(pending.clone()))));
+                let SessionPane::Leaf { ssh_spec, .. } = pane_to_session(&app.tabs[0].pane, cx)
+                else {
+                    panic!("expected a pending leaf");
+                };
+                assert_eq!(ssh_spec, Some(spec.clone()));
+                let (tabs, _, _) = crate::ui::tree_sync::desired_tabs(app, cx);
+                let crate::ui::tree_sync::DesiredNode::Leaf { seed, .. } = &tabs[0].root else {
+                    panic!("expected a pending tree leaf");
+                };
+                assert_eq!(seed.ssh_spec, Some(spec.clone()));
+                let (mut parts, daemon) = crate::terminal::view::quiet_test_shell_parts(42);
+                parts.restored = restored;
+                app.land_pane(id, &pending, Ok(parts), 15.0, window, cx);
+                let slot = app.tabs[0].pane.first_leaf().unwrap();
+                let view = slot.terminal().unwrap();
+                assert_eq!(
+                    view.read(cx).ssh_spec(),
+                    restored.then(|| spec.clone()),
+                    "a reattached SSH pane must retain the connection needed to redial"
+                );
+                view.update(cx, |view, _| view.terminal.exited = true);
+                assert_eq!(view.read(cx).ssh_disconnected(), restored);
+                let SessionPane::Leaf { ssh_spec, .. } = pane_to_session(&app.tabs[0].pane, cx)
+                else {
+                    panic!("expected a leaf");
+                };
+                assert_eq!(ssh_spec, restored.then_some(spec));
+                daemon
+            });
+        }
     }
 
     #[gpui::test]

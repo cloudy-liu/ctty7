@@ -203,7 +203,8 @@ fn desired_node(pane: &Pane, remote_window: bool, cx: &App) -> Option<DesiredNod
             })
         }
         Pane::Leaf(PaneSlot::Connecting(pending)) => {
-            let spawn = &pending.read(cx).spawn;
+            let pending = pending.read(cx);
+            let spawn = &pending.spawn;
             let pane = spawn.restore_pane?;
             let agent = spawn.agent.map(|agent| AgentFacts {
                 agent,
@@ -221,7 +222,7 @@ fn desired_node(pane: &Pane, remote_window: bool, cx: &App) -> Option<DesiredNod
                         .working_directory
                         .as_ref()
                         .map(|p| p.to_string_lossy().into_owned()),
-                    ssh_spec: None,
+                    ssh_spec: pending.ssh_spec.clone(),
                     agent,
                     shell: spawn.shell.clone(),
                 },

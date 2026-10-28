@@ -1117,18 +1117,24 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut view = Self::with_terminal(parts.terminal, parts.pane_id, window, cx);
-        if let Some(name) = parts
-            .persist
+        view.remember_native_ssh_spec(parts.persist);
+        view
+    }
+
+    pub(crate) fn remember_native_ssh_spec(
+        &mut self,
+        spec: Box<crate::daemon::protocol::NativeSshSpec>,
+    ) {
+        if let Some(name) = spec
             .display_name
             .as_deref()
             .map(str::trim)
             .filter(|n| !n.is_empty())
         {
-            view.default_title = name.to_string();
-            view.title = name.to_string();
+            self.default_title = name.to_string();
+            self.title = name.to_string();
         }
-        view.ssh_spec = Some(parts.persist);
-        view
+        self.ssh_spec = Some(spec);
     }
 
     fn with_terminal(
