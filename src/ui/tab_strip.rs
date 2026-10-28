@@ -1180,8 +1180,8 @@ impl Tty7App {
             .into_any_element()
     }
 
-    /// An agent's status as herdr draws it — `×` `◐` `✓` `○` `·` in herdr's
-    /// colours — on a disc of the surface, so the symbol stays legible over
+    /// An agent's status in herdr's colours — `×`, a turning comet, `✓`, `○`
+    /// and `·` — on a disc of the surface, so the symbol stays legible over
     /// whatever part of the logo it covers.
     fn status_badge(
         &self,

@@ -1,11 +1,13 @@
 //! The mark a tab avatar wears in its corner while an agent runs in the pane.
 //!
-//! Herdr's five states and its "distinct symbols" style, drawn the way herdr
-//! draws them: blocked `×`, working `◐`, done `✓`, idle `○`, unknown `·`. The
-//! old badge was a nine-pixel dot that told working from done by hue alone and
-//! drew nothing at all for idle, so an idle agent and one whose status tty7
-//! could not read looked the same. Every state is a different shape here as
-//! well as a different colour.
+//! Herdr's five states and its "distinct symbols" style: blocked `×`, done
+//! `✓`, idle `○` and unknown `·` as herdr draws them, and working as a turning
+//! comet — a solid head with a tail fading behind it — where herdr has `◐`.
+//! A half-filled disc keeps a full circle's outline at every angle, so turning
+//! it read as half done rather than busy. The old badge was a nine-pixel dot
+//! that told working from done by hue alone and drew nothing at all for idle,
+//! so an idle agent and one whose status tty7 could not read looked the same.
+//! Every state is a different shape here as well as a different colour.
 
 use crate::core::cli_agent::AgentStatus;
 use crate::ui::i18n::{L10nKey, t};
@@ -175,6 +177,48 @@ mod tests {
         let labels: std::collections::HashSet<&str> =
             StatusIndicator::ALL.iter().map(|s| s.label()).collect();
         assert_eq!(labels.len(), StatusIndicator::ALL.len());
+    }
+
+    /// The badge turns clockwise, so the head has to lead at twelve o'clock
+    /// with the tail fading anticlockwise behind it and nothing ahead of it.
+    /// A closed outline turning in place — the old half-filled disc — keeps
+    /// the same silhouette at every angle and reads as half done, not as busy.
+    #[test]
+    fn the_working_mark_is_a_comet_with_an_open_path_ahead_of_its_head() {
+        use gpui::AssetSource as _;
+        let svg = crate::ui::assets::Assets
+            .load(StatusIndicator::Working.icon_path())
+            .unwrap()
+            .unwrap();
+        let tree = resvg::usvg::Tree::from_data(&svg, &Default::default()).unwrap();
+        const PX: u32 = 160;
+        let scale = PX as f32 / tree.size().width();
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(PX, PX).unwrap();
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::from_scale(scale, scale),
+            &mut pixmap.as_mut(),
+        );
+        // Ink on the track's centre line, `deg` clockwise from twelve o'clock.
+        let alpha = |deg: f32| {
+            let (sin, cos) = deg.to_radians().sin_cos();
+            let (x, y) = (8. + 5.4 * sin, 8. - 5.4 * cos);
+            pixmap
+                .pixel((x * scale) as u32, (y * scale) as u32)
+                .unwrap()
+                .alpha()
+        };
+
+        assert!(alpha(-6.) > 240, "the head is not solid: {}", alpha(-6.));
+        for ahead in [30., 75., 120.] {
+            assert_eq!(alpha(ahead), 0, "ink {ahead}° ahead of the head");
+        }
+        let tail = [-12., -62., -112., -162., -187.].map(alpha);
+        assert!(
+            tail.windows(2).all(|w| w[0] > w[1]),
+            "the tail does not fade away from the head: {tail:?}"
+        );
+        assert!(tail[4] > 0, "the tail ends before 187°: {tail:?}");
     }
 
     #[test]
