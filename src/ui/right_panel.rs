@@ -637,7 +637,7 @@ impl Tty7App {
                 diff_target = crate::ui::tab_sidebar::diff_click_cwd(
                     cx.global::<Config>(),
                     view.git_status_cwd()
-                        .map(|cwd| (view.host_id(), cwd.to_path_buf())),
+                        .map(|cwd| (view.git_host_id(), cwd.to_path_buf())),
                 );
                 if let Some(cwd) = view.effective_cwd() {
                     let home = view.display_home(cx);

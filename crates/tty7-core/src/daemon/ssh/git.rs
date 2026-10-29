@@ -339,6 +339,38 @@ mod tests {
                 String::from_utf8_lossy(&result.stderr)
             );
             assert_eq!(result.stdout, format!("2\t1\t{file}\n").as_bytes());
+
+            // The same request shape used by the viewer must survive the real
+            // SSH exchange, including full context and a literal pathspec.
+            use crate::core::git::diff::{DiffParser, DiffRequest, DiffSource};
+            let paths = [format!(":(literal){file}")];
+            let args = DiffRequest {
+                source: DiffSource::Head,
+                paths: &paths,
+                context: 100,
+                ..Default::default()
+            }
+            .args();
+            let result = query(&server.conn, &remote, &args, Duration::from_secs(5))
+                .await
+                .unwrap();
+            assert_eq!(
+                result.status,
+                Some(0),
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let mut parser = DiffParser::default();
+            for line in String::from_utf8(result.stdout).unwrap().lines() {
+                parser.push_line(line);
+            }
+            let files = parser.finish();
+            assert_eq!(files.len(), 1);
+            assert_eq!(files[0].path, file);
+            assert_eq!((files[0].added, files[0].removed), (2, 1));
+            assert_eq!(files[0].hunks[0].lines[0].text, "before");
+            assert_eq!(files[0].hunks[0].lines[1].text, "after");
+            assert_eq!(files[0].hunks[0].lines[2].text, "added");
         });
     }
 }

@@ -15366,3 +15366,7 @@ mod native_ssh_git_tests {
             .unwrap();
     }
 }
+
+#[cfg(test)]
+#[path = "native_ssh_diff_tests.rs"]
+mod native_ssh_diff_tests;

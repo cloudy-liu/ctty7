@@ -107,6 +107,7 @@ fn visible_diff_rows(
 
 pub(crate) enum DiffLoad {
     Loading,
+    Unavailable,
     Ready(Arc<DiffSnapshot>),
     NotARepo,
 }
@@ -736,6 +737,15 @@ impl Tty7App {
             _ => None,
         };
         let Some(host) = crate::ui::host_registry::HostRegistry::lookup(cx, id) else {
+            if let Some(overlay) = self
+                .tabs
+                .get_mut(active)
+                .and_then(|t| t.diff_overlay.as_mut())
+            {
+                overlay.loading = false;
+                overlay.load = DiffLoad::Unavailable;
+                cx.notify();
+            }
             return;
         };
         let Some(overlay) = self
@@ -911,6 +921,7 @@ impl Tty7App {
 
         let content = match &overlay.load {
             DiffLoad::Loading => self.diff_message(t(L10nKey::DiffReading), cx),
+            DiffLoad::Unavailable => self.diff_message(t(L10nKey::DiffReadFailed), cx),
             DiffLoad::NotARepo => self.diff_message(t(L10nKey::DiffNotARepo), cx),
             DiffLoad::Ready(snap) if empty_snapshot(snap) && snap.read_failed => {
                 self.diff_message(t(L10nKey::DiffReadFailed), cx)
@@ -1309,7 +1320,7 @@ impl Tty7App {
         {
             o.preview_loading = Some(path.clone());
         }
-        let read_path = root.join(&path);
+        let read_path = host.join(&root, &path);
         let key_path = path.clone();
         crate::ui::host_ops::HostOps::run(
             host,
