@@ -28,6 +28,9 @@ pub const FEATURE_RESTORE_SCROLLBACK: &str = "restore-scrollback";
 /// command on the pane's controlling connection.
 pub const FEATURE_AGENT_RESUME: &str = "agent-resume";
 
+/// Bounded read-only Git queries on an established Native SSH pane connection.
+pub const FEATURE_NATIVE_SSH_GIT: &str = "native-ssh-git";
+
 /// The daemon can replace its own binary without stopping, keeping every pty
 /// and everything running on one — `ClientMsg::Handoff`. Advertised only where
 /// it can actually be done, which is where `execve` exists, so a client can use
@@ -53,6 +56,7 @@ impl DaemonVersion {
             FEATURE_RESIZE_ECHO.to_string(),
             FEATURE_RESTORE_SCROLLBACK.to_string(),
             FEATURE_AGENT_RESUME.to_string(),
+            FEATURE_NATIVE_SSH_GIT.to_string(),
         ];
         if cfg!(unix) {
             features.push(FEATURE_HANDOFF.to_string());
@@ -189,6 +193,10 @@ pub enum WorkspaceOp {
         spec: SftpTransferSpec,
     },
     SftpTransferList,
+    SshGit {
+        cwd: String,
+        args: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -799,6 +807,11 @@ pub enum ClientMsg {
     TestSsh {
         spec: Box<NativeSshSpec>,
     },
+    SshGit {
+        pane_id: u64,
+        cwd: String,
+        args: Vec<String>,
+    },
     SftpList {
         pane_id: u64,
         path: String,
@@ -881,6 +894,7 @@ pub enum DaemonMsg {
     },
     KnownHostsList(Vec<KnownHostEntry>),
     SshTestResult(SshTestReport),
+    SshGitOutput(crate::host::Output),
     SftpEntries(Vec<SftpEntry>),
     SftpOpResult(SftpOpResult),
     SftpTransferStarted {
@@ -926,6 +940,7 @@ mod kind {
     pub const HANDOFF: u8 = 56;
     pub const RESUME_AGENT: u8 = 57;
     pub const AGENT_EVENT: u8 = 58;
+    pub const SSH_GIT: u8 = 62;
 
     pub const SPAWNED: u8 = 1;
     pub const SNAPSHOT: u8 = 2;
@@ -961,6 +976,7 @@ mod kind {
     /// `DeleteImage` — a kitty graphics `a=d` delete lifted out of the stream
     /// (issue #213). Compact binary selector, like `IMAGE`.
     pub const DELETE_IMAGE: u8 = 61;
+    pub const SSH_GIT_OUTPUT: u8 = 62;
 }
 
 pub fn write_frame<W: Write>(w: &mut W, kind: u8, payload: &[u8]) -> io::Result<()> {
@@ -1142,6 +1158,9 @@ impl ClientMsg {
                 write_frame(w, kind::DELETE_KNOWN_HOST, &to_json(id)?)
             }
             ClientMsg::TestSsh { spec } => write_frame(w, kind::TEST_SSH, &to_json(spec)?),
+            ClientMsg::SshGit { pane_id, cwd, args } => {
+                write_frame(w, kind::SSH_GIT, &to_json(&(pane_id, cwd, args))?)
+            }
             ClientMsg::SftpList { pane_id, path } => {
                 write_frame(w, kind::SFTP_LIST, &to_json(&(pane_id, path))?)
             }
@@ -1266,6 +1285,10 @@ impl ClientMsg {
             kind::TEST_SSH => ClientMsg::TestSsh {
                 spec: from_json(&payload)?,
             },
+            kind::SSH_GIT => {
+                let (pane_id, cwd, args) = from_json(&payload)?;
+                ClientMsg::SshGit { pane_id, cwd, args }
+            }
             kind::SFTP_LIST => {
                 let (pane_id, path) = from_json(&payload)?;
                 ClientMsg::SftpList { pane_id, path }
@@ -1355,6 +1378,9 @@ impl DaemonMsg {
             DaemonMsg::SshTestResult(report) => {
                 write_frame(w, kind::SSH_TEST_RESULT, &to_json(report)?)
             }
+            DaemonMsg::SshGitOutput(output) => {
+                write_frame(w, kind::SSH_GIT_OUTPUT, &to_json(output)?)
+            }
             DaemonMsg::SftpEntries(entries) => {
                 write_frame(w, kind::SFTP_ENTRIES, &to_json(entries)?)
             }
@@ -1415,6 +1441,7 @@ impl DaemonMsg {
             },
             kind::KNOWN_HOSTS_LIST => DaemonMsg::KnownHostsList(from_json(&payload)?),
             kind::SSH_TEST_RESULT => DaemonMsg::SshTestResult(from_json(&payload)?),
+            kind::SSH_GIT_OUTPUT => DaemonMsg::SshGitOutput(from_json(&payload)?),
             kind::SFTP_ENTRIES => DaemonMsg::SftpEntries(from_json(&payload)?),
             kind::SFTP_OP_RESULT => DaemonMsg::SftpOpResult(from_json(&payload)?),
             kind::SFTP_TRANSFER_STARTED => DaemonMsg::SftpTransferStarted {
@@ -1605,6 +1632,11 @@ mod tests {
                 key_type: "ssh-ed25519".into(),
                 keyblob: "AAAAC3Nz".into(),
             }),
+            ClientMsg::SshGit {
+                pane_id: 4,
+                cwd: "/repo".into(),
+                args: vec!["diff".into(), "--numstat".into(), "HEAD".into()],
+            },
             ClientMsg::SftpList {
                 pane_id: 4,
                 path: "/home/deploy/项目".into(),
@@ -1805,6 +1837,11 @@ mod tests {
                     target_is_dir: true,
                 },
             ]),
+            DaemonMsg::SshGitOutput(crate::host::Output {
+                status: Some(128),
+                stdout: vec![0, 255],
+                stderr: b"no HEAD".to_vec(),
+            }),
             DaemonMsg::SftpOpResult(SftpOpResult::Done),
             DaemonMsg::SftpOpResult(SftpOpResult::Link("/target/path".into())),
             DaemonMsg::SftpOpResult(SftpOpResult::Error("permission denied".into())),
@@ -2318,6 +2355,10 @@ mod tests {
                     remote: "/remote/f".into(),
                     recursive: false,
                 },
+            },
+            WorkspaceOp::SshGit {
+                cwd: "/repo".into(),
+                args: vec!["rev-parse".into(), "--show-toplevel".into()],
             },
             WorkspaceOp::SftpTransferList,
         ];
