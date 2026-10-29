@@ -49,7 +49,7 @@ ctty7 keeps all of that and focuses on what daily use demanded: Windows shells, 
   </tr>
 </table>
 
-**Remote work without ceremony.** WSL resolves the account's login shell, and Windows packages bundle the Linux server needed to bootstrap it. Native SSH supports saved profiles, keychain credentials, jump hosts, SFTP, and port forwarding. An `ssh` started inside a pane is detected, and the blue Remote badge appears in tabs and sidebar rows so remote sessions remain distinct from local ones. SSH tabs keep the connection name visible, include the directory when away from home, and show connection context below task titles. [Remote workspaces](docs/remote/workspaces.mdx) · [SSH](docs/remote/ssh.mdx)
+**Remote work without ceremony.** WSL resolves the account's login shell, and Windows packages bundle the Linux server needed to bootstrap it. Native SSH supports saved profiles, keychain credentials, jump hosts, SFTP, and port forwarding. Managed SSH tabs show the remote branch and change counts; click the counts to inspect that pane's remote diff through its existing connection. Saved connections reattach or reconnect after restarts, and known Claude Code/Codex conversations resume when the remote shell is ready. An `ssh` started manually inside a pane is detected for Remote badges but does not provide managed remote Git. SSH tabs retain the connection name, project directory, and connection context. [Remote workspaces](docs/remote/workspaces.mdx) · [SSH](docs/remote/ssh.mdx)
 
 <table>
   <tr>

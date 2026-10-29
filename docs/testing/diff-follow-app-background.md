@@ -14,7 +14,20 @@ an isolated configuration with the built-in Dark preset (`#000000`), the same
 1800 x 1150 physical-pixel window and the same click sequence. The fixture is a
 Git repository with a 100-line `example.rs` and working-tree replacements at
 lines 28 and 68. The baseline binary was built from `cb0bc217` with this
-change stashed. Captures use `PrintWindow` on the native window.
+change stashed. These original PNGs use `PrintWindow` on the native window.
+
+The final acceptance pair below was captured again through LCU on 2026-10-29
+to satisfy the repository's capture-tool requirement. Both applications use
+the same fixture, built-in Dark preset, 175% display scale, 1440 x 900 logical
+viewport (1442 x 901 including native borders), dock width, and click sequence.
+The original LCU JPEG bytes were saved through a loopback receiver without
+cropping, resizing, overlays, or redrawing. Inspect the Diff background next
+to the terminal and below the file card; the change colors remain unchanged.
+
+| LCU Before | LCU After |
+| --- | --- |
+| ![Docked Before](images/diff-follow-app-background/before-docked-lcu.jpg) | ![Docked After](images/diff-follow-app-background/after-docked-lcu.jpg) |
+| ![Full-window Before](images/diff-follow-app-background/before-full-lcu.jpg) | ![Full-window After](images/diff-follow-app-background/after-full-lcu.jpg) |
 
 | Before | After |
 | --- | --- |

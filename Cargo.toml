@@ -309,7 +309,7 @@ edition = "2024"
 # they must never drift apart. This is the line a release bump edits (and the
 # first explicit version line in the file; package entries above all use
 # `version.workspace = true`).
-version = "0.8.3"
+version = "0.9.0"
 
 [workspace.dependencies]
 # The maintenance fork retains ctty7's existing menu, button and input changes
