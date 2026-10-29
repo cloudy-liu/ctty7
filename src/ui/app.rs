@@ -9786,7 +9786,7 @@ mod tests {
         use crate::daemon::protocol::ClientMsg;
         for case in 0..6 {
             let (app, mut vcx) = super::test_window::harness(cx);
-            let mut daemon = app.update_in(&mut vcx, |_, window, cx| {
+            let (_view, mut daemon) = app.update_in(&mut vcx, |_, window, cx| {
                 cx.global_mut::<crate::core::config::Config>()
                     .restore_agent_sessions = case != 0;
                 let (view, daemon) = crate::terminal::view::quiet_test_pane(42, window, cx);
@@ -9816,7 +9816,7 @@ mod tests {
                     cx,
                 );
                 assert!(view.read(cx).agent_session().is_none());
-                daemon
+                (view, daemon)
             });
             daemon
                 .set_read_timeout(Some(std::time::Duration::from_millis(50)))
