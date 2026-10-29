@@ -229,6 +229,7 @@ pub struct TerminalView {
     restored: bool,
     pub(super) agent_restore: Option<super::agent_restore::PendingAgentRestore>,
     ssh_spec: Option<Box<crate::daemon::protocol::NativeSshSpec>>,
+    native_git_host: Option<std::sync::Arc<crate::ui::sftp_host::SftpHost>>,
     /// The verified remote staging directory for pasted images, once one has
     /// been prepared for this pane. `None` means "not prepared yet", never
     /// "preparation failed" — see [`staging_cache`].
@@ -1128,6 +1129,12 @@ impl TerminalView {
             view.title = name.to_string();
         }
         view.ssh_spec = Some(parts.persist);
+        let native = std::sync::Arc::new(crate::ui::sftp_host::SftpHost::with_git(
+            crate::ui::sftp::SftpRoute::new(view.pane_id, view.workspace.clone()),
+        ));
+        let host: crate::ui::host_ops::SharedHost = native.clone();
+        crate::ui::host_registry::HostRegistry::insert_pane(cx, &host);
+        view.native_git_host = Some(native);
         view
     }
 
@@ -1285,6 +1292,7 @@ impl TerminalView {
             if let Some(registry) = cx.try_global::<DisplayedRegistry>() {
                 registry.0.lock().unwrap().remove(&entity_id);
             }
+            view.release_native_git(cx);
             view.terminal.detach_link();
             for image in view.terminal.images().take_for_release() {
                 cx.drop_image(image, Some(window));
@@ -1314,6 +1322,7 @@ impl TerminalView {
             restored: false,
             agent_restore: None,
             ssh_spec: None,
+            native_git_host: None,
             remote_clipboard_dir: None,
             focus_handle,
             displayed,
@@ -1511,6 +1520,34 @@ impl TerminalView {
 
     pub fn host_id(&self) -> crate::ui::host_ops::HostId {
         self.host_id
+    }
+
+    pub fn git_host_id(&self) -> crate::ui::host_ops::HostId {
+        use crate::ui::host_ops::Host as _;
+        self.native_git_host
+            .as_ref()
+            .map_or(self.host_id, |host| host.id())
+    }
+
+    fn git_host(&self, cx: &gpui::App) -> Option<crate::ui::host_ops::SharedHost> {
+        crate::ui::host_registry::HostRegistry::lookup(cx, self.git_host_id())
+    }
+
+    fn release_native_git(&mut self, cx: &mut gpui::App) {
+        use crate::ui::host_ops::Host as _;
+        if let Some(host) = self.native_git_host.take() {
+            host.disconnect();
+            crate::ui::host_registry::HostRegistry::remove_pane(cx, host.id());
+            if cx
+                .try_global::<crate::terminal::git_status::GitStatusCache>()
+                .is_some()
+            {
+                cx.update_global::<crate::terminal::git_status::GitStatusCache, _>(|cache, _| {
+                    cache.clear_host(host.id())
+                });
+            }
+            self.git_status_cwd = None;
+        }
     }
 
     pub fn workspace(&self) -> Option<&crate::terminal::PaneWorkspace> {
@@ -1727,7 +1764,7 @@ impl TerminalView {
     pub fn git_status(&self, cx: &App) -> Option<crate::terminal::git_status::GitStatus> {
         let cwd = self.git_status_cwd.as_ref()?;
         cx.try_global::<crate::terminal::git_status::GitStatusCache>()?
-            .status_for(self.host_id, cwd)
+            .status_for(self.git_host_id(), cwd)
     }
 
     pub fn git_status_cwd(&self) -> Option<&std::path::Path> {
@@ -1746,9 +1783,9 @@ impl TerminalView {
     /// folds the two together into `git_status_cwd`; this reads that result
     /// back out under a name that doesn't imply it's only about git.
     ///
-    /// `git_status_cwd` is only ever set for a pane whose paths belong to its
-    /// host, so the fallback here is what decides that: this one takes any
-    /// cwd, [`Self::effective_host_cwd`] takes only one the host can resolve.
+    /// `git_status_cwd` belongs to the Git query host. Native SSH borrows a
+    /// distinct remote host for Git; [`Self::effective_host_cwd`] still admits
+    /// only paths the pane's workspace host can resolve.
     pub fn effective_cwd(&self) -> Option<std::path::PathBuf> {
         self.git_status_cwd.clone().or_else(|| self.cwd())
     }
@@ -1756,7 +1793,10 @@ impl TerminalView {
     /// [`Self::effective_cwd`], restricted to paths the pane's host can act
     /// on — for callers that will hand the result to a `Host` call.
     pub fn effective_host_cwd(&self) -> Option<std::path::PathBuf> {
-        self.git_status_cwd.clone().or_else(|| self.host_cwd())
+        (self.git_host_id() == self.host_id)
+            .then(|| self.git_status_cwd.clone())
+            .flatten()
+            .or_else(|| self.host_cwd())
     }
 
     pub fn refresh_git_status_now(&mut self, cx: &mut Context<Self>) {
@@ -1771,7 +1811,7 @@ impl TerminalView {
             return false;
         };
         cx.try_global::<crate::terminal::git_status::GitStatusCache>()
-            .is_some_and(|cache| cache.retry_due(self.host_id, cwd, GIT_RETRY_GAP))
+            .is_some_and(|cache| cache.retry_due(self.git_host_id(), cwd, GIT_RETRY_GAP))
     }
 
     pub fn selection_text(&self) -> Option<String> {
@@ -3364,6 +3404,7 @@ impl TerminalView {
 
     fn poll_foreground(&mut self, window: &Window, cx: &mut Context<Self>) {
         if self.terminal.exited {
+            self.release_native_git(cx);
             return;
         }
         let at_prompt = self.terminal.at_prompt();
@@ -3438,8 +3479,16 @@ impl TerminalView {
                 false
             }
         };
-        let cwd_now = self
-            .cwd_is_on_host()
+        let native_cwd = self.native_git_host.is_some()
+            && self
+                .remote_context()
+                .is_some_and(|ctx| ctx.kind == crate::daemon::protocol::RemoteKind::NativeSsh);
+        let git_cwd_known = if self.native_git_host.is_some() {
+            native_cwd
+        } else {
+            self.cwd_is_on_host()
+        };
+        let cwd_now = git_cwd_known
             .then(|| {
                 session
                     .as_ref()
@@ -3480,12 +3529,13 @@ impl TerminalView {
         let Some(cwd) = cwd else { return };
         let Some(root) = cx
             .try_global::<GitStatusCache>()
-            .and_then(|cache| cache.repo_root_for(self.host_id, cwd))
+            .and_then(|cache| cache.repo_root_for(self.git_host_id(), cwd))
             .map(std::path::Path::to_path_buf)
         else {
             return;
         };
-        cx.default_global::<ScmData>().bump(self.host_id, &root);
+        cx.default_global::<ScmData>()
+            .bump(self.git_host_id(), &root);
     }
 
     fn desired_history_scope(&self) -> super::history::Scope {
@@ -3596,8 +3646,8 @@ impl TerminalView {
             }
             return;
         };
-        let id = self.host_id;
-        let Some(host) = self.host(cx) else {
+        let id = self.git_host_id();
+        let Some(host) = self.git_host(cx) else {
             if changed {
                 cx.notify();
             }
@@ -3622,11 +3672,25 @@ impl TerminalView {
         }
         let probe_cwd = cwd.clone();
         let pane = cx.weak_entity();
+        let landing_host = host.clone();
+        let pane_scoped = self.native_git_host.is_some();
         crate::ui::host_ops::HostOps::run_detached(
             host,
             cx,
             move |h| crate::terminal::git_status::probe_repo(h, &probe_cwd),
             move |cx, result| {
+                // A pane may disappear while the SSH command is finishing.
+                // Its retired adapter cannot publish a result into a new life.
+                if !landing_host.is_connected()
+                    || (pane_scoped
+                        && !pane
+                            .update(cx, |view, _| {
+                                !view.terminal.exited && view.git_host_id() == id
+                            })
+                            .unwrap_or(false))
+                {
+                    return;
+                }
                 let rerun = cx.update_global::<GitStatusCache, _>(|cache, _| match result {
                     crate::terminal::git_status::RepoProbe::Repo(snapshot) => {
                         cache.finish_probe(id, &cwd, Some(snapshot))
@@ -3638,7 +3702,8 @@ impl TerminalView {
                 });
                 if rerun {
                     let _ = pane.update(cx, |view, cx| {
-                        if view.git_status_cwd.as_deref() == Some(&cwd) {
+                        if view.git_host_id() == id && view.git_status_cwd.as_deref() == Some(&cwd)
+                        {
                             view.refresh_git_status(Some(cwd), GitRefresh::Edge, cx);
                         }
                     });
@@ -6368,6 +6433,9 @@ impl Focusable for TerminalView {
 
 impl Drop for TerminalView {
     fn drop(&mut self) {
+        if let Some(host) = &self.native_git_host {
+            host.disconnect();
+        }
         self.flush_pending_history();
     }
 }
@@ -15151,5 +15219,150 @@ mod agent_notification_tests {
                 "a later live event may play again"
             )
         });
+    }
+}
+
+#[cfg(test)]
+mod native_ssh_git_tests {
+    use super::*;
+    use crate::daemon::protocol::{DaemonMsg, RemoteKind};
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn native_ssh_does_not_guess_remote_git_from_a_parent_directory(cx: &mut TestAppContext) {
+        crate::core::config::pin_test_config_dir();
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(Config::default());
+        });
+        let (parts, mut daemon) = quiet_test_shell_parts(8);
+        let window = cx.add_window(|window, cx| {
+            TerminalView::from_native_ssh_parts(
+                NativeSshParts {
+                    terminal: parts.terminal,
+                    pane_id: 8,
+                    persist: Box::new(
+                        serde_json::from_str(
+                            r#"{"host":"build-box","port":22,"user":"me","auth_mode":"auto"}"#,
+                        )
+                        .unwrap(),
+                    ),
+                },
+                window,
+                cx,
+            )
+        });
+        let cwd = std::path::PathBuf::from("/parent/project");
+        DaemonMsg::Cwd(cwd.clone()).encode(&mut daemon).unwrap();
+        for _ in 0..200 {
+            if window
+                .update(cx, |view, _, _| view.cwd() == Some(cwd.clone()))
+                .unwrap()
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        window
+            .update(cx, |view, window, cx| {
+                view.poll_foreground(window, cx);
+                assert!(
+                    view.git_status_cwd().is_none(),
+                    "only a confirmed Native SSH remote cwd may be queried"
+                );
+            })
+            .unwrap();
+    }
+
+    #[gpui::test]
+    fn managed_ssh_uses_remote_git_without_changing_workspace_identity(cx: &mut TestAppContext) {
+        crate::core::config::pin_test_config_dir();
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(Config::default());
+        });
+        let (parts, mut daemon) = quiet_test_shell_parts(7);
+        let window = cx.add_window(|window, cx| {
+            TerminalView::from_native_ssh_parts(
+                NativeSshParts {
+                    terminal: parts.terminal,
+                    pane_id: 7,
+                    persist: Box::new(
+                        serde_json::from_str(
+                            r#"{"host":"build-box","port":22,"user":"me","auth_mode":"auto"}"#,
+                        )
+                        .unwrap(),
+                    ),
+                },
+                window,
+                cx,
+            )
+        });
+        let cwd = std::path::PathBuf::from("/work/project");
+        DaemonMsg::RemoteContext(Some(RemoteContext {
+            kind: RemoteKind::NativeSsh,
+            argv: vec![],
+            target: "build-box".into(),
+        }))
+        .encode(&mut daemon)
+        .unwrap();
+        DaemonMsg::Cwd(cwd.clone()).encode(&mut daemon).unwrap();
+        for _ in 0..200 {
+            if window
+                .update(cx, |view, _, _| view.cwd() == Some(cwd.clone()))
+                .unwrap()
+            {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+        window
+            .update(cx, |view, window, cx| {
+                view.poll_foreground(window, cx);
+                assert_eq!(
+                    view.git_status_cwd(),
+                    Some(cwd.as_path()),
+                    "managed SSH Git follows the remote cwd"
+                );
+                assert!(
+                    view.host_id().is_local(),
+                    "workspace routing keeps its machine identity"
+                );
+                assert!(
+                    view.effective_host_cwd().is_none(),
+                    "a Git directory on the far side must not leak into local file operations"
+                );
+                assert!(
+                    !view.git_host_id().is_local(),
+                    "Git uses a distinct pane identity"
+                );
+                let git_id = view.git_host_id();
+                let host = crate::ui::host_registry::HostRegistry::lookup(cx, git_id).unwrap();
+                assert!(host.is_connected());
+                assert!(
+                    !crate::ui::host_registry::HostRegistry::ids(cx).contains(&git_id),
+                    "a borrowed pane is not a machine"
+                );
+                cx.update_global::<crate::terminal::git_status::GitStatusCache, _>(|cache, _| {
+                    cache.finish_probe(
+                        git_id,
+                        &cwd,
+                        Some(crate::terminal::git_status::RepoSnapshot {
+                            root: cwd.clone(),
+                            home: cwd.clone(),
+                            branch: "remote-main".into(),
+                            counts: Some((8, 2)),
+                        }),
+                    );
+                });
+                let status = view.git_status(cx).unwrap();
+                assert_eq!(
+                    (status.branch.as_str(), status.added, status.removed),
+                    ("remote-main", 8, 2)
+                );
+            })
+            .unwrap();
     }
 }

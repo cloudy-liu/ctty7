@@ -38,6 +38,10 @@ pub fn handle(req: &WorkspaceRequest) -> DaemonMsg {
             mgr.teardown_workspace_forwards(ws);
             DaemonMsg::ForwardList(mgr.list_workspace_forwards(ws, view))
         }
+        WorkspaceOp::SshGit { cwd, args } => match super::git::run(&conn, cwd, args) {
+            Ok(output) => DaemonMsg::SshGitOutput(output),
+            Err(error) => DaemonMsg::Error(error),
+        },
         WorkspaceOp::SftpList { path } => match SftpManager::global().list(&conn, path) {
             Ok(entries) => DaemonMsg::SftpEntries(entries),
             Err(e) => DaemonMsg::Error(e),

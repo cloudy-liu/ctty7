@@ -28,6 +28,12 @@ pub(crate) enum Exec {
     /// Success, a line of output, exit status 0, EOF and CLOSE: a command
     /// that ran and finished, after which the server closes first.
     Exits,
+    Reply {
+        stdout: &'static [u8],
+        stderr: &'static [u8],
+        status: u32,
+    },
+    LocalShell,
     /// Success and nothing more: a command that never finishes. The server
     /// never closes, so only the client can.
     Hangs,
@@ -78,13 +84,58 @@ impl server::Handler for Sshd {
     async fn exec_request(
         &mut self,
         channel: ChannelId,
-        _command: &[u8],
+        command: &[u8],
         session: &mut Session,
     ) -> Result<(), Self::Error> {
         session.channel_success(channel)?;
-        if let Exec::Exits = self.exec {
-            session.data(channel, &b"ok\n"[..])?;
-            session.exit_status_request(channel, 0)?;
+        let reply = match self.exec {
+            Exec::Exits => Some((&b"ok\n"[..], &b""[..], 0)),
+            Exec::Reply {
+                stdout,
+                stderr,
+                status,
+            } => Some((stdout, stderr, status)),
+            Exec::LocalShell => {
+                let mut command_process = std::process::Command::new("sh");
+                #[cfg(windows)]
+                {
+                    let git = std::process::Command::new("git")
+                        .arg("--exec-path")
+                        .output()
+                        .expect("git is installed");
+                    let exec =
+                        std::path::PathBuf::from(String::from_utf8(git.stdout).unwrap().trim());
+                    let shell = exec.ancestors().nth(3).unwrap().join("usr/bin/sh.exe");
+                    if shell.exists() {
+                        command_process = std::process::Command::new(&shell);
+                        let mut paths = vec![shell.parent().unwrap().to_path_buf()];
+                        paths.extend(std::env::split_paths(
+                            &std::env::var_os("PATH").unwrap_or_default(),
+                        ));
+                        command_process.env("PATH", std::env::join_paths(paths).unwrap());
+                    }
+                }
+                command_process
+                    .arg("-c")
+                    .arg(std::str::from_utf8(command).unwrap());
+                let output = crate::core::proc::hide_console(&mut command_process)
+                    .output()
+                    .expect("a POSIX shell is installed with Git");
+                session.data(channel, output.stdout)?;
+                session.extended_data(channel, 1, output.stderr)?;
+                session.exit_status_request(channel, output.status.code().unwrap_or(255) as u32)?;
+                session.eof(channel)?;
+                session.close(channel)?;
+                None
+            }
+            Exec::Hangs => None,
+        };
+        if let Some((stdout, stderr, status)) = reply {
+            session.data(channel, stdout.to_vec())?;
+            if !stderr.is_empty() {
+                session.extended_data(channel, 1, stderr.to_vec())?;
+            }
+            session.exit_status_request(channel, status)?;
             session.eof(channel)?;
             session.close(channel)?;
         }

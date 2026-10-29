@@ -937,6 +937,22 @@ fn handle_conn(stream: Stream, registry: Arc<Registry>) -> anyhow::Result<()> {
             Ok(())
         }
 
+        ClientMsg::SshGit { pane_id, cwd, args } => {
+            let mut w = write_stream;
+            let reply = match ssh_connection_for(&registry, pane_id) {
+                Ok(conn) if registry.get(pane_id).is_some_and(|pane| pane.alive()) => {
+                    match crate::daemon::ssh::git::run(&conn, &cwd, &args) {
+                        Ok(output) => DaemonMsg::SshGitOutput(output),
+                        Err(error) => DaemonMsg::Error(error),
+                    }
+                }
+                Ok(_) => DaemonMsg::Error(format!("SSH pane {pane_id} is closed")),
+                Err(error) => DaemonMsg::Error(error),
+            };
+            reply.encode(&mut w)?;
+            Ok(())
+        }
+
         ClientMsg::SftpList { pane_id, path } => {
             let mut w = write_stream;
             match ssh_connection_for(&registry, pane_id) {
