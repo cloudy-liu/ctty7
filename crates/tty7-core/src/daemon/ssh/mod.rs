@@ -1,5 +1,6 @@
 pub mod broker;
 pub mod forward;
+pub mod git;
 pub mod known_hosts;
 pub mod session;
 pub mod sftp;
