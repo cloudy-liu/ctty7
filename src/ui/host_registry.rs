@@ -60,6 +60,11 @@ impl HostRegistry {
         reg.pane_hosts.insert(host.id(), Arc::downgrade(host));
     }
 
+    /// Track the borrowed pane's lifetime without keeping its route alive.
+    pub(crate) fn pane_lifetime(cx: &App, id: HostId) -> Option<Weak<dyn Host>> {
+        cx.try_global::<Self>()?.pane_hosts.get(&id).cloned()
+    }
+
     pub(crate) fn remove_pane(cx: &mut App, id: HostId) {
         cx.default_global::<HostRegistry>().pane_hosts.remove(&id);
     }

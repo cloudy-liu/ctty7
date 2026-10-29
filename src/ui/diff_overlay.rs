@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 #[path = "diff_commit.rs"]
 mod commit;
@@ -114,6 +114,9 @@ pub(crate) enum DiffLoad {
 
 pub(crate) struct DiffOverlayState {
     pub(crate) host_id: crate::ui::host_ops::HostId,
+    /// Native pane lifetimes differ from persistent workspace machines. This
+    /// weak handle lets inactive overlays discard data as soon as a pane ends.
+    pub(crate) pane_host: Option<Weak<dyn crate::ui::host_ops::Host>>,
     pub(crate) cwd: PathBuf,
     /// Which patch this overlay is showing. Part of its identity, not a
     /// setting: two sources over one directory are two different overlays.
@@ -203,6 +206,12 @@ fn anchor_row(
 }
 
 impl DiffOverlayState {
+    fn pane_disconnected(&self) -> bool {
+        self.pane_host
+            .as_ref()
+            .is_some_and(|host| host.upgrade().is_none_or(|host| !host.is_connected()))
+    }
+
     fn remember_diff_position(&self, path: &str) {
         let geometry = self.geometry.borrow();
         let Some(g) = geometry.get(path) else {
@@ -372,6 +381,9 @@ impl Tty7App {
         let source = o.source.clone();
         let file = file.clone();
         let token = view.token.clone();
+        let landing_host = host.clone();
+        let native_pane =
+            crate::ui::host_registry::HostRegistry::pane_lifetime(cx, host.id()).is_some();
         view.loading = true;
         view.failed = false;
         crate::ui::host_ops::HostOps::run(
@@ -379,6 +391,10 @@ impl Tty7App {
             cx,
             move |h| git_diff::probe_full_file(h, &root, source, &file).map(Arc::new),
             move |app, full, cx| {
+                if native_pane && !landing_host.is_connected() {
+                    app.retire_disconnected_pane_diffs(cx);
+                    return;
+                }
                 for tab in &mut app.tabs {
                     let Some(o) = tab.diff_overlay.as_mut() else {
                         continue;
@@ -643,6 +659,8 @@ impl Tty7App {
                 if commit.is_some() {
                     o.commit = commit;
                 }
+                let refresh_native = o.pane_host.is_some();
+                let pending = o.loading;
                 o.file_views.clear();
                 o.focus = focus;
                 *o.anchor.borrow_mut() = None;
@@ -650,6 +668,14 @@ impl Tty7App {
                 window.focus(&handle, cx);
                 if commit_document {
                     self.reveal_commit_document_tab();
+                }
+                if refresh_native {
+                    if pending {
+                        self.diff_probes_restale
+                            .insert(probe_key(host, &cwd, &source));
+                    } else {
+                        self.spawn_diff_probe(cx);
+                    }
                 }
                 cx.notify();
                 return;
@@ -661,8 +687,10 @@ impl Tty7App {
             return;
         };
         let focus_handle = cx.focus_handle();
+        let pane_host = crate::ui::host_registry::HostRegistry::pane_lifetime(cx, host);
         tab.diff_overlay = Some(DiffOverlayState {
             host_id: host,
+            pane_host,
             cwd,
             source,
             commit,
@@ -774,6 +802,8 @@ impl Tty7App {
             self.diff_probes_restale.insert(key);
             return;
         }
+        let native_pane =
+            crate::ui::host_registry::HostRegistry::pane_lifetime(cx, host.id()).is_some();
         let host_for_retry = host.clone();
         let probe_cwd = cwd.clone();
         let probe_source = source.clone();
@@ -790,6 +820,11 @@ impl Tty7App {
             move |app, result, cx| {
                 let id = key.0;
                 app.diff_probes_inflight.remove(&key);
+                if native_pane && !host_for_retry.is_connected() {
+                    app.diff_probes_restale.remove(&key);
+                    app.retire_disconnected_pane_diffs(cx);
+                    return;
+                }
                 app.install_diff_snapshot(id, &cwd, &source, result.map(Arc::new), cx);
                 if app.diff_probes_restale.remove(&key) {
                     app.spawn_diff_probe_for(host_for_retry, cwd, source, cx);
@@ -859,7 +894,43 @@ impl Tty7App {
         }
     }
 
+    fn retire_disconnected_pane_diffs(&mut self, cx: &mut Context<Self>) {
+        let mut changed = false;
+        let mut retired = Vec::new();
+        for tab in &mut self.tabs {
+            let Some(overlay) = &mut tab.diff_overlay else {
+                continue;
+            };
+            if !overlay.pane_disconnected() {
+                continue;
+            }
+            retired.push(overlay.host_id);
+            if !matches!(overlay.load, DiffLoad::Unavailable)
+                || overlay.loading
+                || overlay.preview.is_some()
+                || overlay.preview_loading.is_some()
+                || !overlay.file_views.is_empty()
+            {
+                overlay.load = DiffLoad::Unavailable;
+                overlay.loading = false;
+                overlay.preview = None;
+                overlay.preview_loading = None;
+                overlay.file_views.clear();
+                overlay.epoch = None;
+                changed = true;
+            }
+        }
+        self.diff_probes_inflight
+            .retain(|key| !retired.contains(&key.0));
+        self.diff_probes_restale
+            .retain(|key| !retired.contains(&key.0));
+        if changed {
+            cx.notify();
+        }
+    }
+
     pub(crate) fn maybe_refresh_diff_overlay(&mut self, cx: &mut Context<Self>) {
+        self.retire_disconnected_pane_diffs(cx);
         let Some(overlay) = self
             .tabs
             .get(self.active)
@@ -886,7 +957,12 @@ impl Tty7App {
                 else {
                     return;
                 };
-                status.branch != snap.branch || (status.added, status.removed) != snap.totals()
+                status.branch != snap.branch
+                    || (status.added, status.removed) != snap.totals()
+                    || (overlay.pane_host.is_some()
+                        && overlay
+                            .epoch
+                            .is_some_and(|seen| scm_epoch(cx, overlay.host_id, &snap.root) != seen))
             }
             // Those same counts would differ from a staged or unstaged patch
             // the moment anything is staged, and the overlay would reprobe
@@ -1321,6 +1397,9 @@ impl Tty7App {
             o.preview_loading = Some(path.clone());
         }
         let read_path = host.join(&root, &path);
+        let landing_host = host.clone();
+        let native_pane =
+            crate::ui::host_registry::HostRegistry::pane_lifetime(cx, host_id).is_some();
         let key_path = path.clone();
         crate::ui::host_ops::HostOps::run(
             host,
@@ -1337,6 +1416,10 @@ impl Tty7App {
                     })
             },
             move |this, file, cx| {
+                if native_pane && !landing_host.is_connected() {
+                    this.retire_disconnected_pane_diffs(cx);
+                    return;
+                }
                 let active = this.active;
                 let Some(o) = this
                     .tabs
@@ -3816,6 +3899,7 @@ mod github_theme_gpui_tests {
             app.tabs = vec![crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty)];
             app.active = 0;
             app.tabs[0].diff_overlay = Some(DiffOverlayState {
+                pane_host: None,
                 host_id: crate::ui::host_ops::HostId::LOCAL,
                 cwd: PathBuf::from("/fixture"),
                 source: DiffSource::Staged,
@@ -3923,6 +4007,7 @@ mod github_theme_gpui_tests {
                 app.tabs = vec![crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty)];
                 app.active = 0;
                 app.tabs[0].diff_overlay = Some(DiffOverlayState {
+                    pane_host: None,
                     host_id: crate::ui::host_ops::HostId::LOCAL,
                     cwd: PathBuf::from("/fixture"),
                     source: DiffSource::Staged,
@@ -4235,6 +4320,7 @@ mod github_theme_gpui_tests {
             app.tabs = vec![crate::ui::app::Tab::new(crate::ui::pane::Pane::Empty)];
             app.active = 0;
             app.tabs[0].diff_overlay = Some(DiffOverlayState {
+                pane_host: None,
                 host_id: crate::ui::host_ops::HostId::LOCAL,
                 cwd: PathBuf::from("/fixture"),
                 source: DiffSource::Worktree,

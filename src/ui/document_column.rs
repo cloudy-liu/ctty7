@@ -731,6 +731,7 @@ mod gpui_tests {
                     let active = app.active;
                     app.tabs[active].overlay_top = OverlayTop::Diff;
                     app.tabs[active].diff_overlay = Some(DiffOverlayState {
+                        pane_host: None,
                         host_id: HostId::LOCAL,
                         cwd: PathBuf::from("/no/such/repo"),
                         source: source.clone(),
@@ -959,6 +960,7 @@ mod gpui_tests {
                     let active = app.active;
                     app.tabs[active].overlay_top = OverlayTop::Diff;
                     app.tabs[active].diff_overlay = Some(DiffOverlayState {
+                        pane_host: None,
                         host_id: HostId::LOCAL,
                         cwd: PathBuf::from("/no/such/tty7/repo"),
                         source: source.clone(),
