@@ -497,6 +497,8 @@ const INTEGRATION_GRACE: std::time::Duration = std::time::Duration::from_secs(8)
 
 const INTEGRATION_NOTICE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
 
+// Native SSH has no file watcher; active repositories poll at most every three seconds.
+const NATIVE_GIT_GAP: std::time::Duration = std::time::Duration::from_secs(3);
 const OPPORTUNISTIC_GIT_GAP: std::time::Duration = std::time::Duration::from_millis(1500);
 
 /// Retry unanswered repository probes for idle panes without probing on every
@@ -542,6 +544,7 @@ const MAX_HISTORY_BYTES: u64 = 4 << 20;
 enum GitRefresh {
     Edge,
     Opportunistic,
+    NativePoll,
     Retry,
 }
 
@@ -1226,6 +1229,9 @@ impl TerminalView {
                     view.agent_result_unread = false;
                 }
                 view.report_focus_change(true);
+                if view.native_git_host.is_some() {
+                    view.refresh_git_status_now(cx);
+                }
                 cx.notify();
             }),
             cx.on_blur(&focus_handle, window, |view, _window, cx| {
@@ -1533,11 +1539,19 @@ impl TerminalView {
         crate::ui::host_registry::HostRegistry::lookup(cx, self.git_host_id())
     }
 
-    fn release_native_git(&mut self, cx: &mut gpui::App) {
+    pub(crate) fn release_native_git(&mut self, cx: &mut gpui::App) {
         use crate::ui::host_ops::Host as _;
         if let Some(host) = self.native_git_host.take() {
             host.disconnect();
             crate::ui::host_registry::HostRegistry::remove_pane(cx, host.id());
+            if cx
+                .try_global::<crate::terminal::git_data::ScmData>()
+                .is_some()
+            {
+                cx.update_global::<crate::terminal::git_data::ScmData, _>(|data, _| {
+                    data.clear_host(host.id());
+                });
+            }
             if cx
                 .try_global::<crate::terminal::git_status::GitStatusCache>()
                 .is_some()
@@ -1802,7 +1816,12 @@ impl TerminalView {
     pub fn refresh_git_status_now(&mut self, cx: &mut Context<Self>) {
         let cwd = self.git_status_cwd.clone();
         if cwd.is_some() {
-            self.refresh_git_status(cwd, GitRefresh::Opportunistic, cx);
+            let trigger = if self.native_git_host.is_some() {
+                GitRefresh::Edge
+            } else {
+                GitRefresh::Opportunistic
+            };
+            self.refresh_git_status(cwd, trigger, cx);
         }
     }
 
@@ -1963,6 +1982,9 @@ impl TerminalView {
 
     fn handle_event(&mut self, ev: AlacEvent, cx: &mut Context<Self>) {
         self.terminal.poll_exited();
+        if self.terminal.exited {
+            self.release_native_git(cx);
+        }
         self.sync_pending_agent_restore(cx);
         self.sync_typeahead_owner();
         if self.terminal.has_pending_auth() {
@@ -1986,6 +2008,7 @@ impl TerminalView {
             AlacEvent::PtyWrite(text) => self.terminal.write(text.into_bytes()),
             AlacEvent::ChildExit(_) | AlacEvent::Exit => {
                 self.terminal.exited = true;
+                self.release_native_git(cx);
                 // Nothing is left to settle, and a title still waiting its turn
                 // would land on top of the state below a moment from now.
                 self.pending_title = None;
@@ -3497,12 +3520,24 @@ impl TerminalView {
             })
             .flatten();
         if cwd_now.as_ref() != self.git_status_cwd.as_ref() || cmd_finished || turn_finished {
-            if cmd_finished || turn_finished {
+            if (cmd_finished || turn_finished) && self.native_git_host.is_none() {
                 self.mark_repo_changed(cwd_now.as_deref(), cx);
             }
             self.refresh_git_status(cwd_now, GitRefresh::Edge, cx);
         } else if tool_activity {
             self.refresh_git_status(cwd_now, GitRefresh::Opportunistic, cx);
+        } else if native_cwd
+            && self.displayed.load(std::sync::atomic::Ordering::Relaxed)
+            && window.is_window_active()
+            && cwd_now.as_deref().is_some_and(|cwd| {
+                cx.try_global::<crate::terminal::git_status::GitStatusCache>()
+                    .is_some_and(|cache| {
+                        cache.status_for(self.git_host_id(), cwd).is_some()
+                            && cache.probe_due(self.git_host_id(), cwd, NATIVE_GIT_GAP)
+                    })
+            })
+        {
+            self.refresh_git_status(cwd_now, GitRefresh::NativePoll, cx);
         } else if self.git_retry_due(cx) {
             self.refresh_git_status(cwd_now, GitRefresh::Retry, cx);
         }
@@ -3665,10 +3700,16 @@ impl TerminalView {
             GitRefresh::Opportunistic => {
                 cache.begin_probe_throttled(id, &cwd, OPPORTUNISTIC_GIT_GAP)
             }
+            GitRefresh::NativePoll => cache.begin_probe_throttled(id, &cwd, NATIVE_GIT_GAP),
             GitRefresh::Retry => cache.begin_probe_throttled(id, &cwd, GIT_RETRY_GAP),
         });
         if !claimed {
             return;
+        }
+        if self.native_git_host.is_some() {
+            // A remote edit may preserve both branch and line counts. Tell the
+            // open diff that this admitted refresh is a new observation boundary.
+            self.mark_repo_changed(Some(&cwd), cx);
         }
         let probe_cwd = cwd.clone();
         let pane = cx.weak_entity();
