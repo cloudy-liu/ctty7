@@ -5,14 +5,18 @@
 //! pane's files come over SFTP instead, which had no `Host`, so double-click
 //! could only download (#656). This adapter closes that gap: the file
 //! operations map one-to-one onto [`SftpOp`]s, and everything a bare SFTP
-//! channel cannot do — git, search, shells, watching — says so honestly
+//! channel cannot do — search, shells, watching — says so honestly
 //! instead of pretending.
+//!
+//! Managed Native SSH panes can additionally opt into read-only Git through
+//! their existing SSH command connection; bare SFTP hosts still reject Git.
 //!
 //! Calls block on a daemon round trip, so they must stay off the UI thread;
 //! `HostOps` already guarantees that for every `Host`.
 
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use tty7_core::host::ShellInventory;
 
@@ -24,15 +28,54 @@ use crate::ui::sftp::SftpRoute;
 pub(crate) struct SftpHost {
     id: HostId,
     route: SftpRoute,
+    git_enabled: bool,
+    connected: AtomicBool,
 }
 
 impl SftpHost {
     pub(crate) fn new(route: SftpRoute) -> Self {
         let id = HostId::from_connection_key(&route.connection_key());
-        SftpHost { id, route }
+        SftpHost {
+            id,
+            route,
+            git_enabled: false,
+            connected: AtomicBool::new(true),
+        }
+    }
+
+    pub(crate) fn with_git(route: SftpRoute) -> Self {
+        // A new adapter is a new connection lifetime, even if a daemon reuses
+        // the pane number. Old diff requests must never describe the new pane.
+        let id = HostId::from_connection_key(&format!(
+            "native-git:{}:{}",
+            route.connection_key(),
+            uuid::Uuid::new_v4()
+        ));
+        Self {
+            id,
+            route,
+            git_enabled: true,
+            connected: AtomicBool::new(true),
+        }
+    }
+
+    pub(crate) fn disconnect(&self) {
+        self.connected.store(false, Ordering::Release);
+    }
+
+    fn check_connected(&self) -> io::Result<()> {
+        if self.is_connected() {
+            Ok(())
+        } else {
+            Err(io::Error::new(
+                io::ErrorKind::NotConnected,
+                "SSH pane disconnected",
+            ))
+        }
     }
 
     fn op(&self, op: SftpOp) -> io::Result<SftpOpResult> {
+        self.check_connected()?;
         match self.route.op(op) {
             SftpOpResult::Error(e) => Err(sftp_io(e)),
             other => Ok(other),
@@ -100,6 +143,7 @@ impl Host for SftpHost {
     }
 
     fn read_dir(&self, dir: &Path, _root: Option<&Path>) -> io::Result<Vec<Entry>> {
+        self.check_connected()?;
         let entries = self.route.list(&rpath(dir)).map_err(sftp_io)?;
         Ok(entries
             .iter()
@@ -221,12 +265,24 @@ impl Host for SftpHost {
         }
     }
 
-    fn repo_root(&self, _p: &Path) -> io::Result<Option<PathBuf>> {
-        Ok(None)
+    fn repo_root(&self, p: &Path) -> io::Result<Option<PathBuf>> {
+        if !self.git_enabled {
+            return Ok(None);
+        }
+        let out = self.git(p, &["rev-parse", "--show-toplevel"])?;
+        Ok(out.success().then(|| PathBuf::from(out.stdout_trimmed())))
     }
 
-    fn git(&self, _cwd: &Path, _args: &[&str]) -> io::Result<Output> {
-        Err(unsupported("git"))
+    fn git(&self, cwd: &Path, args: &[&str]) -> io::Result<Output> {
+        if !self.git_enabled {
+            return Err(unsupported("git"));
+        }
+        self.check_connected()?;
+        self.route.git(cwd, args)
+    }
+
+    fn is_connected(&self) -> bool {
+        self.connected.load(Ordering::Acquire)
     }
 
     fn shells(&self) -> io::Result<ShellInventory> {

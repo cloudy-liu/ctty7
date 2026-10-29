@@ -112,6 +112,37 @@ impl SftpRoute {
         }
     }
 
+    pub(crate) fn git(
+        &self,
+        cwd: &Path,
+        args: &[&str],
+    ) -> std::io::Result<crate::ui::host_ops::Output> {
+        if !crate::daemon::spawn::local_daemon_supports(
+            crate::daemon::protocol::FEATURE_NATIVE_SSH_GIT,
+        ) {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "daemon does not support Native SSH Git queries",
+            ));
+        }
+        let args: Vec<String> = args.iter().map(|arg| (*arg).to_string()).collect();
+        let cwd = cwd.to_string_lossy().into_owned();
+        let reply = match self.workspace_op(crate::daemon::protocol::WorkspaceOp::SshGit {
+            cwd: cwd.clone(),
+            args: args.clone(),
+        }) {
+            Some(req) => RemoteTerminal::on_workspace(req),
+            None => return RemoteTerminal::ssh_git(self.pane_id, cwd, args),
+        }
+        .map_err(std::io::Error::other)?;
+        match reply {
+            crate::daemon::protocol::DaemonMsg::SshGitOutput(out) => Ok(out),
+            other => Err(std::io::Error::other(format!(
+                "unexpected SSH Git reply: {other:?}"
+            ))),
+        }
+    }
+
     pub(crate) fn transfer_start(&self, spec: SftpTransferSpec) -> Result<u64, String> {
         let Some(req) =
             self.workspace_op(crate::daemon::protocol::WorkspaceOp::SftpTransferStart {
