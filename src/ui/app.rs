@@ -5104,6 +5104,11 @@ impl Tty7App {
             return false;
         };
         let view = leaf.read(cx);
+        // This gates worktree creation in the tab menu. Native SSH Git is
+        // inspection only; its directory is not on the workspace host.
+        if view.git_host_id() != view.host_id() {
+            return false;
+        }
         let Some(cwd) = view.git_status_cwd() else {
             return false;
         };

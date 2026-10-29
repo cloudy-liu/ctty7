@@ -1,0 +1,255 @@
+use super::*;
+use crate::terminal::git_status::{GitStatusCache, RepoSnapshot};
+use crate::ui::app::{Tab, test_window};
+use crate::ui::diff_overlay::DiffLoad;
+use crate::ui::host_ops::{Entry, Host, HostId, Meta, Output, SearchHit, WatchSub};
+use crate::ui::host_registry::HostRegistry;
+use crate::ui::pane::{Pane, PaneSlot};
+use gpui::{Entity, TestAppContext, VisualTestContext};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tty7_core::host::ShellInventory;
+
+// Substitute only the Host I/O boundary, as the document-resource tests do.
+// Pane selection, cache, sidebar mouse input, Git parser and diff renderer run
+// through their production paths. The real SSH exchange is tested in core.
+struct RemoteRepository {
+    id: HostId,
+    branch: &'static str,
+}
+
+fn unsupported<T>() -> io::Result<T> {
+    Err(io::ErrorKind::Unsupported.into())
+}
+
+impl Host for RemoteRepository {
+    fn id(&self) -> HostId {
+        self.id
+    }
+    fn separator(&self) -> char {
+        '/'
+    }
+    fn is_absolute(&self, p: &Path) -> bool {
+        p.to_string_lossy().starts_with('/')
+    }
+    fn read_dir(&self, _: &Path, _: Option<&Path>) -> io::Result<Vec<Entry>> {
+        unsupported()
+    }
+    fn stat(&self, _: &Path) -> io::Result<Meta> {
+        unsupported()
+    }
+    fn read_file(&self, p: &Path, _: u64) -> io::Result<Vec<u8>> {
+        if p.to_string_lossy() == "/work/project/docs/new.md" {
+            Ok(format!("{} untracked\n", self.branch).into_bytes())
+        } else {
+            Err(io::ErrorKind::NotFound.into())
+        }
+    }
+    fn canonicalize(&self, _: &Path) -> io::Result<PathBuf> {
+        unsupported()
+    }
+    fn search(
+        &self,
+        _: &[PathBuf],
+        _: &str,
+        _: usize,
+        _: usize,
+        _: bool,
+    ) -> io::Result<Vec<SearchHit>> {
+        unsupported()
+    }
+    fn write_file(&self, _: &Path, _: &[u8]) -> io::Result<Meta> {
+        unsupported()
+    }
+    fn create_file_new(&self, _: &Path) -> io::Result<()> {
+        unsupported()
+    }
+    fn create_dir(&self, _: &Path, _: bool) -> io::Result<()> {
+        unsupported()
+    }
+    fn rename(&self, _: &Path, _: &Path) -> io::Result<()> {
+        unsupported()
+    }
+    fn remove(&self, _: &Path, _: bool) -> io::Result<()> {
+        unsupported()
+    }
+    fn repo_root(&self, _: &Path) -> io::Result<Option<PathBuf>> {
+        Ok(Some("/work/project".into()))
+    }
+    fn git(&self, cwd: &Path, args: &[&str]) -> io::Result<Output> {
+        if cwd != Path::new("/work/project") {
+            return Err(io::ErrorKind::NotFound.into());
+        }
+        let stdout = if args.first() == Some(&"rev-parse") {
+            if args.contains(&"--git-dir") {
+                "/work/project\n/work/project/.git\n/work/project/.git\n".to_string()
+            } else {
+                "/work/project\n".to_string()
+            }
+        } else if args.first() == Some(&"symbolic-ref") {
+            format!("{}\n", self.branch)
+        } else if args.contains(&"--numstat") {
+            "2\t1\tsrc/service.rs\n".to_string()
+        } else if args.contains(&"ls-files") {
+            "docs/new.md\n".to_string()
+        } else if args.first() == Some(&"diff") || args.contains(&"diff") {
+            format!(
+                "diff --git a/src/service.rs b/src/service.rs\n--- a/src/service.rs\n+++ b/src/service.rs\n@@ -1 +1,2 @@\n-old\n+{}\n+added\n",
+                self.branch
+            )
+        } else {
+            return unsupported();
+        };
+        Ok(Output {
+            status: Some(0),
+            stdout: stdout.into_bytes(),
+            stderr: vec![],
+        })
+    }
+    fn shells(&self) -> io::Result<ShellInventory> {
+        unsupported()
+    }
+    fn watch(&self, _: &[PathBuf]) -> io::Result<WatchSub> {
+        unsupported()
+    }
+}
+
+fn settle(vcx: &mut VisualTestContext, mut ready: impl FnMut(&mut VisualTestContext) -> bool) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        vcx.run_until_parked();
+        if ready(vcx) {
+            return;
+        }
+        assert!(Instant::now() < deadline, "remote diff did not settle");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+#[gpui::test]
+fn sidebar_click_reads_the_owning_ssh_repository_and_untracked_file(cx: &mut TestAppContext) {
+    let (app, mut vcx) = test_window::harness(cx);
+    vcx.simulate_resize(gpui::size(px(1200.), px(700.)));
+    let cwd = PathBuf::from("/work/project");
+    let (panes, _streams): (Vec<Entity<TerminalView>>, Vec<_>) = app.update_in(&mut vcx, |app, window, cx| {
+        let cfg = cx.global_mut::<Config>();
+        cfg.tab_bar_position = crate::core::config::TabBarPosition::Left;
+        cfg.sidebar_grouping = crate::core::config::SidebarGrouping::None;
+        cfg.cursor_blink = false;
+        cfg.sidebar_diff_preview = true;
+        let mut panes = Vec::new();
+        let mut streams = Vec::new();
+        for (index, branch) in ["remote-a", "remote-b"].into_iter().enumerate() {
+            let pane_id = index as u64 + 70;
+            let (parts, mut daemon) = quiet_test_shell_parts(pane_id);
+            let view = cx.new(|cx| TerminalView::from_native_ssh_parts(NativeSshParts {
+                terminal: parts.terminal, pane_id,
+                persist: Box::new(serde_json::from_str(r#"{"host":"build-box","port":22,"user":"me","auth_mode":"auto"}"#).unwrap()),
+            }, window, cx));
+            crate::daemon::protocol::DaemonMsg::RemoteContext(Some(RemoteContext {
+                kind: crate::daemon::protocol::RemoteKind::NativeSsh,
+                argv: vec![], target: branch.into(),
+            })).encode(&mut daemon).unwrap();
+            crate::daemon::protocol::DaemonMsg::Cwd(cwd.clone()).encode(&mut daemon).unwrap();
+            let id = view.read(cx).git_host_id();
+            HostRegistry::insert(cx, Arc::new(RemoteRepository { id, branch }));
+            cx.default_global::<GitStatusCache>().finish_probe(id, &cwd, Some(RepoSnapshot {
+                root: cwd.clone(), home: cwd.clone(), branch: branch.into(), counts: Some((2, 1)),
+            }));
+            app.tabs.push(Tab::new(Pane::leaf(PaneSlot::Ready(view.clone()))));
+            panes.push(view);
+            streams.push(daemon);
+        }
+        // An identical local path must not determine what either SSH row opens.
+        cx.default_global::<GitStatusCache>().finish_probe(HostId::LOCAL, &cwd, Some(RepoSnapshot {
+            root: cwd.clone(), home: cwd.clone(), branch: "local-only".into(), counts: Some((99, 99)),
+        }));
+        app.active = 0;
+        cx.notify();
+        (panes, streams)
+    });
+    settle(&mut vcx, |vcx| {
+        app.update_in(vcx, |_, window, cx| {
+            for pane in &panes {
+                pane.update(cx, |view, cx| view.poll_foreground(window, cx));
+            }
+            panes
+                .iter()
+                .all(|pane| pane.read(cx).git_status_cwd() == Some(cwd.as_path()))
+        })
+    });
+    vcx.run_until_parked();
+    let counts = vcx
+        .debug_bounds("sidebar-diff-1")
+        .expect("remote totals are clickable");
+    vcx.simulate_click(counts.center(), gpui::Modifiers::none());
+    let remote_id = panes[1].read_with(&vcx, |view, _| view.git_host_id());
+    app.read_with(&vcx, |app, _| {
+        assert_eq!(app.active, 1, "clicking totals activates their owning tab");
+        let overlay = app.tabs[1].diff_overlay.as_ref().expect("diff opened");
+        assert_eq!(
+            overlay.host_id, remote_id,
+            "remote cwd must travel with its pane's Git identity"
+        );
+        assert_eq!(overlay.cwd, cwd);
+    });
+    settle(&mut vcx, |vcx| {
+        app.read_with(vcx, |app, _| {
+            matches!(
+                app.tabs[1].diff_overlay.as_ref().unwrap().load,
+                DiffLoad::Ready(_)
+            )
+        })
+    });
+    app.read_with(&vcx, |app, _| {
+        let DiffLoad::Ready(snapshot) = &app.tabs[1].diff_overlay.as_ref().unwrap().load else {
+            unreachable!()
+        };
+        assert_eq!(snapshot.branch, "remote-b");
+        assert_eq!(snapshot.totals(), (2, 1));
+        assert_eq!(snapshot.files[0].path, "src/service.rs");
+        assert_eq!(snapshot.files[0].hunks[0].lines[1].text, "remote-b");
+    });
+    app.update_in(&mut vcx, |app, window, cx| {
+        assert!(
+            !app.tab_is_in_repo(1, window, cx),
+            "read-only pane Git must not enable workspace-host write actions"
+        );
+    });
+    // Open the listed untracked file through the same application entry. Its
+    // bytes must use the Host's POSIX join even when the GUI runs on Windows.
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.toggle_diff_overlay_at(
+            remote_id,
+            cwd.clone(),
+            Some("docs/new.md".into()),
+            window,
+            cx,
+        )
+    });
+    settle(&mut vcx, |vcx| {
+        app.read_with(vcx, |app, _| {
+            app.tabs[1].diff_overlay.as_ref().unwrap().preview.is_some()
+        })
+    });
+    app.read_with(&vcx, |app, _| {
+        let overlay = app.tabs[1].diff_overlay.as_ref().unwrap();
+        let (_, file) = overlay.preview.as_ref().unwrap();
+        let file = file.as_ref().expect("the remote untracked file was read");
+        assert_eq!(file.hunks[0].lines[0].text, "remote-b untracked");
+    });
+    app.update_in(&mut vcx, |app, window, cx| {
+        app.close_diff_overlay(window, cx);
+        HostRegistry::remove(cx, remote_id);
+        panes[1].update(cx, |view, cx| view.release_native_git(cx));
+        app.toggle_diff_overlay(remote_id, cwd, window, cx);
+        let overlay = app.tabs[1].diff_overlay.as_ref().unwrap();
+        assert!(!overlay.loading);
+        assert!(
+            matches!(overlay.load, DiffLoad::Unavailable),
+            "a departed pane reports an unavailable diff instead of reading forever"
+        );
+    });
+}
