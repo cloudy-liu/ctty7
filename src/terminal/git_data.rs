@@ -909,8 +909,11 @@ impl Tty7App {
         if held.is_empty() {
             return;
         }
-        let live = crate::ui::host_registry::HostRegistry::ids(cx);
-        for host in held.into_iter().filter(|h| !live.contains(h)) {
+        for host in held {
+            // Pane-owned Git routes are deliberately absent from machine IDs.
+            if crate::ui::host_registry::HostRegistry::lookup(cx, host).is_some() {
+                continue;
+            }
             cx.default_global::<ScmData>().clear_host(host);
             cx.default_global::<crate::terminal::git_status::GitStatusCache>()
                 .clear_host(host);

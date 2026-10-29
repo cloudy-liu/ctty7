@@ -2,7 +2,7 @@ use super::*;
 use crate::terminal::git_status::{GitStatusCache, RepoSnapshot};
 use crate::ui::app::{Tab, test_window};
 use crate::ui::diff_overlay::DiffLoad;
-use crate::ui::host_ops::{Entry, Host, HostId, Meta, Output, SearchHit, WatchSub};
+use crate::ui::host_ops::{Entry, Host, HostId, Meta, Output, SearchHit, SharedHost, WatchSub};
 use crate::ui::host_registry::HostRegistry;
 use crate::ui::pane::{Pane, PaneSlot};
 use gpui::{Entity, TestAppContext, VisualTestContext};
@@ -21,7 +21,7 @@ struct RemoteRepository {
     branch: &'static str,
     body: Option<Arc<Mutex<String>>>,
     status_queries: Option<Arc<AtomicUsize>>,
-    connection: Option<crate::ui::host_ops::SharedHost>,
+    connection: Option<SharedHost>,
     pause: Option<Arc<QueryPause>>,
 }
 
@@ -193,7 +193,7 @@ fn sidebar_click_reads_the_owning_ssh_repository_and_untracked_file(cx: &mut Tes
     let (app, mut vcx) = test_window::harness(cx);
     vcx.simulate_resize(gpui::size(px(1200.), px(700.)));
     let cwd = PathBuf::from("/work/project");
-    let (panes, _streams): (Vec<Entity<TerminalView>>, Vec<_>) = app.update_in(&mut vcx, |app, window, cx| {
+    let (panes, _streams, _hosts): (Vec<Entity<TerminalView>>, Vec<_>, Vec<_>) = app.update_in(&mut vcx, |app, window, cx| {
         let cfg = cx.global_mut::<Config>();
         cfg.tab_bar_position = crate::core::config::TabBarPosition::Left;
         cfg.sidebar_grouping = crate::core::config::SidebarGrouping::None;
@@ -201,6 +201,7 @@ fn sidebar_click_reads_the_owning_ssh_repository_and_untracked_file(cx: &mut Tes
         cfg.sidebar_diff_preview = true;
         let mut panes = Vec::new();
         let mut streams = Vec::new();
+        let mut hosts = Vec::new();
         for (index, branch) in ["remote-a", "remote-b"].into_iter().enumerate() {
             let pane_id = index as u64 + 70;
             let (parts, mut daemon) = quiet_test_shell_parts(pane_id);
@@ -214,7 +215,11 @@ fn sidebar_click_reads_the_owning_ssh_repository_and_untracked_file(cx: &mut Tes
             })).encode(&mut daemon).unwrap();
             crate::daemon::protocol::DaemonMsg::Cwd(cwd.clone()).encode(&mut daemon).unwrap();
             let id = view.read(cx).git_host_id();
-            HostRegistry::insert(cx, Arc::new(RemoteRepository { id, branch, body: None, status_queries: None, connection: None, pause: None }));
+            let connection = HostRegistry::lookup(cx, id).expect("native pane route exists");
+            let host: SharedHost = Arc::new(RemoteRepository { id, branch, body: None, status_queries: None, connection: Some(connection), pause: None });
+            HostRegistry::insert_pane(cx, &host);
+            assert!(!HostRegistry::ids(cx).contains(&id));
+            hosts.push(host);
             cx.default_global::<GitStatusCache>().finish_probe(id, &cwd, Some(RepoSnapshot {
                 root: cwd.clone(), home: cwd.clone(), branch: branch.into(), counts: Some((2, 1)),
             }));
@@ -228,7 +233,7 @@ fn sidebar_click_reads_the_owning_ssh_repository_and_untracked_file(cx: &mut Tes
         }));
         app.active = 0;
         cx.notify();
-        (panes, streams)
+        (panes, streams, hosts)
     });
     settle(&mut vcx, |vcx| {
         app.update_in(vcx, |_, window, cx| {
@@ -302,7 +307,6 @@ fn sidebar_click_reads_the_owning_ssh_repository_and_untracked_file(cx: &mut Tes
     });
     app.update_in(&mut vcx, |app, window, cx| {
         app.close_diff_overlay(window, cx);
-        HostRegistry::remove(cx, remote_id);
         panes[1].update(cx, |view, cx| view.release_native_git(cx));
         app.toggle_diff_overlay(remote_id, cwd, window, cx);
         let overlay = app.tabs[1].diff_overlay.as_ref().unwrap();
@@ -322,7 +326,7 @@ fn active_ssh_diff_refreshes_external_edits_with_unchanged_line_counts(cx: &mut 
     let body = Arc::new(Mutex::new("before external edit".to_string()));
     let status_queries = Arc::new(AtomicUsize::new(0));
     let pause = Arc::new(QueryPause::default());
-    let (pane, daemons) = app.update_in(&mut vcx, |app, window, cx| {
+    let (pane, daemons, _host) = app.update_in(&mut vcx, |app, window, cx| {
         window.activate_window();
         let cfg = cx.global_mut::<Config>();
         cfg.tab_bar_position = crate::core::config::TabBarPosition::Left;
@@ -357,25 +361,24 @@ fn active_ssh_diff_refreshes_external_edits_with_unchanged_line_counts(cx: &mut 
             .encode(&mut daemon)
             .unwrap();
         let id = pane.read(cx).git_host_id();
-        let connection = HostRegistry::lookup(cx, id);
-        HostRegistry::insert(
-            cx,
-            Arc::new(RemoteRepository {
-                id,
-                branch: "remote",
-                body: Some(body.clone()),
-                status_queries: Some(status_queries.clone()),
-                connection,
-                pause: Some(pause.clone()),
-            }),
-        );
+        let connection = HostRegistry::lookup(cx, id).expect("native pane route exists");
+        let host: SharedHost = Arc::new(RemoteRepository {
+            id,
+            branch: "remote",
+            body: Some(body.clone()),
+            status_queries: Some(status_queries.clone()),
+            connection: Some(connection),
+            pause: Some(pause.clone()),
+        });
+        HostRegistry::insert_pane(cx, &host);
+        assert!(!HostRegistry::ids(cx).contains(&id));
         app.tabs
             .push(Tab::new(Pane::leaf(PaneSlot::Ready(pane.clone()))));
         let (local, local_daemon) = quiet_test_pane(81, window, cx);
         app.tabs.push(Tab::new(Pane::leaf(PaneSlot::Ready(local))));
         app.active = 0;
         cx.notify();
-        (pane, (daemon, local_daemon))
+        (pane, (daemon, local_daemon), host)
     });
     settle(&mut vcx, |vcx| {
         app.update_in(vcx, |_, window, cx| {
@@ -410,13 +413,38 @@ fn active_ssh_diff_refreshes_external_edits_with_unchanged_line_counts(cx: &mut 
             "fresh content can have identical totals"
         );
     });
-    let admitted = status_queries.load(Ordering::SeqCst);
-    app.update_in(&mut vcx, |app, window, cx| {
-        for _ in 0..20 {
-            pane.update(cx, |view, cx| view.poll_foreground(window, cx));
-        }
-        app.activate(1, window, cx);
+    let id = pane.read_with(&vcx, |view, _| view.git_host_id());
+    let epoch = app.read_with(&vcx, |_, cx| {
+        cx.global::<crate::terminal::git_data::ScmData>()
+            .epoch(id, &cwd)
     });
+    assert!(
+        epoch > 0,
+        "the admitted native refresh advances diff freshness"
+    );
+    let admitted = status_queries.load(Ordering::SeqCst);
+    for _ in 0..20 {
+        app.update_in(&mut vcx, |_, window, cx| {
+            pane.update(cx, |view, cx| view.poll_foreground(window, cx));
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        app.update_in(&mut vcx, |_, _, cx| {
+            assert!(!HostRegistry::ids(cx).contains(&id));
+            assert!(HostRegistry::lookup(cx, id).is_some());
+            assert!(
+                cx.global::<GitStatusCache>().status_for(id, &cwd).is_some(),
+                "ordinary renders retain live pane statistics"
+            );
+            assert_eq!(
+                cx.global::<crate::terminal::git_data::ScmData>()
+                    .epoch(id, &cwd),
+                epoch,
+                "ordinary renders retain the pane's diff freshness epoch"
+            );
+        });
+    }
+    app.update_in(&mut vcx, |app, window, cx| app.activate(1, window, cx));
     vcx.run_until_parked();
     assert_eq!(
         status_queries.load(Ordering::SeqCst),
@@ -460,6 +488,26 @@ fn active_ssh_diff_refreshes_external_edits_with_unchanged_line_counts(cx: &mut 
         pane.update(cx, |view, cx| view.refresh_git_status_now(cx));
     });
     settle(&mut vcx, |_| pause.started.load(Ordering::SeqCst) >= 3);
+    app.update_in(&mut vcx, |_, _, cx| cx.notify());
+    vcx.run_until_parked();
+    app.update_in(&mut vcx, |_, _, cx| {
+        assert!(!HostRegistry::ids(cx).contains(&old_id));
+        assert!(HostRegistry::lookup(cx, old_id).is_some());
+        let cache = cx.global::<GitStatusCache>();
+        assert!(
+            cache.status_for(old_id, &cwd).is_some(),
+            "a render keeps statistics while their refresh is pending"
+        );
+        assert!(
+            !cache.probe_due(old_id, &cwd, Duration::ZERO),
+            "a render preserves the pending claim so another poll cannot duplicate it"
+        );
+        assert!(
+            cx.global::<crate::terminal::git_data::ScmData>()
+                .epoch(old_id, &cwd)
+                > 0
+        );
+    });
     app.update_in(&mut vcx, |app, window, cx| app.activate(1, window, cx));
     daemons.0.shutdown(std::net::Shutdown::Both).unwrap();
     settle(&mut vcx, |vcx| {
@@ -490,10 +538,16 @@ fn active_ssh_diff_refreshes_external_edits_with_unchanged_line_counts(cx: &mut 
             "a late untracked read must not land after retirement"
         );
         assert!(overlay.file_views.is_empty());
+        assert!(HostRegistry::lookup(cx, old_id).is_none());
+        assert_eq!(
+            cx.global::<crate::terminal::git_data::ScmData>()
+                .epoch(old_id, &cwd),
+            0,
+            "disconnect still retires pane freshness"
+        );
     });
     let new_body = Arc::new(Mutex::new("new connection".to_string()));
-    let (fresh, mut fresh_daemon) = app.update_in(&mut vcx, |app, window, cx| {
-        HostRegistry::remove(cx, old_id); // Remove the test's I/O substitution too.
+    let (fresh, mut fresh_daemon, _fresh_host) = app.update_in(&mut vcx, |app, window, cx| {
         let (parts, daemon) = quiet_test_shell_parts(80); // Reused daemon pane number.
         let fresh = cx.new(|cx| {
             TerminalView::from_native_ssh_parts(
@@ -521,21 +575,20 @@ fn active_ssh_diff_refreshes_external_edits_with_unchanged_line_counts(cx: &mut 
             !HostRegistry::ids(cx).contains(&id),
             "reconnection does not create another selectable machine"
         );
-        let connection = HostRegistry::lookup(cx, id);
-        HostRegistry::insert(
-            cx,
-            Arc::new(RemoteRepository {
-                id,
-                branch: "remote-new",
-                body: Some(new_body.clone()),
-                status_queries: None,
-                connection,
-                pause: None,
-            }),
-        );
+        let connection = HostRegistry::lookup(cx, id).expect("native pane route exists");
+        let host: SharedHost = Arc::new(RemoteRepository {
+            id,
+            branch: "remote-new",
+            body: Some(new_body.clone()),
+            status_queries: None,
+            connection: Some(connection),
+            pause: None,
+        });
+        HostRegistry::insert_pane(cx, &host);
+        assert!(!HostRegistry::ids(cx).contains(&id));
         app.tabs[0].pane = Pane::leaf(PaneSlot::Ready(fresh.clone()));
         cx.notify();
-        (fresh, daemon)
+        (fresh, daemon, host)
     });
     crate::daemon::protocol::DaemonMsg::RemoteContext(Some(RemoteContext {
         kind: crate::daemon::protocol::RemoteKind::NativeSsh,
