@@ -6,13 +6,33 @@ the mode icon appears when the active commit document contains a text diff.
 The existing fine separator still resizes the message and diff regions, and the
 existing icon artwork is retained.
 
-The native screenshots below document the preceding revision `3e2de8f8` before
-the latest toolbar move. The final placement has not been visually verified:
-LCU identified the acceptance window by its title and window ID, but twice
-returned an unrelated foreground window image. No input was sent to that window.
-The current PR must stay draft until matching final screenshots are captured.
+The final toolbar placement was verified on 2026-10-29 in the running native
+application built from the final `e422dfcd` source. Raising the exact acceptance
+window before capture resolved the earlier foreground-window capture blocker.
+The original LCU JPEG bytes were saved through a loopback capture receiver.
 
-## Native evidence
+## Final toolbar evidence
+
+The Before and After use the same repository, selected commit `34740588`,
+1280 x 800 logical viewport, 1.75 display scale, light theme, 320px Source
+Control panel, 400px History, and disabled remote author photos.
+
+Inspect the mode icon moving from its separate row into the top document strip,
+beside fill/restore and close; the extra content row is gone.
+
+![Before: diff mode occupies a separate row](images/commit-detail-layout/after-light.jpg)
+
+![After: diff mode shares the document tab strip](images/commit-detail-layout/after-toolbar-light.jpg)
+
+Dragging the separator still resizes the message and diff regions.
+
+![After: final toolbar with the separator dragged upward](images/commit-detail-layout/after-toolbar-dragged.jpg)
+
+Switching to README hides diff mode while retaining the same fill/restore position.
+
+![After: ordinary document hides diff-only controls](images/commit-detail-layout/after-toolbar-file.jpg)
+
+## Earlier native evidence
 
 Before is the production application at `cb0bc217`. After in this historical
 pair is revision `3e2de8f8`, before the later toolbar move.
@@ -104,9 +124,7 @@ the natural-height content wrapper received a follow-up Spec review with no find
 
 ## Known limitations
 
-The latest toolbar placement and its dynamic visibility are visually unverified:
-LCU twice returned an unrelated foreground window screenshot despite binding the
-acceptance window. Capture matching Before and After screenshots before marking
-the draft PR ready. Prior revision screenshots cover Windows/light-theme only;
-macOS, Linux, and dark-theme visuals have not been manually exercised.
+Native screenshots cover Windows/light-theme only; macOS, Linux, and dark-theme
+visuals have not been manually exercised. Empty and binary-only commit states
+are covered by rendered interaction checks rather than native screenshots.
 The split is retained for the open commit document, not persisted across app restarts.
