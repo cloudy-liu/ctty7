@@ -7,6 +7,7 @@ use std::sync::Arc;
 
 #[path = "diff_commit.rs"]
 mod commit;
+pub(crate) use commit::CommitSplit;
 
 #[cfg(feature = "markdown-visual-tests")]
 #[path = "diff_profile.rs"]
@@ -119,6 +120,7 @@ pub(crate) struct DiffOverlayState {
     pub(crate) source: DiffSource,
     pub(crate) commit: Option<Arc<tty7_core::core::git::log::Commit>>,
     pub(crate) commit_message_expanded: bool,
+    pub(crate) commit_split: CommitSplit,
     pub(crate) document_header_focus: FocusHandle,
     pub(crate) focus_handle: FocusHandle,
     pub(crate) load: DiffLoad,
@@ -666,6 +668,7 @@ impl Tty7App {
             source,
             commit,
             commit_message_expanded: false,
+            commit_split: crate::ui::diff_overlay::CommitSplit::new(cx),
             document_header_focus: cx.focus_handle(),
             focus_handle: focus_handle.clone(),
             // Every open starts at Loading until its own probe lands. The old
@@ -823,7 +826,10 @@ impl Tty7App {
         // Only wanted by an overlay whose first probe could not know the root,
         // and so could not read its own epoch before dispatching.
         let landing_epoch = snap.as_ref().map(|s| scm_epoch(cx, host, &s.root));
-        for tab in self.tabs.iter_mut() {
+        let mut reveal_commit_tab = false;
+        let active = self.active;
+        for (index, tab) in self.tabs.iter_mut().enumerate() {
+            let front = index == active && tab.overlay_top == crate::ui::app::OverlayTop::Diff;
             let Some(overlay) = tab
                 .diff_overlay
                 .as_mut()
@@ -831,18 +837,29 @@ impl Tty7App {
             else {
                 continue;
             };
+            let previously_had_actions = commit_has_diff_actions(overlay);
             overlay.loading = false;
             overlay.epoch = overlay.epoch.or(landing_epoch);
             overlay.load = match &snap {
                 Some(snap) => DiffLoad::Ready(Arc::clone(snap)),
                 None => DiffLoad::NotARepo,
             };
+            if front
+                && matches!(overlay.source, DiffSource::Commit { label: Some(_), .. })
+                && !previously_had_actions
+                && commit_has_diff_actions(overlay)
+            {
+                reveal_commit_tab = true;
+            }
             // A new snapshot restarts any untracked preview: the file may
             // have changed with the tree, and the re-read costs one file.
             overlay.preview = None;
             overlay.file_views.clear();
             *overlay.anchor.borrow_mut() = None;
             landed = true;
+        }
+        if reveal_commit_tab {
+            self.reveal_commit_document_tab();
         }
         if landed {
             cx.notify();
@@ -944,12 +961,22 @@ impl Tty7App {
 
         let palette = diff_palette(cx);
         let content = v_flex()
+            .relative()
             .flex_1()
             .min_h_0()
             .w_full()
             .bg(palette.background)
             .text_color(palette.foreground)
             .children(self.diff_commit_details(overlay, cx))
+            .when(self.has_commit_document(), |body| {
+                body.child(overlay.commit_split.backing()).child(
+                    div()
+                        .relative()
+                        .flex_none()
+                        .h(px(1.))
+                        .child(overlay.commit_split.divider(cx)),
+                )
+            })
             .child(content);
 
         let commit_document = self.has_commit_document();
@@ -1252,22 +1279,27 @@ impl Tty7App {
             })
     }
 
-    fn diff_document_actions(
+    pub(crate) fn diff_document_actions(
         &self,
         overlay: &DiffOverlayState,
         cx: &mut Context<Self>,
     ) -> AnyElement {
-        h_flex().flex_none().items_center().gap_2()
-            .child(self.diff_view_button(cx))
-            .when_some(focused_name(overlay).filter(|path| {
-                matches!(&overlay.load, DiffLoad::Ready(s) if s.files.iter().any(|f| f.path == *path && !f.binary))
-                    && !overlay.file_views.get(path)
-                        .and_then(|v| v.full.as_ref()).is_some_and(|f| f.binary)
-            }), |bar, path| bar
-                .child(self.diff_context_button(&path, cx))
-                .child(self.diff_change_button(false, cx))
-                .child(self.diff_change_button(true, cx)))
-            .child(self.document_fill_button(cx))
+        h_flex()
+            .flex_none()
+            .items_center()
+            .gap_2()
+            .when(
+                !self.has_commit_document() || commit_has_text_diff(overlay),
+                |bar| bar.child(self.diff_view_button(cx)),
+            )
+            .when_some(diff_context_path(overlay), |bar, path| {
+                bar.child(self.diff_context_button(&path, cx))
+                    .child(self.diff_change_button(false, cx))
+                    .child(self.diff_change_button(true, cx))
+            })
+            .when(!self.has_commit_document(), |bar| {
+                bar.child(self.document_fill_button(cx))
+            })
             .into_any_element()
     }
 
@@ -2644,6 +2676,38 @@ fn focused_name(overlay: &DiffOverlayState) -> Option<String> {
     untracked_focus(snap, overlay.focus.as_deref()).map(str::to_string)
 }
 
+fn diff_context_path(overlay: &DiffOverlayState) -> Option<String> {
+    focused_name(overlay).filter(|path| {
+        matches!(&overlay.load, DiffLoad::Ready(s) if s.files.iter().any(|f| f.path == *path && !f.binary))
+            && !overlay.file_views.get(path).and_then(|v| v.full.as_ref()).is_some_and(|f| f.binary)
+    })
+}
+
+pub(crate) fn commit_has_diff_actions(overlay: &DiffOverlayState) -> bool {
+    commit_has_text_diff(overlay) || diff_context_path(overlay).is_some()
+}
+
+pub(crate) fn commit_has_text_diff(overlay: &DiffOverlayState) -> bool {
+    let DiffLoad::Ready(snapshot) = &overlay.load else {
+        return false;
+    };
+    if let Some(path) = overlay.focus.as_deref() {
+        if let Some(file) = snapshot.files.iter().find(|file| file.path == path) {
+            return !file.binary && !file.hunks.is_empty();
+        }
+        return overlay.preview.as_ref().is_some_and(|(held, file)| {
+            held == path
+                && file
+                    .as_ref()
+                    .is_some_and(|file| !file.binary && !file.hunks.is_empty())
+        });
+    }
+    snapshot
+        .files
+        .iter()
+        .any(|file| !file.binary && !file.hunks.is_empty())
+}
+
 fn empty_snapshot(snap: &DiffSnapshot) -> bool {
     snap.files.is_empty() && snap.untracked.is_empty()
 }
@@ -3810,6 +3874,7 @@ mod github_theme_gpui_tests {
                 source: DiffSource::Staged,
                 commit: None,
                 commit_message_expanded: false,
+                commit_split: crate::ui::diff_overlay::CommitSplit::new(cx),
                 document_header_focus: cx.focus_handle(),
                 focus_handle: cx.focus_handle(),
                 load: DiffLoad::Ready(snapshot),
@@ -3917,6 +3982,7 @@ mod github_theme_gpui_tests {
                     source: DiffSource::Staged,
                     commit: None,
                     commit_message_expanded: false,
+                    commit_split: crate::ui::diff_overlay::CommitSplit::new(cx),
                     document_header_focus: cx.focus_handle(),
                     focus: Some("context.rs".into()),
                     focus_handle: cx.focus_handle(),
@@ -4229,6 +4295,7 @@ mod github_theme_gpui_tests {
                 source: DiffSource::Worktree,
                 commit: None,
                 commit_message_expanded: false,
+                commit_split: crate::ui::diff_overlay::CommitSplit::new(cx),
                 document_header_focus: cx.focus_handle(),
                 focus_handle: cx.focus_handle(),
                 load: DiffLoad::Ready(Arc::new(DiffSnapshot {

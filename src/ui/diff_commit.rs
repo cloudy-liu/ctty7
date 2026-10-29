@@ -1,6 +1,8 @@
 //! The selected commit's message and metadata above the existing diff content.
 use super::*;
-use gpui_component::avatar::Avatar;
+use gpui::{Bounds, MouseButton, MouseMoveEvent, MouseUpEvent};
+use gpui_component::InteractiveElementExt as _;
+use std::cell::Cell;
 use tty7_core::core::date::format_date;
 
 impl Tty7App {
@@ -68,7 +70,6 @@ impl Tty7App {
                         .child(div().min_w_0().truncate().text_xs().child(name)),
                 )
             })
-            .child(self.diff_document_actions(overlay, cx))
             .into_any_element()
     }
 
@@ -94,27 +95,15 @@ impl Tty7App {
             .and_then(|(cache, commit)| {
                 cache.update(cx, |cache, cx| cache.image(&commit.author.email, cx))
             });
-        let avatar = Avatar::new()
-            .name(label.author.clone())
-            .with_size(px(36.))
-            .when_some(image, |avatar, image| {
-                avatar.src(gpui::ImageSource::Render(image))
-            });
+        let avatar = crate::ui::scm::avatars::author_avatar(label.author.clone(), image, 36.);
         let date = format_date(label.at, commit.map_or(0, |c| c.author.at.offset_minutes));
         let mono = cx.theme().mono_font_family.clone();
         let muted = cx.theme().muted_foreground;
         let full_sha = rev.clone();
         let mut details = v_flex()
-            .id("diff-commit-details")
-            .debug_selector(|| "diff-commit-details".into())
-            .flex_shrink_0()
-            .max_h(gpui::relative(0.55))
-            .overflow_y_scroll()
-            .px_4()
-            .py_4()
+            .flex_none()
+            .w_full()
             .gap_3()
-            .border_b_1()
-            .border_color(cx.theme().border)
             .text_color(cx.theme().foreground)
             .child(
                 h_flex()
@@ -270,7 +259,6 @@ impl Tty7App {
                         .line_height(px(20.))
                         .text_color(muted)
                         .when(folded, |body| body.max_h(px(80.)).overflow_hidden())
-                        .when(!folded, |body| body.max_h(px(160.)).overflow_y_scroll())
                         .child(visible),
                 )
                 .when(can_fold, |details| {
@@ -330,6 +318,174 @@ impl Tty7App {
                     ),
             );
         }
-        Some(details.into_any_element())
+        Some(
+            v_flex()
+                .id("diff-commit-details")
+                .debug_selector(|| "diff-commit-details".into())
+                .flex_shrink_0()
+                .h(gpui::relative(overlay.commit_split.ratio()))
+                .min_h_0()
+                .overflow_y_scroll()
+                .px_4()
+                .py_4()
+                .child(details)
+                .into_any_element(),
+        )
+    }
+}
+
+fn split_limits(height: f32) -> (f32, f32) {
+    let height = height.max(1.);
+    ((100. / height).min(0.4), (1. - 140. / height).max(0.4))
+}
+
+/// Per-document geometry, using the same window-level drag capture as the side panels.
+pub(crate) struct CommitSplit {
+    ratio: Rc<Cell<f32>>,
+    dragging: Rc<Cell<bool>>,
+    bounds: Rc<Cell<Option<Bounds<Pixels>>>>,
+    focus: FocusHandle,
+}
+
+impl CommitSplit {
+    pub(crate) fn new(cx: &mut gpui::App) -> Self {
+        Self {
+            ratio: Rc::new(Cell::new(0.45)),
+            dragging: Rc::default(),
+            bounds: Rc::default(),
+            focus: cx.focus_handle(),
+        }
+    }
+
+    fn limits(&self) -> (f32, f32) {
+        let height = self
+            .bounds
+            .get()
+            .map_or(600., |b| b.size.height.as_f32())
+            .max(1.);
+        split_limits(height)
+    }
+
+    fn ratio(&self) -> f32 {
+        let (min, max) = self.limits();
+        self.ratio.get().clamp(min, max)
+    }
+
+    pub(super) fn backing(&self) -> AnyElement {
+        let bounds = self.bounds.clone();
+        let ratio = self.ratio.clone();
+        let dragging = self.dragging.clone();
+        gpui::canvas(
+            {
+                let bounds = bounds.clone();
+                move |actual, window, _| {
+                    if bounds
+                        .replace(Some(actual))
+                        .is_none_or(|old| old.size != actual.size)
+                    {
+                        window.refresh();
+                    }
+                }
+            },
+            move |_, _, window, _| {
+                window.on_mouse_event({
+                    let bounds = bounds.clone();
+                    let ratio = ratio.clone();
+                    let dragging = dragging.clone();
+                    move |event: &MouseMoveEvent, _, window, _| {
+                        if !dragging.get() {
+                            return;
+                        }
+                        // A release outside the window must not leave a stuck drag.
+                        if !event.pressed_button.is_some_and(|b| b == MouseButton::Left) {
+                            dragging.set(false);
+                            window.refresh();
+                            return;
+                        }
+                        if let Some(bounds) = bounds.get() {
+                            let height = bounds.size.height.as_f32().max(1.);
+                            let (min, max) = split_limits(height);
+                            ratio.set(
+                                ((event.position.y - bounds.top()).as_f32() / height)
+                                    .clamp(min, max),
+                            );
+                            window.refresh();
+                        }
+                    }
+                });
+                window.on_mouse_event({
+                    let dragging = dragging.clone();
+                    move |_: &MouseUpEvent, _, window, _| {
+                        if dragging.replace(false) {
+                            window.refresh();
+                        }
+                    }
+                });
+            },
+        )
+        .absolute()
+        .inset_0()
+        .size_full()
+        .into_any_element()
+    }
+
+    pub(super) fn divider(&self, cx: &mut Context<Tty7App>) -> AnyElement {
+        let ratio = self.ratio.clone();
+        let dragging = self.dragging.clone();
+        let focus = self.focus.clone();
+        let bounds = self.bounds.clone();
+        div()
+            .id("commit-details-resize")
+            .debug_selector(|| "commit-details-resize".into())
+            .track_focus(&self.focus)
+            .occlude()
+            .absolute()
+            .top(px(-4.))
+            .left_0()
+            .w_full()
+            .h(px(9.))
+            .flex()
+            .items_center()
+            .cursor_row_resize()
+            .child(div().h(px(1.)).w_full().bg(cx.theme().border))
+            .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+                dragging.set(true);
+                window.focus(&focus, cx);
+                cx.stop_propagation();
+            })
+            .on_double_click({
+                let ratio = ratio.clone();
+                let dragging = self.dragging.clone();
+                move |_, window, cx| {
+                    dragging.set(false);
+                    ratio.set(0.45);
+                    window.refresh();
+                    cx.stop_propagation();
+                }
+            })
+            .on_key_down(move |event: &KeyDownEvent, window, cx| {
+                let height = bounds
+                    .get()
+                    .map_or(600., |b| b.size.height.as_f32())
+                    .max(1.);
+                let (min, max) = split_limits(height);
+                let delta = if event.keystroke.modifiers.shift {
+                    32.
+                } else {
+                    8.
+                } / height;
+                let current = ratio.get().clamp(min, max);
+                let value = match event.keystroke.key.as_str() {
+                    "up" => current - delta,
+                    "down" => current + delta,
+                    "home" => min,
+                    "end" => max,
+                    _ => return,
+                };
+                ratio.set(value.clamp(min, max));
+                window.refresh();
+                cx.stop_propagation();
+            })
+            .into_any_element()
     }
 }
