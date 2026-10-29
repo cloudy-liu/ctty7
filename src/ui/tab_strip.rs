@@ -1210,9 +1210,7 @@ impl Tty7App {
             .child(
                 gpui::svg()
                     .path(indicator.icon_path())
-                    // At nine pixels the comet's turn only reads when it
-                    // fills the disc; the still marks keep a margin.
-                    .size(px(if working { d } else { d * 0.9 }))
+                    .size(px(d * 0.9))
                     .text_color(indicator.color(surface))
                     .when(working, |icon| {
                         icon.with_transformation(gpui::Transformation::rotate(gpui::percentage(
