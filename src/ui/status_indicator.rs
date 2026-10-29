@@ -202,7 +202,7 @@ mod tests {
         // Ink on the track's centre line, `deg` clockwise from twelve o'clock.
         let alpha = |deg: f32| {
             let (sin, cos) = deg.to_radians().sin_cos();
-            let (x, y) = (8. + 5.4 * sin, 8. - 5.4 * cos);
+            let (x, y) = (8. + 5.6 * sin, 8. - 5.6 * cos);
             pixmap
                 .pixel((x * scale) as u32, (y * scale) as u32)
                 .unwrap()
@@ -210,15 +210,20 @@ mod tests {
         };
 
         assert!(alpha(-6.) > 240, "the head is not solid: {}", alpha(-6.));
-        for ahead in [30., 75., 120.] {
+        for ahead in [35., 55., 75.] {
             assert_eq!(alpha(ahead), 0, "ink {ahead}° ahead of the head");
         }
-        let tail = [-12., -62., -112., -162., -187.].map(alpha);
+        let tail = [-15., -75., -135., -195., -255.].map(alpha);
         assert!(
             tail.windows(2).all(|w| w[0] > w[1]),
             "the tail does not fade away from the head: {tail:?}"
         );
-        assert!(tail[4] > 0, "the tail ends before 187°: {tail:?}");
+        // At nine or ten pixels a tail that fades out early leaves only a
+        // speck at the head, and the turning stops being visible.
+        assert!(
+            tail[4] >= 40,
+            "the end of the tail is too faint to see: {tail:?}"
+        );
     }
 
     #[test]
