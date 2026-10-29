@@ -31,6 +31,8 @@ struct Options {
     top: bool,
     #[serde(default)]
     tray_disabled: bool,
+    #[serde(default)]
+    dark: bool,
 }
 
 #[derive(Deserialize)]
@@ -171,7 +173,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             crate::register_bundled_fonts(cx);
             let mut config = Config::default();
             config.theme_follow_system = false;
-            config.theme_preset = "light".into();
+            config.theme_preset = if options.dark { "dark" } else { "light" }.into();
             config.install_cli_on_path = false;
             config.cursor_blink = false;
             config.sidebar_width = 260.;

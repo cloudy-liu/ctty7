@@ -10625,6 +10625,8 @@ mod run_badge_gpui_tests {
     use gpui::{Entity, TestAppContext, VisualTestContext};
     use std::time::Duration;
 
+    const STEPS: u64 = crate::ui::tab_strip::RUN_BADGE_STEPS as u64;
+
     fn working_window(
         cx: &mut TestAppContext,
         count: usize,
@@ -10767,20 +10769,20 @@ mod run_badge_gpui_tests {
     }
 
     #[gpui::test]
-    fn visible_working_badge_refreshes_at_twelve_steps_per_second(cx: &mut TestAppContext) {
+    fn visible_working_badge_refreshes_once_per_step(cx: &mut TestAppContext) {
         let (app, mut vcx, _streams) = working_window(cx, 1);
         let draws = draws_over(&mut vcx, 1000);
         assert_eq!(
             app.read_with(&vcx, |app, cx| app.tabs[0].agent_status(cx)),
             Some(AgentStatus::Working)
         );
-        assert_eq!(draws, 12);
+        assert_eq!(draws, STEPS);
     }
 
     #[gpui::test]
     fn several_working_badges_share_the_windows_refresh_rate(cx: &mut TestAppContext) {
         let (_app, mut vcx, _streams) = working_window(cx, 4);
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
     }
 
     #[gpui::test]
@@ -10814,7 +10816,7 @@ mod run_badge_gpui_tests {
             app.update(&mut vcx, |_, cx| cx.notify());
             vcx.background_executor.run_until_parked();
             draws_over(&mut vcx, 1000);
-            assert_eq!(draws_over(&mut vcx, 1000), 12);
+            assert_eq!(draws_over(&mut vcx, 1000), STEPS);
         }
     }
 
@@ -10835,13 +10837,13 @@ mod run_badge_gpui_tests {
             cx.notify();
         });
         vcx.background_executor.run_until_parked();
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
         app.update(&mut vcx, |app, cx| app.toggle_left_panel(cx));
         vcx.background_executor.run_until_parked();
         assert_eq!(draws_over(&mut vcx, 1000), 0);
         app.update(&mut vcx, |app, cx| app.toggle_left_panel(cx));
         vcx.background_executor.run_until_parked();
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
     }
 
     #[gpui::test]
@@ -10858,7 +10860,7 @@ mod run_badge_gpui_tests {
         });
         vcx.background_executor.run_until_parked();
         draws_over(&mut vcx, 1000);
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
         app.update(&mut vcx, |app, cx| {
             app.sidebar_scroll
                 .set_offset(gpui::point(gpui::px(0.), gpui::px(-10000.)));
@@ -10872,7 +10874,7 @@ mod run_badge_gpui_tests {
             cx.notify();
         });
         vcx.background_executor.run_until_parked();
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
     }
 
     #[gpui::test]
@@ -10880,9 +10882,9 @@ mod run_badge_gpui_tests {
         let (app, mut vcx, _streams) = working_window(cx, 2);
         app.update(&mut vcx, |app, cx| app.toggle_tab_sidebar(cx));
         vcx.background_executor.run_until_parked();
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
         vcx.deactivate_window();
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
     }
 }
 

@@ -148,9 +148,12 @@ Reproduce the interactive fixture after building with
   "state": "C:/temp/ctty7-attention/state.json",
   "split": false,
   "top": false,
-  "tray_disabled": false
+  "tray_disabled": false,
+  "dark": false
 }
 ```
+
+`dark` switches the fixture from the light preset to the dark one.
 
 Launch `tty7-app --config-dir C:/temp/ctty7-attention/config
 --agent-attention-visual C:/temp/ctty7-attention/options.json`. Change the
