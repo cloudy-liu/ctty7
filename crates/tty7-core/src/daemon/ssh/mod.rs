@@ -145,6 +145,7 @@ impl SshManager {
         &'static self,
         pane_id: u64,
         spec: Box<NativeSshSpec>,
+        remote_start_dir: Option<String>,
         size: WinSize,
         broker: Arc<PromptBroker>,
         data_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
@@ -156,6 +157,7 @@ impl SshManager {
                 .run_session(
                     pane_id,
                     &spec,
+                    remote_start_dir.as_deref(),
                     size,
                     &broker,
                     data_tx.clone(),
@@ -219,6 +221,7 @@ impl SshManager {
         &'static self,
         pane_id: u64,
         spec: &NativeSshSpec,
+        remote_start_dir: Option<&str>,
         size: WinSize,
         broker: &Arc<PromptBroker>,
         data_tx: tokio::sync::mpsc::Sender<Vec<u8>>,
@@ -285,7 +288,7 @@ impl SshManager {
         }
 
         let bootstrap = match spec.shell_integration {
-            true => self.remote_bootstrap(&conn).await,
+            true => self.remote_bootstrap(&conn, remote_start_dir).await,
             false => None,
         };
         match bootstrap {
@@ -437,7 +440,11 @@ impl SshManager {
         routes
     }
 
-    async fn remote_bootstrap(&self, conn: &Arc<SshConnection>) -> Option<String> {
+    async fn remote_bootstrap(
+        &self,
+        conn: &Arc<SshConnection>,
+        start_dir: Option<&str>,
+    ) -> Option<String> {
         let key = conn.key().clone();
         let cached = { self.probes.lock().unwrap().get(&key).cloned() };
         let probed = match cached {
@@ -459,7 +466,7 @@ impl SshManager {
                 probed
             }
         };
-        probed.map(|(shell, path)| remote::bootstrap_command(shell, &path))
+        probed.map(|(shell, path)| remote::bootstrap_command(shell, &path, start_dir))
     }
 
     fn open_connection<'a>(
@@ -702,7 +709,7 @@ mod tests {
         let mgr = manager();
         mgr.runtime.block_on(async {
             let sshd = FakeSshd::connect(Exec::Hangs, Some(0)).await;
-            assert!(mgr.remote_bootstrap(&sshd.conn).await.is_none());
+            assert!(mgr.remote_bootstrap(&sshd.conn, None).await.is_none());
             assert!(!sshd.conn.is_alive(), "a refused session retires the link");
             assert!(
                 !mgr.probes.lock().unwrap().contains_key(sshd.conn.key()),
@@ -716,7 +723,7 @@ mod tests {
         let mgr = manager();
         mgr.runtime.block_on(async {
             let sshd = FakeSshd::connect(Exec::Exits, None).await;
-            assert!(mgr.remote_bootstrap(&sshd.conn).await.is_none());
+            assert!(mgr.remote_bootstrap(&sshd.conn, None).await.is_none());
             assert!(sshd.conn.is_alive());
             assert!(mgr.probes.lock().unwrap().contains_key(sshd.conn.key()));
             sshd.wait_for_closed(1).await;

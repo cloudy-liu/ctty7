@@ -38,6 +38,8 @@ pub struct PendingPane {
     pub machine: SharedString,
     pub state: PendingState,
     pub spawn: PendingSpawn,
+    /// The saved native SSH connection while its existing pane is reattached.
+    pub ssh_spec: Option<Box<crate::daemon::protocol::NativeSshSpec>>,
     pub on_ready_command: Option<String>,
 }
 
@@ -54,6 +56,7 @@ impl PendingPane {
             machine: machine.into(),
             state: PendingState::Connecting,
             spawn,
+            ssh_spec: None,
             on_ready_command: None,
         }
     }

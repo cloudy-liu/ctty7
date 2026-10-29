@@ -35,6 +35,11 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) {
         self.clear_pending_agent_restore(cx);
+        if let Some(spec) = self.ssh_spec()
+            && (!spec.shell_integration || !matches!(agent, CLIAgent::Claude | CLIAgent::Codex))
+        {
+            return;
+        }
         let id = session_id.or_else(|| launch_argv.and_then(|argv| agent.resumed_session_id(argv)));
         let Some((id, command)) = id.and_then(|id| {
             agent
@@ -179,6 +184,41 @@ mod tests {
         loop {
             if let ClientMsg::Input(bytes) = ClientMsg::read(daemon).unwrap() {
                 return String::from_utf8(bytes).unwrap();
+            }
+        }
+    }
+
+    #[gpui::test]
+    fn native_ssh_known_sessions_use_the_daemon_queue(cx: &mut TestAppContext) {
+        let id = "0199c3f2-1b0e-7c3a-9f21-6d4b8e2a5c17";
+        for agent in [CLIAgent::Claude, CLIAgent::Codex] {
+            let (view, mut vcx, mut daemon) = harness(cx);
+            view.update_in(&mut vcx, |view, window, cx| {
+                view.remember_native_ssh_spec(Box::new(
+                    serde_json::from_str(
+                        r#"{"host":"test-ssh","port":22,"user":"me","auth_mode":"auto"}"#,
+                    )
+                    .unwrap(),
+                ));
+                view.restore_agent(agent, Some(id), None, window, cx);
+                assert_eq!(
+                    view.agent_session().unwrap().session_id.as_deref(),
+                    Some(id)
+                );
+            });
+            loop {
+                match ClientMsg::read(&mut daemon).unwrap() {
+                    ClientMsg::ResumeAgent(resume) => {
+                        assert_eq!(resume.agent, agent);
+                        assert_eq!(resume.session_id, id);
+                        assert_eq!(agent.resumed_session_id(&resume.launch_argv), Some(id));
+                        break;
+                    }
+                    ClientMsg::Input(_) => {
+                        panic!("SSH resume must not bypass the server's prompt gate")
+                    }
+                    _ => {}
+                }
             }
         }
     }
