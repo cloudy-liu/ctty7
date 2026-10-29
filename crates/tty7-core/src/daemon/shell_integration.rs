@@ -1619,12 +1619,42 @@ pub mod remote {
         RemoteShell::from_path(path).map(|shell| (shell, path.to_string()))
     }
 
-    pub fn bootstrap_command(shell: RemoteShell, shell_path: &str) -> String {
-        match shell {
+    pub fn bootstrap_command(
+        shell: RemoteShell,
+        shell_path: &str,
+        start_dir: Option<&str>,
+    ) -> String {
+        let mut out = start_dir
+            .and_then(usable_start_dir)
+            .map(|dir| cd_line(shell, dir))
+            .unwrap_or_default();
+        out.push_str(&match shell {
             RemoteShell::Zsh => zsh_bootstrap(shell_path),
             RemoteShell::Bash => bash_bootstrap(shell_path),
             RemoteShell::Fish => fish_bootstrap(shell_path),
-        }
+        });
+        out
+    }
+
+    /// `dir`, if it can only mean one place on the far host.
+    ///
+    /// Absolute paths only: a relative one would resolve against the login
+    /// directory and through `CDPATH`, and a `~` would reach the shell quoted
+    /// and never expand. Neither is anything OSC 7 reports, so honouring one
+    /// would be a guess. A NUL cannot travel in an exec request at all.
+    fn usable_start_dir(dir: &str) -> Option<&str> {
+        (dir.starts_with('/') && !dir.contains('\0')).then_some(dir)
+    }
+
+    /// `builtin`, so a `cd` wrapper defined in a file the `-c` shell already
+    /// read (`.zshenv`, fish's `config.fish`) cannot print, prompt or refuse;
+    /// `--`, so no directory name is ever taken for an option.
+    fn cd_line(shell: RemoteShell, dir: &str) -> String {
+        let quoted = match shell {
+            RemoteShell::Zsh | RemoteShell::Bash => shell_quote(dir),
+            RemoteShell::Fish => fish_quote(dir),
+        };
+        format!("builtin cd -- {quoted} 2>/dev/null\n")
     }
 
     fn fish_quote(s: &str) -> String {
@@ -1747,8 +1777,24 @@ fi
         }
 
         #[test]
+        fn remote_start_directory_is_absolute_and_shell_quoted() {
+            let script = bootstrap_command(RemoteShell::Bash, "/bin/bash", Some("/work/a'b"));
+            assert!(script.starts_with("builtin cd -- '/work/a'\\''b' 2>/dev/null\n"));
+            for invalid in ["relative", "~/project", "/work/\0bad"] {
+                assert_eq!(
+                    bootstrap_command(RemoteShell::Bash, "/bin/bash", Some(invalid)),
+                    bootstrap_command(RemoteShell::Bash, "/bin/bash", None)
+                );
+            }
+            assert!(
+                bootstrap_command(RemoteShell::Fish, "/bin/fish", Some("/work/a'b"))
+                    .starts_with("builtin cd -- '/work/a\\'b' 2>/dev/null\n")
+            );
+        }
+
+        #[test]
         fn zsh_bootstrap_gates_zdotdir_on_every_redirector_landing() {
-            let script = bootstrap_command(RemoteShell::Zsh, "/bin/zsh");
+            let script = bootstrap_command(RemoteShell::Zsh, "/bin/zsh", None);
             for name in [".zshenv", ".zprofile", ".zshrc", ".zlogin"] {
                 assert!(
                     script.contains(&format!("[ -s \"$__tty7_d/{name}\" ] &&")),
@@ -1767,7 +1813,7 @@ fi
                 (RemoteShell::Zsh, "/bin/zsh"),
                 (RemoteShell::Bash, "/bin/bash"),
             ] {
-                let script = bootstrap_command(shell, path);
+                let script = bootstrap_command(shell, path, None);
                 let last = script.trim_end().lines().last().unwrap();
                 assert_eq!(
                     last,
@@ -1779,14 +1825,14 @@ fi
 
         #[test]
         fn bash_bootstrap_forces_a_non_login_shell_through_the_rcfile() {
-            let script = bootstrap_command(RemoteShell::Bash, "/bin/bash");
+            let script = bootstrap_command(RemoteShell::Bash, "/bin/bash", None);
             assert!(script.contains("exec '/bin/bash' --rcfile \"$__tty7_d/bashrc\" -i"));
             assert!(script.contains("source /etc/profile"));
         }
 
         #[test]
         fn fish_bootstrap_is_one_exec_carrying_the_escaped_body() {
-            let script = bootstrap_command(RemoteShell::Fish, "/usr/bin/fish");
+            let script = bootstrap_command(RemoteShell::Fish, "/usr/bin/fish", None);
             assert!(script.starts_with("exec '/usr/bin/fish' -C '"));
             assert!(script.trim_end().ends_with("' -l"));
             assert!(!script.contains("mkdir"));
@@ -1846,7 +1892,7 @@ fi
                 (RemoteShell::Fish, "fish", "--no-execute", "/usr/bin/fish"),
             ];
             for (shell, bin, flag, path) in cases {
-                let script = bootstrap_command(shell, path);
+                let script = bootstrap_command(shell, path, None);
                 if let Some((ok, stderr)) = parse_check(bin, flag, &script) {
                     assert!(ok, "{bin} rejected its bootstrap script:\n{stderr}");
                 }

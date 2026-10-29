@@ -34,6 +34,9 @@ pub(crate) const GRAB_HANDLE_W: f32 = 80.;
 
 const KEEP_SEGMENTS: usize = 3;
 
+/// Steps per one-second turn of the working badge.
+pub(crate) const RUN_BADGE_STEPS: u128 = 24;
+
 /// A single clock for the window's working badges. Only actual visible paint
 /// renews its one-shot wake, so an idle or unpainted window cannot spin a loop.
 pub(crate) struct RunBadgeAnimation {
@@ -58,7 +61,9 @@ impl RunBadgeAnimation {
     pub(crate) fn begin_frame(&mut self, cx: &App) {
         self.visible = false;
         let elapsed = cx.background_executor().now().duration_since(self.epoch);
-        self.phase = ((elapsed.as_nanos() * 12 / 1_000_000_000) % 12) as f32 / 12.;
+        self.phase = ((elapsed.as_nanos() * RUN_BADGE_STEPS / 1_000_000_000) % RUN_BADGE_STEPS)
+            as f32
+            / RUN_BADGE_STEPS as f32;
     }
 }
 
@@ -1180,8 +1185,8 @@ impl Tty7App {
             .into_any_element()
     }
 
-    /// An agent's status as herdr draws it — `×` `◐` `✓` `○` `·` in herdr's
-    /// colours — on a disc of the surface, so the symbol stays legible over
+    /// An agent's status in herdr's colours — `×`, a turning comet, `✓`, `○`
+    /// and `·` — on a disc of the surface, so the symbol stays legible over
     /// whatever part of the logo it covers.
     fn status_badge(
         &self,
@@ -1238,8 +1243,8 @@ impl Tty7App {
                                 .now()
                                 .duration_since(state.epoch)
                                 .as_nanos();
-                            let next_step = elapsed * 12 / 1_000_000_000 + 1;
-                            let next = (next_step * 1_000_000_000).div_ceil(12);
+                            let next_step = elapsed * RUN_BADGE_STEPS / 1_000_000_000 + 1;
+                            let next = (next_step * 1_000_000_000).div_ceil(RUN_BADGE_STEPS);
                             let delay = std::time::Duration::from_nanos((next - elapsed) as u64);
                             let owner = state.owner.clone();
                             drop(state);

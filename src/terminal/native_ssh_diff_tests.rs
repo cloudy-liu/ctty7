@@ -206,7 +206,7 @@ fn sidebar_click_reads_the_owning_ssh_repository_and_untracked_file(cx: &mut Tes
             let pane_id = index as u64 + 70;
             let (parts, mut daemon) = quiet_test_shell_parts(pane_id);
             let view = cx.new(|cx| TerminalView::from_native_ssh_parts(NativeSshParts {
-                terminal: parts.terminal, pane_id,
+                terminal: parts.terminal, pane_id, restored: false,
                 persist: Box::new(serde_json::from_str(r#"{"host":"build-box","port":22,"user":"me","auth_mode":"auto"}"#).unwrap()),
             }, window, cx));
             crate::daemon::protocol::DaemonMsg::RemoteContext(Some(RemoteContext {
@@ -339,6 +339,7 @@ fn active_ssh_diff_refreshes_external_edits_with_unchanged_line_counts(cx: &mut 
                 NativeSshParts {
                     terminal: parts.terminal,
                     pane_id: 80,
+                    restored: false,
                     persist: Box::new(
                         serde_json::from_str(
                             r#"{"host":"build-box","port":22,"user":"me","auth_mode":"auto"}"#,
@@ -554,6 +555,7 @@ fn active_ssh_diff_refreshes_external_edits_with_unchanged_line_counts(cx: &mut 
                 NativeSshParts {
                     terminal: parts.terminal,
                     pane_id: 80,
+                    restored: false,
                     persist: Box::new(
                         serde_json::from_str(
                             r#"{"host":"build-box","port":22,"user":"me","auth_mode":"auto"}"#,

@@ -3470,6 +3470,9 @@ impl Tty7App {
         let was_focused = pending.read(cx).focus_handle.contains_focused(window, cx);
         let restored = parts.restored;
         let view = build_terminal_view(parts, font_size, window, cx);
+        if restored && let Some(spec) = pending.read(cx).ssh_spec.clone() {
+            view.update(cx, |view, cx| view.remember_native_ssh_spec(spec, cx));
+        }
         if let Some(command) = pending.update(cx, |pending, _| pending.on_ready_command.take()) {
             view.read(cx).run_command_line(&command);
         }
@@ -3861,12 +3864,8 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let cwd = self.tabs.get(self.active).and_then(|t| {
-            t.pane
-                .focused_or_first(window, cx)
-                .and_then(|leaf| leaf.read(cx).cwd())
-        });
-        let view = match new_terminal_native(self.font_size, cwd, spec, window, cx) {
+        let cwd = None;
+        let view = match new_terminal_native(self.font_size, cwd, spec, None, window, cx) {
             Ok(view) => view,
             Err(e) => {
                 log::error!("native SSH spawn failed: {e}");
@@ -3898,8 +3897,9 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        let saved = pane_to_session(&Pane::leaf(PaneSlot::Ready(dead.clone())), cx);
         let cwd = dead.read(cx).cwd();
-        let fresh = match new_terminal_native(self.font_size, cwd, spec, window, cx) {
+        let fresh = match new_terminal_native(self.font_size, cwd, spec, None, window, cx) {
             Ok(view) => view,
             Err(e) => {
                 log::error!("native SSH respawn failed: {e}");
@@ -3910,6 +3910,24 @@ impl Tty7App {
                 return;
             }
         };
+        if let SessionPane::Leaf {
+            agent,
+            agent_session_id,
+            agent_launch_argv,
+            agent_unstarted,
+            ..
+        } = saved
+        {
+            resume_agent_in_terminal(
+                &fresh,
+                &agent,
+                agent_session_id.as_deref(),
+                agent_launch_argv.as_deref(),
+                agent_unstarted,
+                window,
+                cx,
+            );
+        }
         let old_git_host = dead.read(cx).git_host_id();
         dead.update(cx, |view, cx| view.release_native_git(cx));
         for tab in &mut self.tabs {
@@ -3976,7 +3994,7 @@ impl Tty7App {
         };
         let new = match spawn {
             SpawnAs::Ssh(spec) => {
-                match new_terminal_native(self.font_size, cwd, spec, window, cx) {
+                match new_terminal_native(self.font_size, cwd, spec, None, window, cx) {
                     Ok(view) => PaneSlot::Ready(view),
                     Err(e) => {
                         log::error!("native SSH split spawn failed: {e}");
@@ -8325,12 +8343,13 @@ fn tab_to_session(tab: &Tab, cx: &App) -> SessionTab {
 fn pane_to_session(pane: &Pane, cx: &App) -> SessionPane {
     match pane {
         Pane::Leaf(PaneSlot::Connecting(pending)) => {
-            let spawn = &pending.read(cx).spawn;
+            let pending = pending.read(cx);
+            let spawn = &pending.spawn;
             SessionPane::Leaf {
                 cwd: spawn.working_directory.clone(),
                 pane_id: spawn.restore_pane,
                 shell: spawn.shell.clone(),
-                ssh_spec: None,
+                ssh_spec: pending.ssh_spec.clone(),
                 agent: spawn.agent,
                 agent_session_id: spawn.agent_session_id.clone(),
                 agent_launch_argv: spawn.agent_launch_argv.clone(),
@@ -8342,7 +8361,11 @@ fn pane_to_session(pane: &Pane, cx: &App) -> SessionPane {
             let view = view.read(cx);
             let pending = view.pending_agent_restore();
             SessionPane::Leaf {
-                cwd: view.spawnable_cwd(),
+                cwd: if view.ssh_spec().is_some() {
+                    view.cwd()
+                } else {
+                    view.spawnable_cwd()
+                },
                 pane_id: Some(view.pane_id),
                 // `None` for a pane this window attached to rather than
                 // spawned: it never knew what was on the other end. The tree
@@ -8403,6 +8426,17 @@ fn resume_agent_in_terminal(
     }) else {
         return;
     };
+    if let Some(spec) = terminal.read(cx).ssh_spec() {
+        if !spec.shell_integration
+            || unstarted
+            || !matches!(
+                agent,
+                crate::core::cli_agent::CLIAgent::Claude | crate::core::cli_agent::CLIAgent::Codex
+            )
+        {
+            return;
+        }
+    }
     terminal.update(cx, |terminal, cx| {
         if unstarted
             && let Some(command) = launch_argv.and_then(|argv| agent.unstarted_command(argv))
@@ -8555,6 +8589,16 @@ fn tabs_from_session(
     (tabs, active, dropped)
 }
 
+/// Whether a native SSH pane can be attached to by its old id: only when the
+/// server lists it. Without a listing the host is dialled again. If the old
+/// pane exits after the listing, the native SSH constructor redials it too.
+fn native_ssh_pane_alive(
+    alive: Option<&std::collections::HashMap<u64, Option<String>>>,
+    id: u64,
+) -> bool {
+    alive.is_some_and(|alive| alive.contains_key(&id))
+}
+
 fn leaf_shares_the_window_daemon(window_is_remote: bool, leaf_is_native_ssh: bool) -> bool {
     !(window_is_remote && leaf_is_native_ssh)
 }
@@ -8587,16 +8631,41 @@ fn session_to_pane(
                 // Not `pane_attachable`: a dead pane's id is what the restore
                 // is keyed on, so it has to survive being dead. The attach is
                 // still attempted first and still gives way to a fresh spawn.
-                false => (*pane_id).filter(|id| same_daemon && pane_free_for(alive, *id, owner)),
+                false => (*pane_id).filter(|id| {
+                    same_daemon
+                        && pane_free_for(alive, *id, owner)
+                        && (ssh_spec.is_none() || native_ssh_pane_alive(alive, *id))
+                }),
             };
-            if restore.is_none() {
-                if let Some(spec) = ssh_spec.clone() {
-                    let resolved = crate::ui::ssh_connect::resolve_persisted_ssh_spec(spec, cx);
-                    match new_terminal_native(font_size, cwd.clone(), resolved, window, cx) {
-                        Ok(view) => return Some(Pane::leaf(PaneSlot::Ready(view))),
-                        Err(e) => log::error!("restoring native SSH pane failed: {e}"),
+            if let Some(spec) = ssh_spec.clone() {
+                let resolved = crate::ui::ssh_connect::resolve_persisted_ssh_spec(spec, cx);
+                return match new_terminal_native(
+                    font_size,
+                    cwd.clone(),
+                    resolved,
+                    restore,
+                    window,
+                    cx,
+                ) {
+                    Ok(view) => {
+                        if !view.read(cx).restored() {
+                            resume_agent_in_terminal(
+                                &view,
+                                agent,
+                                agent_session_id.as_deref(),
+                                agent_launch_argv.as_deref(),
+                                *agent_unstarted,
+                                window,
+                                cx,
+                            );
+                        }
+                        Some(Pane::leaf(PaneSlot::Ready(view)))
                     }
-                }
+                    Err(error) => {
+                        log::error!("restoring native SSH pane failed: {error}");
+                        None
+                    }
+                };
             }
             let view = match new_terminal(
                 workspace.cloned(),
@@ -8818,10 +8887,11 @@ pub(crate) fn new_terminal_native(
     font_size: f32,
     working_directory: Option<std::path::PathBuf>,
     spec: Box<crate::daemon::protocol::NativeSshSpec>,
+    restore_pane: Option<u64>,
     window: &mut Window,
     cx: &mut Context<Tty7App>,
 ) -> anyhow::Result<Entity<TerminalView>> {
-    let parts = TerminalView::spawn_native_ssh_terminal(spec, working_directory)?;
+    let parts = TerminalView::spawn_native_ssh_terminal(spec, working_directory, restore_pane)?;
     let view = cx.new(|cx| {
         let mut view = TerminalView::from_native_ssh_parts(parts, window, cx);
         view.font_size = px(font_size);
@@ -9346,8 +9416,8 @@ mod tests {
         CloseReason, DOCUMENT_MIN_W, TERMINAL_MIN_W, TITLE_BAR_HEIGHT, TabAgentBadge,
         TabAgentSession, badge_for_focused_pane, clear_window_override_values, close_prompt,
         document_column_px, join_shell_args, leaf_shares_the_window_daemon, most_urgent_agent_row,
-        mru_order, pane_free_for, parse_ssh_connect_input, parse_ssh_option_words, side_panel_max,
-        split_shell_args, strip_band, wd_path_saveable,
+        mru_order, native_ssh_pane_alive, pane_free_for, parse_ssh_connect_input,
+        parse_ssh_option_words, side_panel_max, split_shell_args, strip_band, wd_path_saveable,
     };
     use gpui::{Edges, point, px, size};
 
@@ -9718,6 +9788,75 @@ mod tests {
         assert!(leaf_shares_the_window_daemon(true, false));
         assert!(leaf_shares_the_window_daemon(false, true));
         assert!(leaf_shares_the_window_daemon(false, false));
+    }
+
+    #[test]
+    fn a_native_ssh_pane_the_server_no_longer_has_is_dialled_again() {
+        let mut alive = std::collections::HashMap::new();
+        alive.insert(4u64, None);
+        assert!(native_ssh_pane_alive(Some(&alive), 4));
+        assert!(
+            !native_ssh_pane_alive(Some(&alive), 9),
+            "gone: dial, don't attach"
+        );
+        assert!(
+            !native_ssh_pane_alive(None, 4),
+            "no listing: dial, don't guess"
+        );
+    }
+
+    #[gpui::test]
+    fn ineligible_native_ssh_agent_restores_leave_an_interactive_shell(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use crate::core::cli_agent::CLIAgent;
+        use crate::daemon::protocol::ClientMsg;
+        for case in 0..6 {
+            let (app, mut vcx) = super::test_window::harness(cx);
+            let (_view, mut daemon) = app.update_in(&mut vcx, |_, window, cx| {
+                cx.global_mut::<crate::core::config::Config>()
+                    .restore_agent_sessions = case != 0;
+                let (view, daemon) = crate::terminal::view::quiet_test_pane(42, window, cx);
+                let mut spec: crate::daemon::protocol::NativeSshSpec = serde_json::from_str(
+                    r#"{"host":"test-ssh","port":22,"user":"me","auth_mode":"auto"}"#,
+                )
+                .unwrap();
+                spec.shell_integration = case != 1;
+                view.update(cx, |view, cx| {
+                    view.remember_native_ssh_spec(Box::new(spec), cx)
+                });
+                let agent = if case == 2 {
+                    CLIAgent::Gemini
+                } else {
+                    CLIAgent::Claude
+                };
+                let argv = if case == 3 {
+                    vec!["claude".into(), "--no-session-persistence".into()]
+                } else {
+                    vec!["claude".into()]
+                };
+                super::resume_agent_in_terminal(
+                    &view,
+                    &Some(agent),
+                    (case != 4).then_some("0199c3f2-1b0e-7c3a-9f21-6d4b8e2a5c17"),
+                    Some(&argv),
+                    case == 5,
+                    window,
+                    cx,
+                );
+                assert!(view.read(cx).agent_session().is_none());
+                (view, daemon)
+            });
+            daemon
+                .set_read_timeout(Some(std::time::Duration::from_millis(50)))
+                .unwrap();
+            while let Ok(message) = ClientMsg::read(&mut daemon) {
+                assert!(
+                    !matches!(message, ClientMsg::ResumeAgent(_) | ClientMsg::Input(_)),
+                    "case {case}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -10515,6 +10654,8 @@ mod run_badge_gpui_tests {
     use gpui::{Entity, TestAppContext, VisualTestContext};
     use std::time::Duration;
 
+    const STEPS: u64 = crate::ui::tab_strip::RUN_BADGE_STEPS as u64;
+
     fn working_window(
         cx: &mut TestAppContext,
         count: usize,
@@ -10657,20 +10798,20 @@ mod run_badge_gpui_tests {
     }
 
     #[gpui::test]
-    fn visible_working_badge_refreshes_at_twelve_steps_per_second(cx: &mut TestAppContext) {
+    fn visible_working_badge_refreshes_once_per_step(cx: &mut TestAppContext) {
         let (app, mut vcx, _streams) = working_window(cx, 1);
         let draws = draws_over(&mut vcx, 1000);
         assert_eq!(
             app.read_with(&vcx, |app, cx| app.tabs[0].agent_status(cx)),
             Some(AgentStatus::Working)
         );
-        assert_eq!(draws, 12);
+        assert_eq!(draws, STEPS);
     }
 
     #[gpui::test]
     fn several_working_badges_share_the_windows_refresh_rate(cx: &mut TestAppContext) {
         let (_app, mut vcx, _streams) = working_window(cx, 4);
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
     }
 
     #[gpui::test]
@@ -10704,7 +10845,7 @@ mod run_badge_gpui_tests {
             app.update(&mut vcx, |_, cx| cx.notify());
             vcx.background_executor.run_until_parked();
             draws_over(&mut vcx, 1000);
-            assert_eq!(draws_over(&mut vcx, 1000), 12);
+            assert_eq!(draws_over(&mut vcx, 1000), STEPS);
         }
     }
 
@@ -10725,13 +10866,13 @@ mod run_badge_gpui_tests {
             cx.notify();
         });
         vcx.background_executor.run_until_parked();
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
         app.update(&mut vcx, |app, cx| app.toggle_left_panel(cx));
         vcx.background_executor.run_until_parked();
         assert_eq!(draws_over(&mut vcx, 1000), 0);
         app.update(&mut vcx, |app, cx| app.toggle_left_panel(cx));
         vcx.background_executor.run_until_parked();
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
     }
 
     #[gpui::test]
@@ -10748,7 +10889,7 @@ mod run_badge_gpui_tests {
         });
         vcx.background_executor.run_until_parked();
         draws_over(&mut vcx, 1000);
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
         app.update(&mut vcx, |app, cx| {
             app.sidebar_scroll
                 .set_offset(gpui::point(gpui::px(0.), gpui::px(-10000.)));
@@ -10762,7 +10903,7 @@ mod run_badge_gpui_tests {
             cx.notify();
         });
         vcx.background_executor.run_until_parked();
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
     }
 
     #[gpui::test]
@@ -10770,9 +10911,9 @@ mod run_badge_gpui_tests {
         let (app, mut vcx, _streams) = working_window(cx, 2);
         app.update(&mut vcx, |app, cx| app.toggle_tab_sidebar(cx));
         vcx.background_executor.run_until_parked();
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
         vcx.deactivate_window();
-        assert_eq!(draws_over(&mut vcx, 1000), 12);
+        assert_eq!(draws_over(&mut vcx, 1000), STEPS);
     }
 }
 
@@ -11197,6 +11338,57 @@ mod pending_spawn_gpui_tests {
                 Some("agent fork")
             );
         });
+    }
+
+    #[gpui::test]
+    fn reattached_ssh_pane_keeps_its_connection_for_the_next_reconnect(cx: &mut TestAppContext) {
+        for restored in [true, false] {
+            let (app, mut vcx) = test_window::harness(cx);
+            let _daemon = app.update_in(&mut vcx, |app, window, cx| {
+                let spec = Box::new(
+                    serde_json::from_str::<crate::daemon::protocol::NativeSshSpec>(
+                        r#"{"host":"build-box","port":2222,"user":"me","auth_mode":"auto","display_name":"Build box"}"#,
+                    )
+                    .unwrap(),
+                );
+                let pending = pending(cx);
+                pending.update(cx, |p, _| {
+                    p.spawn.restore_pane = Some(42);
+                    p.ssh_spec = Some(spec.clone());
+                });
+                let id = pending.entity_id();
+                app.tabs
+                    .push(Tab::new(Pane::leaf(PaneSlot::Connecting(pending.clone()))));
+                let SessionPane::Leaf { ssh_spec, .. } = pane_to_session(&app.tabs[0].pane, cx)
+                else {
+                    panic!("expected a pending leaf");
+                };
+                assert_eq!(ssh_spec, Some(spec.clone()));
+                let (tabs, _, _) = crate::ui::tree_sync::desired_tabs(app, cx);
+                let crate::ui::tree_sync::DesiredNode::Leaf { seed, .. } = &tabs[0].root else {
+                    panic!("expected a pending tree leaf");
+                };
+                assert_eq!(seed.ssh_spec, Some(spec.clone()));
+                let (mut parts, daemon) = crate::terminal::view::quiet_test_shell_parts(42);
+                parts.restored = restored;
+                app.land_pane(id, &pending, Ok(parts), 15.0, window, cx);
+                let slot = app.tabs[0].pane.first_leaf().unwrap();
+                let view = slot.terminal().unwrap();
+                assert_eq!(
+                    view.read(cx).ssh_spec(),
+                    restored.then(|| spec.clone()),
+                    "a reattached SSH pane must retain the connection needed to redial"
+                );
+                view.update(cx, |view, _| view.terminal.exited = true);
+                assert_eq!(view.read(cx).ssh_disconnected(), restored);
+                let SessionPane::Leaf { ssh_spec, .. } = pane_to_session(&app.tabs[0].pane, cx)
+                else {
+                    panic!("expected a leaf");
+                };
+                assert_eq!(ssh_spec, restored.then_some(spec));
+                daemon
+            });
+        }
     }
 
     #[gpui::test]

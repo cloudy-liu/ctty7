@@ -158,6 +158,7 @@ pub struct NativeSshParts {
     terminal: RemoteTerminal,
     pane_id: u64,
     persist: Box<crate::daemon::protocol::NativeSshSpec>,
+    restored: bool,
 }
 
 /// What a pane is called when nothing running in it has said otherwise.
@@ -1099,19 +1100,30 @@ impl TerminalView {
     pub fn spawn_native_ssh_terminal(
         spec: Box<crate::daemon::protocol::NativeSshSpec>,
         working_directory: Option<std::path::PathBuf>,
+        restore_pane: Option<u64>,
     ) -> anyhow::Result<NativeSshParts> {
         let persist = Box::new(spec.without_secrets());
-        let (terminal, pane_id) = RemoteTerminal::spawn_native_ssh(
-            TermSize::new(80, 24),
-            8,
-            17,
-            working_directory,
-            spec,
-        )?;
+        let attached = restore_pane.and_then(|id| {
+            RemoteTerminal::attach(TermSize::new(80, 24), 8, 17, id)
+                .map(|terminal| (terminal, id))
+                .ok()
+        });
+        let restored = attached.is_some();
+        let (terminal, pane_id) = match attached {
+            Some(parts) => parts,
+            None => RemoteTerminal::spawn_native_ssh(
+                TermSize::new(80, 24),
+                8,
+                17,
+                working_directory,
+                spec,
+            )?,
+        };
         Ok(NativeSshParts {
             terminal,
             pane_id,
             persist,
+            restored,
         })
     }
 
@@ -1121,24 +1133,32 @@ impl TerminalView {
         cx: &mut Context<Self>,
     ) -> Self {
         let mut view = Self::with_terminal(parts.terminal, parts.pane_id, window, cx);
-        if let Some(name) = parts
-            .persist
+        view.restored = parts.restored;
+        view.remember_native_ssh_spec(parts.persist, cx);
+        view
+    }
+
+    pub(crate) fn remember_native_ssh_spec(
+        &mut self,
+        spec: Box<crate::daemon::protocol::NativeSshSpec>,
+        cx: &mut Context<Self>,
+    ) {
+        if let Some(name) = spec
             .display_name
             .as_deref()
             .map(str::trim)
             .filter(|n| !n.is_empty())
         {
-            view.default_title = name.to_string();
-            view.title = name.to_string();
+            self.default_title = name.to_string();
+            self.title = name.to_string();
         }
-        view.ssh_spec = Some(parts.persist);
+        self.ssh_spec = Some(spec);
         let native = std::sync::Arc::new(crate::ui::sftp_host::SftpHost::with_git(
-            crate::ui::sftp::SftpRoute::new(view.pane_id, view.workspace.clone()),
+            crate::ui::sftp::SftpRoute::new(self.pane_id, self.workspace.clone()),
         ));
         let host: crate::ui::host_ops::SharedHost = native.clone();
         crate::ui::host_registry::HostRegistry::insert_pane(cx, &host);
-        view.native_git_host = Some(native);
-        view
+        self.native_git_host = Some(native);
     }
 
     fn with_terminal(
@@ -1867,11 +1887,17 @@ impl TerminalView {
         } else {
             command.to_string()
         };
-        let supported = crate::ui::tree_sync::control_for(cx, self.host_id).is_some_and(|client| {
-            client
-                .hello()
-                .has_feature(crate::daemon::protocol::FEATURE_AGENT_RESUME)
-        });
+        let supported = crate::ui::tree_sync::control_for(cx, self.host_id)
+            .map(|client| {
+                client
+                    .hello()
+                    .has_feature(crate::daemon::protocol::FEATURE_AGENT_RESUME)
+            })
+            .unwrap_or(self.ssh_spec.is_some());
+        if self.ssh_spec.is_some() && !supported {
+            log::warn!("native SSH agent restore requires a server with ResumeAgent support");
+            return;
+        }
         self.terminal.resume_agent(
             crate::daemon::protocol::AgentResume {
                 agent,
@@ -15266,6 +15292,46 @@ mod agent_notification_tests {
 #[cfg(test)]
 mod native_ssh_git_tests {
     use super::*;
+
+    #[gpui::test]
+    fn reattached_native_ssh_registers_its_pane_git_host(cx: &mut TestAppContext) {
+        crate::core::config::pin_test_config_dir();
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(Config::default());
+        });
+        let (parts, _daemon) = quiet_test_shell_parts(9);
+        let window = cx.add_window(|window, cx| {
+            let mut view = TerminalView::from_shell_parts(parts, window, cx);
+            view.remember_native_ssh_spec(
+                Box::new(
+                    serde_json::from_str(
+                        r#"{"host":"build-box","port":22,"user":"me","auth_mode":"auto"}"#,
+                    )
+                    .unwrap(),
+                ),
+                cx,
+            );
+            view
+        });
+        window
+            .update(cx, |view, _, cx| {
+                assert!(view.host_id().is_local());
+                let id = view.git_host_id();
+                assert!(
+                    !id.is_local(),
+                    "reattached SSH needs a pane-scoped Git host"
+                );
+                assert!(
+                    crate::ui::host_registry::HostRegistry::lookup(cx, id)
+                        .unwrap()
+                        .is_connected()
+                );
+                assert!(!crate::ui::host_registry::HostRegistry::ids(cx).contains(&id));
+            })
+            .unwrap();
+    }
     use crate::daemon::protocol::{DaemonMsg, RemoteKind};
     use gpui::TestAppContext;
 
@@ -15283,6 +15349,7 @@ mod native_ssh_git_tests {
                 NativeSshParts {
                     terminal: parts.terminal,
                     pane_id: 8,
+                    restored: false,
                     persist: Box::new(
                         serde_json::from_str(
                             r#"{"host":"build-box","port":22,"user":"me","auth_mode":"auto"}"#,
@@ -15330,6 +15397,7 @@ mod native_ssh_git_tests {
                 NativeSshParts {
                     terminal: parts.terminal,
                     pane_id: 7,
+                    restored: false,
                     persist: Box::new(
                         serde_json::from_str(
                             r#"{"host":"build-box","port":22,"user":"me","auth_mode":"auto"}"#,

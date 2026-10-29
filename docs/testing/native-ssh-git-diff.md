@@ -44,6 +44,30 @@ All images are screenshots of the running native application captured through LC
 
 ## Automated evidence
 
+### SSH restoration integration
+
+The release integration also covers cloudy-liu/ctty7#217. Reattaching a live
+SSH pane registers the same pane-owned Git adapter as a new connection.
+The combined Windows workspace passed 3,198 tests with zero failures and
+12 existing skips, including `reattached_native_ssh_registers_its_pane_git_host`.
+
+With the matching candidate daemon, restarting the daemon redials the saved
+SSH connection and restores remote Git `+3 -2`. Reopening only the GUI then
+reattaches to the same pane 6; the daemon PID, pane ID, and remote diff remain
+unchanged. No additional SSH pane is created.
+
+![After daemon restart: restored remote repository and diff](images/native-ssh-git-diff/after-daemon-restart.jpg)
+
+![After live reattach: the same pane still opens its remote diff](images/native-ssh-git-diff/after-live-reattach.jpg)
+
+These additional captures are original LCU JPEG bytes from the running
+integration candidate, using the same viewport, scale, fixture and theme.
+Temporary diagnostic logging was enabled outside the application window to
+trace directory and Git routing; it was removed before committing the source.
+The earlier fixture daemon did not replay a confirmed directory on attach;
+no saved local-path fallback was added. Native Git still requires a confirmed
+remote directory and a daemon advertising `native-ssh-git`.
+
 - Whole-workspace validation at `ac32b255`: 3,189 passed, zero failed, 12 existing skips across 17 harnesses, using `cargo test --offline --locked --workspace -- --test-threads=1` with a shared local target directory.
 - Ticket lifecycle regression run: 167 passed, zero failed, two existing manual/performance skips. Actual red/green traces cover equal-count edits, hidden polling, immediate revisit, pending replies after disconnect, reconnect identity, and close while another entity retains the pane.
 - Real SSH Git boundary: five tests passed, including literal special-character paths, the viewer's full-context patch request, byte/status/stderr preservation, timeout/channel reuse, output cap, and rejection of write queries.

@@ -391,6 +391,7 @@ impl CLIAgent {
 
     pub fn opts_out_of_sessions(self, argv: &[String]) -> bool {
         let ephemeral: &[&str] = match self {
+            CLIAgent::Claude => &["--no-session-persistence"],
             CLIAgent::Pi | CLIAgent::OhMyPi => &["--no-session"],
             // "Do not save conversation history" — nothing is persisted, so
             // there is no session left to resume from.
