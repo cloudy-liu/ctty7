@@ -251,8 +251,10 @@ fn diff_overlay_background(
     }
 }
 
-// Use the immutable bundled reading theme, independent of the user's Markdown
-// theme choice and application preset status colors.
+// Reading surfaces share the application's background, text and hairlines, as
+// the bundled Markdown theme does. Change colors come from the immutable
+// bundled GitHub palette, independent of the user's Markdown theme choice and
+// application preset status colors.
 struct DiffPalette {
     background: Hsla,
     foreground: Hsla,
@@ -285,13 +287,13 @@ fn diff_palette(cx: &gpui::App) -> DiffPalette {
         .expect("bundled GitHub deletions");
     let dark = cx.theme().mode.is_dark();
     DiffPalette {
-        background: color(p.background),
-        foreground: color(p.foreground),
-        header: color(p.code_background),
+        background: gpui::rgb(cx.global::<crate::ui::presets::Surfaces>().window.base).into(),
+        foreground: cx.theme().foreground,
+        header: cx.theme().popover,
         hunk_background: gpui::rgb(if dark { 0x1b_3040 } else { 0xdd_f4ff }).into(),
         hunk_controls: gpui::rgb(if dark { 0x2a_5a_7a } else { 0xb6_e3ff }).into(),
-        muted: color(p.muted),
-        border: color(p.border),
+        muted: cx.theme().muted_foreground,
+        border: cx.theme().border,
         hunk: color(p.syntax.diff_hunk.expect("bundled GitHub hunk color")),
         added: color(added.foreground),
         added_background: color(
@@ -5139,20 +5141,17 @@ mod github_theme_gpui_tests {
         }
     }
     #[gpui::test]
-    fn rendered_context_and_file_cards_share_an_opaque_github_palette(cx: &mut TestAppContext) {
+    fn rendered_context_and_file_cards_share_the_application_surface(cx: &mut TestAppContext) {
         let (app, mut vcx) = test_window::harness(cx);
-        for (mode, fg, bg, border) in [
-            (ThemeMode::Light, 0x1f2328, 0xffffff, 0xd1d9e0),
-            (ThemeMode::Dark, 0xf0f6fc, 0x0d1117, 0x3d444d),
-        ] {
-            vcx.update(|window, cx| {
-                Theme::change(mode, Some(window), cx);
+        for (preset, bg) in [("light", 0xffffff), ("dark", 0x000000), ("nord", 0x2e3440)] {
+            let (expected_fg, border) = app.update_in(&mut vcx, |app, window, cx| {
+                app.set_preset(preset, window, cx);
                 // Unrelated custom-preset status colors must not affect reading.
                 let theme = Theme::global_mut(cx);
                 theme.success = gpui::rgb(0xff00ff).into();
                 theme.danger = gpui::rgb(0x00ffff).into();
+                (cx.theme().foreground, cx.theme().border)
             });
-            let expected_fg = gpui::Hsla::from(gpui::rgb(fg));
             let expected_bg = gpui::Fill::from(gpui::rgb(bg));
             let mut context = app.update_in(&mut vcx, |app, _, cx| {
                 app.diff_unified_row(
@@ -5179,7 +5178,7 @@ mod github_theme_gpui_tests {
                 });
                 assert_eq!(card.style().background, Some(expected_bg.clone()));
                 assert_eq!(card.style().text.color, Some(expected_fg));
-                assert_eq!(card.style().border_color, Some(gpui::rgb(border).into()));
+                assert_eq!(card.style().border_color, Some(border));
                 // Inspect the card shell here. Expanded scroll state needs a
                 // rendering view, exercised by the window tests above.
             }
