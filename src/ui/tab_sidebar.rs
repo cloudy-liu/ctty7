@@ -1394,16 +1394,20 @@ impl Tty7App {
                     .when(show_chevron, |header| header.child(chevron))
                     .children(folder)
                     .when(is_ssh_group, |b| {
+                        // A quiet marker: a muted outline pill with no fill
+                        // and no colour of its own. The row badge already says
+                        // SSH in blue; the header only needs to read as one.
                         b.child(
                             div()
                                 .flex_shrink_0()
                                 .text_size(px(10.))
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .px(px(4.))
+                                .line_height(gpui::relative(1.2))
+                                .px(px(5.))
                                 .py(px(1.))
-                                .rounded(px(3.))
+                                .rounded_full()
                                 .border_1()
-                                .border_color(muted.opacity(0.4))
+                                .border_color(muted.opacity(0.45))
                                 .text_color(muted)
                                 .child("SSH"),
                         )
