@@ -6,8 +6,9 @@ clipboard capture of the active window saved as PNG, without cropping,
 retouching or compositing.
 
 - Before: `main` at `ddd81dfa`, built from a detached worktree of that commit.
-- After: the feature commits on `feat/sidebar-group-icons` (`8f17adb4` adds the
-  settings; the capture commits add the images below).
+- After: the feature commits on `feat/sidebar-group-icons`. `8f17adb4` adds the
+  settings and the fixture captures; the project-and-Scratch After is from
+  `8448edb5`, after the Scratch arrow fix.
 - Each pair runs its own isolated config directory with the built-in Dark
   preset, 175% display scale and the same input sequence in both instances.
 - The settings and sidebar pairs use the `--document-visual` workspace fixture:
@@ -20,7 +21,8 @@ retouching or compositing.
   2524 x 1577 pixels. Before runs the baseline with no icon settings; After
   adds only `sidebar_group_arrows = false` and `sidebar_group_folders = true`.
   Both runs click the `Scratch` heading twice to fold and unfold it, then click
-  the empty sidebar area before the capture.
+  the empty sidebar area before the capture. The window title is a random
+  codename drawn at launch, so it differs between the two runs.
 
 ## Settings
 
