@@ -390,6 +390,10 @@ impl Tty7App {
             }
             let group_key = section.key.clone();
             let group_key_str = group_name_key(&group_key);
+            let is_ssh_group = group_key
+                .as_deref()
+                .and_then(ssh_hop_group_target)
+                .is_some();
             let stored_collapsed = section.name.is_some()
                 && cx
                     .global::<Config>()
@@ -1225,13 +1229,13 @@ impl Tty7App {
                 let cfg = cx.global::<Config>();
                 let show_arrow = cfg.sidebar_group_arrows;
                 let folder_path = group_folder_icon(
-                    section.key.is_some(),
+                    section.key.is_some() && !is_ssh_group,
                     cfg.sidebar_group_folders,
                     show_arrow,
                     effective_collapsed,
                 );
                 let show_chevron = header_shows_chevron(
-                    section.key.is_some(),
+                    section.key.is_some() && !is_ssh_group,
                     show_arrow,
                     cfg.sidebar_group_folders,
                 );
@@ -1321,7 +1325,7 @@ impl Tty7App {
                     .group_hover(header_group.clone(), |s| s.visible())
                     .on_any_mouse_down(|_, _, cx| cx.stop_propagation())
                     .on_click(|_, _, cx| cx.stop_propagation())
-                    .when(is_local && section.key.is_some(), |act| {
+                    .when(is_local && section.key.is_some() && !is_ssh_group, |act| {
                         let pin_key = group_key_str.clone();
                         let icon_path = if is_pinned {
                             "icons/pin-off.svg"
@@ -1345,17 +1349,19 @@ impl Tty7App {
                                 })),
                         )
                     })
-                    .child({
-                        let new_key = section.key.clone();
-                        Button::new(("sidebar-group-new", group_ix))
-                            .icon(Icon::empty().path("icons/plus.svg"))
-                            .ghost()
-                            .xsmall()
-                            .tooltip(t(L10nKey::SidebarNewTabHere))
-                            .on_click(cx.listener(move |this, _, window, cx| {
-                                cx.stop_propagation();
-                                this.new_tab_in_group(new_key.clone(), window, cx);
-                            }))
+                    .when(!is_ssh_group, |act| {
+                        act.child({
+                            let new_key = section.key.clone();
+                            Button::new(("sidebar-group-new", group_ix))
+                                .icon(Icon::empty().path("icons/plus.svg"))
+                                .ghost()
+                                .xsmall()
+                                .tooltip(t(L10nKey::SidebarNewTabHere))
+                                .on_click(cx.listener(move |this, _, window, cx| {
+                                    cx.stop_propagation();
+                                    this.new_tab_in_group(new_key.clone(), window, cx);
+                                }))
+                        })
                     })
                     .child(
                         Button::new(("sidebar-group-more", group_ix))
@@ -1400,6 +1406,25 @@ impl Tty7App {
                                     d.group_hover(header_group.clone(), move |s| s.text_color(fg))
                                 })
                                 .child(Icon::new(IconName::Inbox).size(px(13.))),
+                        )
+                    })
+                    .when(is_ssh_group, |b| {
+                        // A quiet marker: a muted outline pill with no fill
+                        // and no colour of its own. The row badge already says
+                        // SSH in blue; the header only needs to read as one.
+                        b.child(
+                            div()
+                                .flex_shrink_0()
+                                .text_size(px(10.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .line_height(gpui::relative(1.2))
+                                .px(px(5.))
+                                .py(px(1.))
+                                .rounded_full()
+                                .border_1()
+                                .border_color(muted.opacity(0.45))
+                                .text_color(muted)
+                                .child("SSH"),
                         )
                     })
                     .child(
@@ -1889,11 +1914,16 @@ impl Tty7App {
                 }
                 let cwd = tab.pane.first_leaf().and_then(|leaf| {
                     let view = leaf.terminal()?.read(cx);
-                    if in_pane_ssh_hop(
-                        view.host_id().is_local(),
-                        view.remote_context().map(|r| r.kind),
-                    ) {
-                        *tab.sidebar_group.borrow_mut() = None;
+                    let remote = view.remote_context();
+                    if let Some(remote) =
+                        remote.filter(|r| in_pane_ssh_hop(view.host_id().is_local(), Some(r.kind)))
+                    {
+                        // A hop is grouped by where it went, not by the
+                        // local directory it left; the display identity
+                        // keeps profile names readable and explicit login
+                        // and port options distinct.
+                        *tab.sidebar_group.borrow_mut() =
+                            Some(ssh_hop_group_key(&remote.display_target()));
                         return None;
                     }
                     Some((view.git_host_id(), view.git_status_cwd()?.to_path_buf()))
@@ -2019,7 +2049,8 @@ impl Tty7App {
     }
 
     fn toggle_pin_group(&mut self, key: &str, cx: &mut Context<Self>) {
-        if key.is_empty() || !self.can_spawn_locally(cx) {
+        // Pinning probes the key as a directory; an SSH group has none.
+        if key.is_empty() || ssh_hop_group_label(key).is_some() || !self.can_spawn_locally(cx) {
             return;
         }
         let path = PathBuf::from(key);
@@ -2040,6 +2071,10 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        // A local spawn has no meaning on a remote host's group.
+        if key.as_deref().and_then(ssh_hop_group_target).is_some() {
+            return;
+        }
         self.unfold_group(&group_name_key(&key), cx);
         match key {
             Some(path) => self.new_tab_at(path, window, cx),
@@ -2058,7 +2093,8 @@ impl Tty7App {
     ) -> PopupMenu {
         menu = menu.min_w(px(160.));
         let key_str = group_name_key(&key);
-        if is_local && key.is_some() {
+        let is_ssh_group = key.as_deref().and_then(ssh_hop_group_target).is_some();
+        if is_local && key.is_some() && !is_ssh_group {
             let pin_label = if is_pinned {
                 t(L10nKey::SidebarUnpinGroup)
             } else {
@@ -2074,15 +2110,17 @@ impl Tty7App {
                 }),
             );
         }
-        let app_new = app.clone();
-        let new_key = key.clone();
-        menu = menu.item(PopupMenuItem::new(t(L10nKey::SidebarNewTabHere)).on_click(
-            move |_, window, cx| {
-                let _ = app_new.update(cx, |this, cx| {
-                    this.new_tab_in_group(new_key.clone(), window, cx);
-                });
-            },
-        ));
+        if !is_ssh_group {
+            let app_new = app.clone();
+            let new_key = key.clone();
+            menu = menu.item(PopupMenuItem::new(t(L10nKey::SidebarNewTabHere)).on_click(
+                move |_, window, cx| {
+                    let _ = app_new.update(cx, |this, cx| {
+                        this.new_tab_in_group(new_key.clone(), window, cx);
+                    });
+                },
+            ));
+        }
         let app_rename = app.clone();
         let rename_key = key.clone();
         menu = menu
@@ -2202,6 +2240,28 @@ fn in_pane_ssh_hop(host_is_local: bool, kind: Option<RemoteKind>) -> bool {
     host_is_local && matches!(kind, Some(RemoteKind::Ssh | RemoteKind::NativeSsh))
 }
 
+/// Group keys for in-pane SSH hops: `ssh:` + the connection's display identity
+/// (profile name, alias, or the address as typed). Every real group root is an
+/// absolute path, so a prefixed key — always relative — cannot collide with
+/// one. The rest of the config surface ([`group_name_key`], folded groups,
+/// custom titles) carries these keys as opaque strings.
+const SSH_GROUP_PREFIX: &str = "ssh:";
+
+/// The target behind an `ssh:`-prefixed key string, or `None` for a path key.
+fn ssh_hop_group_label(key: &str) -> Option<&str> {
+    key.strip_prefix(SSH_GROUP_PREFIX)
+}
+
+/// The group key for an in-pane SSH hop to `target`.
+fn ssh_hop_group_key(target: &str) -> PathBuf {
+    PathBuf::from(format!("{SSH_GROUP_PREFIX}{target}"))
+}
+
+/// The SSH target behind a group key, or `None` for a path group.
+fn ssh_hop_group_target(key: &Path) -> Option<&str> {
+    ssh_hop_group_label(key.to_str()?)
+}
+
 /// The group a probed cwd resolves to under `grouping`: the repo home when
 /// the cache found one, otherwise Scratch — or the cwd itself under
 /// repo-or-directory grouping, so a shell in a plain folder still gets a
@@ -2268,7 +2328,9 @@ fn sidebar_sections(
     }
     let mut pinned_order: Vec<PathBuf> = Vec::new();
     for p_str in pinned {
-        if p_str.is_empty() {
+        // `""` is Scratch, and an SSH key is never pinnable: pinning probes
+        // the root as a directory, and a hop's host has no local root.
+        if p_str.is_empty() || ssh_hop_group_label(p_str).is_some() {
             continue;
         }
         let path = PathBuf::from(p_str);
@@ -2276,10 +2338,20 @@ fn sidebar_sections(
             pinned_order.push(path);
         }
     }
-    let unpinned_order: Vec<PathBuf> = active_groups
+    let mut unpinned_order: Vec<PathBuf> = active_groups
         .into_iter()
         .filter(|g| !pinned_order.contains(g))
         .collect();
+    // SSH groups park between the local project groups and Scratch: a hop's
+    // host is a destination, not a local root, and Scratch stays the
+    // catch-all at the bottom. Within each kind, first appearance decides.
+    let ssh_groups: Vec<PathBuf> = unpinned_order
+        .iter()
+        .filter(|g| ssh_hop_group_target(g.as_path()).is_some())
+        .cloned()
+        .collect();
+    unpinned_order.retain(|g| ssh_hop_group_target(g.as_path()).is_none());
+    unpinned_order.extend(ssh_groups);
     if pinned_order.is_empty() && unpinned_order.is_empty() {
         return vec![Section {
             key: None,
@@ -2292,8 +2364,18 @@ fn sidebar_sections(
     let mut all_groups = Vec::with_capacity(pinned_count + unpinned_order.len());
     all_groups.extend(pinned_order);
     all_groups.extend(unpinned_order);
-    let refs: Vec<&PathBuf> = all_groups.iter().collect();
-    let names = group_names(&refs);
+    let path_roots: Vec<&PathBuf> = all_groups
+        .iter()
+        .filter(|g| ssh_hop_group_target(g.as_path()).is_none())
+        .collect();
+    let mut derived = group_names(&path_roots).into_iter();
+    let names: Vec<String> = all_groups
+        .iter()
+        .map(|root| match ssh_hop_group_target(root.as_path()) {
+            Some(target) => target.to_string(),
+            None => derived.next().expect("one derived name per path group"),
+        })
+        .collect();
     let mut sections: Vec<Section> = all_groups
         .into_iter()
         .zip(names)
@@ -2712,6 +2794,69 @@ mod tests {
             !in_pane_ssh_hop(false, Some(RemoteKind::Ssh)),
             "a remote workspace probes git on that host"
         );
+    }
+
+    #[test]
+    fn an_ssh_group_key_round_trips_its_target() {
+        let key = ssh_hop_group_key("deploy@prod-web");
+        assert_eq!(ssh_hop_group_target(&key), Some("deploy@prod-web"));
+        assert_eq!(group_name_key(&Some(key)), "ssh:deploy@prod-web");
+        assert!(ssh_hop_group_target(&p("/w/repo")).is_none());
+    }
+
+    #[test]
+    fn sections_place_ssh_groups_between_local_groups_and_scratch() {
+        let keys = vec![
+            Some(p("/w/beta")),
+            None,
+            Some(ssh_hop_group_key("dev-box")),
+            Some(p("/w/alpha")),
+            Some(ssh_hop_group_key("prod-web")),
+            Some(ssh_hop_group_key("dev-box")),
+        ];
+        let sections = sidebar_sections(&keys, &[], &|_| true);
+        let shape: Vec<(Option<PathBuf>, Option<String>, Vec<usize>)> = sections
+            .into_iter()
+            .map(|s| (s.key, s.name, s.tabs))
+            .collect();
+        assert_eq!(
+            shape,
+            vec![
+                (Some(p("/w/beta")), Some("beta".into()), vec![0]),
+                (Some(p("/w/alpha")), Some("alpha".into()), vec![3]),
+                (
+                    Some(ssh_hop_group_key("dev-box")),
+                    Some("dev-box".into()),
+                    vec![2, 5]
+                ),
+                (
+                    Some(ssh_hop_group_key("prod-web")),
+                    Some("prod-web".into()),
+                    vec![4]
+                ),
+                (None, Some("Scratch".into()), vec![1]),
+            ]
+        );
+
+        // A stale SSH key hand-edited into the pin list must not pin
+        // anything: the pinned probe would treat it as a directory.
+        let pinned = vec![ssh_hop_group_key("dev-box").to_string_lossy().into_owned()];
+        let sections = sidebar_sections(&keys, &pinned, &|_| true);
+        assert!(sections.iter().all(|section| !section.pinned));
+    }
+
+    #[gpui::test]
+    fn ssh_groups_cannot_be_pinned(cx: &mut gpui::TestAppContext) {
+        use crate::ui::app::test_window::harness;
+
+        let (app, mut vcx) = harness(cx);
+        app.update(&mut vcx, |app, cx| {
+            app.toggle_pin_group("ssh:dev-box", cx);
+            assert!(
+                cx.global::<Config>().sidebar_pinned_groups.is_empty(),
+                "the SSH group guard refuses the pin before it reaches config"
+            );
+        });
     }
 
     #[test]
