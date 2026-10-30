@@ -629,6 +629,14 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSidebarGroupingDesc => {
             "サイドバータブを git リポジトリごとにまとめます。リポジトリ外のタブはスクラッチに、「リポジトリ／フォルダ別」なら作業ディレクトリごとに。左サイドバーのみ"
         }
+        L10nKey::SettingsSidebarGroupArrows => "グループの矢印を表示",
+        L10nKey::SettingsSidebarGroupArrowsDesc => {
+            "プロジェクトとスクラッチの展開・折りたたみ矢印を表示します。非表示でも見出しはクリックでき、フォルダのみ表示のときスクラッチは矢印を残します。"
+        }
+        L10nKey::SettingsSidebarGroupFolders => "プロジェクトのフォルダアイコンを表示",
+        L10nKey::SettingsSidebarGroupFoldersDesc => {
+            "プロジェクトの見出しにフォルダを表示します。矢印を非表示にすると、フォルダが展開状態を示します。"
+        }
         L10nKey::SettingsDiffPreviewFromCounts => "サイドバーのカウントから Diff プレビューを開く",
         L10nKey::SettingsDiffPreviewFromCountsDesc => {
             "行の +N −N をクリックすると、オーバーレイでワーキングツリーの Diff を開きます。オフならカウントは表示されたまま、クリックだけできません"

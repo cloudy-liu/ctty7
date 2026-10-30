@@ -554,6 +554,14 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSidebarGroupingDesc => {
             "按 git 仓库给侧栏标签页分组。仓库外的标签页归到“草稿”，选“按仓库或文件夹”时则按工作目录分。仅左侧栏。"
         }
+        L10nKey::SettingsSidebarGroupArrows => "显示分组箭头",
+        L10nKey::SettingsSidebarGroupArrowsDesc => {
+            "控制项目和草稿分组的展开、折叠箭头。关闭后仍可点击分组标题；仅显示文件夹图标时，草稿分组保留箭头。"
+        }
+        L10nKey::SettingsSidebarGroupFolders => "显示项目文件夹图标",
+        L10nKey::SettingsSidebarGroupFoldersDesc => {
+            "在项目分组标题显示文件夹图标。关闭箭头时，文件夹图标表示展开或折叠状态。"
+        }
         L10nKey::SettingsDiffPreviewFromCounts => "从侧栏计数打开 diff 预览",
         L10nKey::SettingsDiffPreviewFromCountsDesc => {
             "点击行上的 +N −N 在浮层中打开 worktree diff。关闭后计数仍显示，只是不可点击。"

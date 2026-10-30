@@ -1206,6 +1206,19 @@ impl Tty7App {
                     "icons/chevron-down-thin.svg"
                 };
                 let chevron_color = if folded_active { accent } else { muted };
+                let cfg = cx.global::<Config>();
+                let show_arrow = cfg.sidebar_group_arrows;
+                let folder_path = group_folder_icon(
+                    section.key.is_some(),
+                    cfg.sidebar_group_folders,
+                    show_arrow,
+                    effective_collapsed,
+                );
+                let show_chevron = header_shows_chevron(
+                    section.key.is_some(),
+                    show_arrow,
+                    cfg.sidebar_group_folders,
+                );
                 let chevron = div()
                     .flex_shrink_0()
                     .size(px(16.))
@@ -1217,6 +1230,19 @@ impl Tty7App {
                         d.group_hover(header_group.clone(), move |s| s.text_color(fg))
                     })
                     .child(Icon::empty().path(chevron_path).size(px(12.)));
+                let folder = folder_path.map(|path| {
+                    div()
+                        .flex_shrink_0()
+                        .size(px(if show_arrow { 13. } else { 16. }))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .text_color(chevron_color)
+                        .when(!folded_active, |d| {
+                            d.group_hover(header_group.clone(), move |s| s.text_color(fg))
+                        })
+                        .child(Icon::empty().path(path).size(px(13.)))
+                });
 
                 let status_dots: Option<Div> = if effective_collapsed {
                     let dot_colors: Vec<gpui::Rgba> = section
@@ -1343,13 +1369,18 @@ impl Tty7App {
                             this.toggle_group_collapsed(&click_key_str, cx);
                         }
                     }))
-                    .child(chevron)
+                    .when(show_chevron, |header| header.child(chevron))
+                    .children(folder)
                     .child(
                         div()
                             .flex_shrink(1.)
                             .min_w_0()
                             .truncate()
                             .font_weight(FontWeight::MEDIUM)
+                            .when(
+                                folded_active && !show_chevron && folder_path.is_none(),
+                                |label| label.text_color(accent),
+                            )
                             .child(label),
                     )
                     .when(is_pinned, |b| {
@@ -2107,6 +2138,32 @@ impl Tty7App {
     }
 }
 
+/// Scratch has no directory icon. When the arrow is hidden, the folder itself
+/// indicates the expanded or collapsed state.
+fn group_folder_icon(
+    is_project: bool,
+    show_folder: bool,
+    show_arrow: bool,
+    collapsed: bool,
+) -> Option<&'static str> {
+    if !is_project || !show_folder {
+        None
+    } else if show_arrow {
+        Some("icons/folder.svg")
+    } else if collapsed {
+        Some("icons/folder-closed.svg")
+    } else {
+        Some("icons/folder-open.svg")
+    }
+}
+
+/// Scratch has no folder, so with folder icons enabled and arrows hidden the
+/// arrow stays: it is the only state cue the Scratch header can show. When
+/// both icon styles are hidden no header shows an arrow.
+fn header_shows_chevron(is_project: bool, show_arrow: bool, show_folder: bool) -> bool {
+    show_arrow || (!is_project && show_folder)
+}
+
 /// A hop this pane made with `ssh` (or tty7's own SSH engine) from a local
 /// window. The far side is not a Host we can git-probe, so the tab must not
 /// keep the local repo group it started in.
@@ -2379,6 +2436,46 @@ mod tests {
 
     fn p(s: &str) -> PathBuf {
         PathBuf::from(s)
+    }
+
+    #[test]
+    fn group_folder_icon_follows_the_display_choices_and_group_state() {
+        for arrow in [false, true] {
+            for collapsed in [false, true] {
+                assert_eq!(group_folder_icon(true, false, arrow, collapsed), None);
+                assert_eq!(group_folder_icon(false, true, arrow, collapsed), None);
+            }
+        }
+        assert_eq!(
+            group_folder_icon(true, true, true, false),
+            Some("icons/folder.svg")
+        );
+        assert_eq!(
+            group_folder_icon(true, true, true, true),
+            Some("icons/folder.svg")
+        );
+        assert_eq!(
+            group_folder_icon(true, true, false, false),
+            Some("icons/folder-open.svg")
+        );
+        assert_eq!(
+            group_folder_icon(true, true, false, true),
+            Some("icons/folder-closed.svg")
+        );
+    }
+
+    #[test]
+    fn scratch_keeps_its_arrow_when_only_folder_icons_are_shown() {
+        // Projects swap the arrow for the folder when arrows are hidden.
+        assert!(header_shows_chevron(true, true, false));
+        assert!(header_shows_chevron(true, true, true));
+        assert!(!header_shows_chevron(true, false, true));
+        assert!(!header_shows_chevron(true, false, false));
+        // Scratch has no folder, so it keeps the arrow while folders are on.
+        assert!(header_shows_chevron(false, true, false));
+        assert!(header_shows_chevron(false, true, true));
+        assert!(header_shows_chevron(false, false, true));
+        assert!(!header_shows_chevron(false, false, false));
     }
 
     #[gpui::test]

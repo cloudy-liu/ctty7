@@ -619,6 +619,14 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsSidebarGroupingDesc => {
             "Group sidebar tabs by git repository. Tabs outside a repo collect under Scratch, or under their working directory with \"By repo or folder\". Left sidebar only."
         }
+        L10nKey::SettingsSidebarGroupArrows => "Show group arrows",
+        L10nKey::SettingsSidebarGroupArrowsDesc => {
+            "Show expand and collapse arrows for project and Scratch groups. Group titles stay clickable when arrows are hidden; Scratch keeps its arrow in folder-only mode."
+        }
+        L10nKey::SettingsSidebarGroupFolders => "Show project folder icons",
+        L10nKey::SettingsSidebarGroupFoldersDesc => {
+            "Show folders on project group titles. When arrows are hidden, the folder indicates whether the group is open."
+        }
         L10nKey::SettingsDiffPreviewFromCounts => "Open diff preview from sidebar counts",
         L10nKey::SettingsDiffPreviewFromCountsDesc => {
             "Click a row's +N −N to open the working-tree diff in an overlay. Off leaves the counts visible, just not clickable."
