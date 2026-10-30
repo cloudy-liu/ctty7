@@ -5,7 +5,23 @@ becomes its own sidebar group between the local project groups and Scratch,
 with an `SSH` chip on the header; local shells without a repository keep
 Scratch. Pinning and "New tab here" are not offered for these groups.
 
-## Native UI evidence
+## Current-head Linux CI preview (supplementary)
+
+The following unedited screenshots come from the production GPUI application in
+[CI run 41070303035](https://github.com/cloudy-liu/ctty7/actions/runs/41070303035).
+Both use the same deterministic SSH fixture, light theme, Linux/X11 display
+settings and 1200 x 660 window; no network SSH connection is opened. The before image uses
+base `5ec55456`, and the after image uses CI merge commit `a2973bb7` with
+parents `5ec55456` and feature head `cf87a514`.
+
+- [Before: SSH sessions in the flat sidebar](images/ssh-host-groups/before-ci-sidebar.png)
+- [After: per-host groups with the transparent SSH pill](images/ssh-host-groups/after-ci-sidebar.png)
+
+These images are supplementary previews. Windows Local Computer Use captures of
+the current base and head are still needed for visual acceptance; the Windows
+captures below predate the rebase and the transparent pill.
+
+## Historical native UI evidence
 
 Captured on Windows with Local Computer Use on 2026-10-30. Both phases run the
 production GPUI application through the opt-in `--ssh-tab-visual` fixture with
