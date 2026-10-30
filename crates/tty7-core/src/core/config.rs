@@ -228,6 +228,10 @@ pub struct Config {
     #[serde(default, deserialize_with = "de_lenient")]
     pub sidebar_grouping: SidebarGrouping,
     #[serde(default = "default_true")]
+    pub sidebar_group_arrows: bool,
+    #[serde(default)]
+    pub sidebar_group_folders: bool,
+    #[serde(default = "default_true")]
     pub sidebar_diff_preview: bool,
     #[serde(default = "default_true")]
     pub sidebar_agent_status_text: bool,
@@ -646,6 +650,8 @@ impl Default for Config {
             scm_graph_expanded: false,
             scm_remote_avatars: true,
             sidebar_grouping: SidebarGrouping::Repo,
+            sidebar_group_arrows: true,
+            sidebar_group_folders: false,
             sidebar_diff_preview: true,
             sidebar_agent_status_text: true,
             sidebar_group_names: BTreeMap::new(),
@@ -1464,6 +1470,27 @@ mod tests {
         );
         let back: Config = serde_json::from_str(&json).unwrap();
         assert!(!back.sidebar_agent_status_text);
+    }
+
+    #[test]
+    fn sidebar_group_icons_preserve_old_defaults_and_round_trip_all_choices() {
+        let old: Config = serde_json::from_str(r#"{"font_size": 15.0}"#).unwrap();
+        assert!(old.sidebar_group_arrows);
+        assert!(!old.sidebar_group_folders);
+
+        for arrows in [false, true] {
+            for folders in [false, true] {
+                let config = Config {
+                    sidebar_group_arrows: arrows,
+                    sidebar_group_folders: folders,
+                    ..Config::default()
+                };
+                let saved = serde_json::to_string(&config).unwrap();
+                let restored: Config = serde_json::from_str(&saved).unwrap();
+                assert_eq!(restored.sidebar_group_arrows, arrows);
+                assert_eq!(restored.sidebar_group_folders, folders);
+            }
+        }
     }
 
     #[test]

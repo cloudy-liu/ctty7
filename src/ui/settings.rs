@@ -691,6 +691,16 @@ fn settings_search_entries() -> &'static [SearchEntry] {
         },
         SearchEntry {
             section: WindowTabs,
+            title: SettingsSidebarGroupArrows,
+            keywords: SettingsSidebarGroupArrowsDesc,
+        },
+        SearchEntry {
+            section: WindowTabs,
+            title: SettingsSidebarGroupFolders,
+            keywords: SettingsSidebarGroupFoldersDesc,
+        },
+        SearchEntry {
+            section: WindowTabs,
             title: SettingsDiffPreviewFromCounts,
             keywords: SettingsSearchDiffPreviewFromCountsKeywords,
         },
@@ -5900,6 +5910,8 @@ impl Tty7App {
         };
         let sidebar_diff_preview = cfg.sidebar_diff_preview;
         let sidebar_agent_status_text = cfg.sidebar_agent_status_text;
+        let sidebar_group_arrows = cfg.sidebar_group_arrows;
+        let sidebar_group_folders = cfg.sidebar_group_folders;
         let sidebar_grouping_idx = match cfg.sidebar_grouping {
             crate::core::config::SidebarGrouping::Repo => 0,
             crate::core::config::SidebarGrouping::RepoOrDirectory => 1,
@@ -6065,6 +6077,16 @@ impl Tty7App {
             .checked(sidebar_diff_preview)
             .on_click(cx.listener(|this, on: &bool, _w, cx| this.set_sidebar_diff_preview(*on, cx)))
             .into_any_element();
+        let sidebar_group_arrows_switch = crate::ui::theme::switch("wt-sidebar-group-arrows", cx)
+            .checked(sidebar_group_arrows)
+            .on_click(cx.listener(|this, on: &bool, _w, cx| this.set_sidebar_group_arrows(*on, cx)))
+            .into_any_element();
+        let sidebar_group_folders_switch = crate::ui::theme::switch("wt-sidebar-group-folders", cx)
+            .checked(sidebar_group_folders)
+            .on_click(
+                cx.listener(|this, on: &bool, _w, cx| this.set_sidebar_group_folders(*on, cx)),
+            )
+            .into_any_element();
         let sidebar_agent_status_switch =
             crate::ui::theme::switch("wt-sidebar-agent-status-text", cx)
                 .checked(sidebar_agent_status_text)
@@ -6135,6 +6157,18 @@ impl Tty7App {
                 t(L10nKey::SettingsSidebarGrouping),
                 t(L10nKey::SettingsSidebarGroupingDesc),
                 sidebar_grouping_radio,
+                cx,
+            ))
+            .child(self.settings_row(
+                t(L10nKey::SettingsSidebarGroupArrows),
+                t(L10nKey::SettingsSidebarGroupArrowsDesc),
+                sidebar_group_arrows_switch,
+                cx,
+            ))
+            .child(self.settings_row(
+                t(L10nKey::SettingsSidebarGroupFolders),
+                t(L10nKey::SettingsSidebarGroupFoldersDesc),
+                sidebar_group_folders_switch,
                 cx,
             ))
             .child(self.settings_row(

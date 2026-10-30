@@ -3214,6 +3214,14 @@ impl Tty7App {
         self.update_config(cx, |cfg| cfg.sidebar_grouping = grouping);
     }
 
+    pub(crate) fn set_sidebar_group_arrows(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.update_config(cx, |cfg| cfg.sidebar_group_arrows = on);
+    }
+
+    pub(crate) fn set_sidebar_group_folders(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.update_config(cx, |cfg| cfg.sidebar_group_folders = on);
+    }
+
     pub(crate) fn set_sidebar_diff_preview(&mut self, on: bool, cx: &mut Context<Self>) {
         self.update_config(cx, |cfg| cfg.sidebar_diff_preview = on);
     }
