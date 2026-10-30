@@ -194,12 +194,15 @@ mod tests {
         for agent in [CLIAgent::Claude, CLIAgent::Codex] {
             let (view, mut vcx, mut daemon) = harness(cx);
             view.update_in(&mut vcx, |view, window, cx| {
-                view.remember_native_ssh_spec(Box::new(
-                    serde_json::from_str(
-                        r#"{"host":"test-ssh","port":22,"user":"me","auth_mode":"auto"}"#,
-                    )
-                    .unwrap(),
-                ));
+                view.remember_native_ssh_spec(
+                    Box::new(
+                        serde_json::from_str(
+                            r#"{"host":"test-ssh","port":22,"user":"me","auth_mode":"auto"}"#,
+                        )
+                        .unwrap(),
+                    ),
+                    cx,
+                );
                 view.restore_agent(agent, Some(id), None, window, cx);
                 assert_eq!(
                     view.agent_session().unwrap().session_id.as_deref(),

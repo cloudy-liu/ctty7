@@ -421,7 +421,7 @@ impl Tty7App {
                     tab.pane.focused_or_first(window, cx).and_then(|leaf| {
                         let view = leaf.read(cx);
                         let cwd = view.git_status_cwd()?.to_path_buf();
-                        Some((view.host_id(), cwd))
+                        Some((view.git_host_id(), cwd))
                     }),
                 );
                 let badge_extra = if show_badges && badge_pos < 9 {
@@ -606,6 +606,7 @@ impl Tty7App {
                     if g.added > 0 || g.removed > 0 {
                         let mut counts = h_flex()
                             .id(("sidebar-diff", i))
+                            .debug_selector(move || format!("sidebar-diff-{i}"))
                             .flex_shrink_0()
                             .items_center()
                             .gap_1p5()
@@ -1833,7 +1834,7 @@ impl Tty7App {
                         *tab.sidebar_group.borrow_mut() = None;
                         return None;
                     }
-                    Some((view.host_id(), view.git_status_cwd()?.to_path_buf()))
+                    Some((view.git_host_id(), view.git_status_cwd()?.to_path_buf()))
                 });
                 if let Some((id, cwd)) = cwd {
                     let known = cx.global::<GitStatusCache>().known_repo_for(id, &cwd);
@@ -2151,7 +2152,7 @@ pub(crate) fn probed_group_cwd(
                 return None;
             }
             if let Some(cwd) = view.git_status_cwd() {
-                return Some((view.host_id(), cwd.to_path_buf()));
+                return Some((view.git_host_id(), cwd.to_path_buf()));
             }
         }
     }

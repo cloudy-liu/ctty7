@@ -3471,7 +3471,7 @@ impl Tty7App {
         let restored = parts.restored;
         let view = build_terminal_view(parts, font_size, window, cx);
         if restored && let Some(spec) = pending.read(cx).ssh_spec.clone() {
-            view.update(cx, |view, _| view.remember_native_ssh_spec(spec));
+            view.update(cx, |view, cx| view.remember_native_ssh_spec(spec, cx));
         }
         if let Some(command) = pending.update(cx, |pending, _| pending.on_ready_command.take()) {
             view.read(cx).run_command_line(&command);
@@ -3928,6 +3928,8 @@ impl Tty7App {
                 cx,
             );
         }
+        let old_git_host = dead.read(cx).git_host_id();
+        dead.update(cx, |view, cx| view.release_native_git(cx));
         for tab in &mut self.tabs {
             if tab
                 .pane
@@ -3935,6 +3937,13 @@ impl Tty7App {
             {
                 if tab.last_focused == Some(dead.entity_id()) {
                     tab.last_focused = Some(fresh.entity_id());
+                }
+                if tab
+                    .diff_overlay
+                    .as_ref()
+                    .is_some_and(|overlay| overlay.host_id == old_git_host)
+                {
+                    tab.diff_overlay = None;
                 }
                 break;
             }
@@ -4078,6 +4087,7 @@ impl Tty7App {
             }
             CloseOutcome::Collapsed => {
                 if let Some(leaf) = &focused {
+                    leaf.update(cx, |view, cx| view.release_native_git(cx));
                     kill_pane_off_thread(leaf.read(cx).pane_route(), leaf.read(cx).pane_id, cx);
                 }
                 self.focus_active(window, cx);
@@ -4658,6 +4668,15 @@ impl Tty7App {
                     .iter()
                     .any(|l| l.entity_id() == leaf.entity_id())
             });
+            // The incoming tab may give focus to its diff rather than its
+            // terminal. Its remote Git state still needs a fresh observation.
+            for pane in self.tabs[index].pane.terminals() {
+                pane.update(cx, |view, cx| {
+                    if view.git_host_id() != view.host_id() {
+                        view.refresh_git_status_now(cx);
+                    }
+                });
+            }
             self.maybe_refresh_diff_overlay(cx);
             self.sidebar_scroll.scroll_to_item(index);
             if self.code_panel_visible() {
@@ -4721,6 +4740,9 @@ impl Tty7App {
             self.closed.remove(0);
         }
         for leaf in self.tabs[index].pane.terminals() {
+            // A mirrored view or a pending UI action may still hold this
+            // entity. Closing its owner ends the borrowed Git route now.
+            leaf.update(cx, |view, cx| view.release_native_git(cx));
             kill_pane_off_thread(leaf.read(cx).pane_route(), leaf.read(cx).pane_id, cx);
         }
         self.tabs.remove(index);
@@ -5122,6 +5144,11 @@ impl Tty7App {
             return false;
         };
         let view = leaf.read(cx);
+        // This gates worktree creation in the tab menu. Native SSH Git is
+        // inspection only; its directory is not on the workspace host.
+        if view.git_host_id() != view.host_id() {
+            return false;
+        }
         let Some(cwd) = view.git_status_cwd() else {
             return false;
         };
@@ -9795,7 +9822,9 @@ mod tests {
                 )
                 .unwrap();
                 spec.shell_integration = case != 1;
-                view.update(cx, |view, _| view.remember_native_ssh_spec(Box::new(spec)));
+                view.update(cx, |view, cx| {
+                    view.remember_native_ssh_spec(Box::new(spec), cx)
+                });
                 let agent = if case == 2 {
                     CLIAgent::Gemini
                 } else {

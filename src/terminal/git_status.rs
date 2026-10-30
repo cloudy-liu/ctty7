@@ -48,6 +48,7 @@ impl GitStatusCache {
         self.homes.clear_host(host);
         self.status.clear_host(host);
         self.last_probe.clear_host(host);
+        self.probes.retain(|(id, _)| *id != host);
     }
 
     pub fn begin_probe(&mut self, host: HostId, cwd: &Path) -> bool {

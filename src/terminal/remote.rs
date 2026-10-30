@@ -2001,6 +2001,25 @@ impl RemoteTerminal {
         query(id).unwrap_or_default()
     }
 
+    pub(crate) fn ssh_git(
+        pane_id: u64,
+        cwd: String,
+        args: Vec<String>,
+    ) -> std::io::Result<crate::ui::host_ops::Output> {
+        let mut stream = connect().map_err(std::io::Error::other)?;
+        let timeout = Some(std::time::Duration::from_secs(20));
+        stream.set_read_timeout(timeout)?;
+        stream.set_write_timeout(timeout)?;
+        ClientMsg::SshGit { pane_id, cwd, args }.encode(&mut stream)?;
+        match DaemonMsg::read(&mut stream)? {
+            DaemonMsg::SshGitOutput(out) => Ok(out),
+            DaemonMsg::Error(message) => Err(std::io::Error::other(message)),
+            other => Err(std::io::Error::other(format!(
+                "unexpected SSH Git reply: {other:?}"
+            ))),
+        }
+    }
+
     pub fn sftp_list(pane_id: u64, path: &str) -> Result<Vec<SftpEntry>, String> {
         fn query(pane_id: u64, path: String) -> anyhow::Result<Result<Vec<SftpEntry>, String>> {
             let mut stream = connect()?;
