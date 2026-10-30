@@ -1818,7 +1818,8 @@ impl Tty7App {
                     return;
                 }
                 let Ok((text, mtime)) = result else {
-                    f.dirty = true;
+                    // A failed reload did not edit the buffer. Preserve its
+                    // dirty state so a deleted, unedited file can still close.
                     f.conflict = false;
                     cx.notify();
                     return;
@@ -3188,6 +3189,113 @@ mod tests {
                 assert_eq!(code.visible, remaining != 0);
             });
         }
+    }
+
+    #[gpui::test]
+    fn document_tabs_close_after_their_parent_folder_is_deleted(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let folder = dir.path().join("deleted-folder");
+        std::fs::create_dir(&folder).unwrap();
+        let path = folder.join("guide.md");
+        std::fs::write(&path, "# Guide\n").unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_open_on_host(tty7_core::host::local::LocalHost::new(), &path, window, cx);
+        });
+        wait_for_markdown(&mut vcx, |vcx| {
+            app.read_with(vcx, |app, _| {
+                app.tab_code().is_some_and(|code| code.files.len() == 1)
+                    && !app.editor.watch_opening
+                    && !app.editor.watch_busy
+            })
+        });
+        let opened = app.read_with(&vcx, |app, _| {
+            app.tab_code().unwrap().active_file().unwrap().path.clone()
+        });
+        std::fs::remove_dir_all(&folder).unwrap();
+        let mut reloaded = std::pin::pin!(app.next_notification(std::time::Duration::ZERO, cx));
+        // Deliver the watch event deterministically, then wait for the failed read.
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_apply_external_change(HostId::LOCAL, &opened, None, window, cx);
+        });
+        wait_for_markdown(&mut vcx, |_| {
+            gpui::block_on(smol::future::poll_once(reloaded.as_mut())).is_some()
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let close = vcx.debug_bounds("editor-file-close-0").unwrap();
+        vcx.simulate_click(close.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        app.read_with(&vcx, |app, _| {
+            let code = app.tab_code().unwrap();
+            assert!(
+                code.files.is_empty(),
+                "an unedited deleted file must close without trying to save it"
+            );
+            assert!(
+                !code.visible,
+                "closing the final file must dismiss the panel"
+            );
+        });
+        assert!(!folder.exists());
+    }
+
+    #[gpui::test]
+    fn deleted_document_keeps_real_edits_and_can_be_discarded(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("edited.md");
+        std::fs::write(&path, "# Original\n").unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_install_file(
+                tty7_core::host::local::LocalHost::new(),
+                path.clone(),
+                "# Original\n".into(),
+                None,
+                window,
+                cx,
+            );
+            app.editor_toggle_preview(window, cx);
+        });
+        vcx.run_until_parked();
+        vcx.simulate_keystrokes("x");
+        let edited = app.read_with(&vcx, |app, cx| {
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(file.dirty);
+            file.input.read(cx).text().to_string()
+        });
+        std::fs::remove_file(&path).unwrap();
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.editor_apply_external_change(HostId::LOCAL, &path, None, window, cx);
+            assert!(app.tab_code().unwrap().active_file().unwrap().conflict);
+            app.editor_reload_from_disk(app.active, 0, window, cx);
+        });
+        wait_for_markdown(&mut vcx, |vcx| {
+            app.read_with(vcx, |app, _| {
+                !app.tab_code().unwrap().active_file().unwrap().conflict
+            })
+        });
+        app.read_with(&vcx, |app, cx| {
+            let file = app.tab_code().unwrap().active_file().unwrap();
+            assert!(file.dirty, "a failed reload must preserve real edits");
+            assert_eq!(file.input.read(cx).text().to_string(), edited);
+        });
+        for answer in [L10nKey::Cancel, L10nKey::EditorDiscard] {
+            let close = vcx.debug_bounds("editor-file-close-0").unwrap();
+            vcx.simulate_click(close.center(), gpui::Modifiers::none());
+            vcx.run_until_parked();
+            cx.simulate_prompt_answer(crate::ui::i18n::t(answer));
+            vcx.run_until_parked();
+            app.read_with(&vcx, |app, _| {
+                assert_eq!(
+                    app.tab_code().unwrap().files.len(),
+                    usize::from(answer == L10nKey::Cancel)
+                );
+            });
+        }
+        assert!(!path.exists(), "discard must not recreate the deleted file");
     }
 
     #[gpui::test]
