@@ -45,6 +45,8 @@ mod row_metrics {
     pub(super) const LIST_PAD: f32 = 4.;
     /// `pl_2` + `pr_2` on the row.
     pub(super) const ROW_PAD: f32 = 8.;
+    /// Extra space before rows that sit under a group header.
+    pub(super) const GROUP_INDENT: f32 = 12.;
     /// The avatar handed to `tab_avatar`.
     pub(super) const AVATAR: f32 = 22.;
     /// `gap_2` between the row's children.
@@ -355,6 +357,11 @@ impl Tty7App {
 
         for (group_slot, group_ix) in blocks {
             let section = &sections[group_ix];
+            let content_indent = if section.name.is_some() {
+                row_metrics::GROUP_INDENT
+            } else {
+                0.
+            };
             let (drag_slots, bounds_seen, active_preview, anim_prefix) = match &group_slot {
                 Some((Surface::PinnedGroups, _)) => (
                     &pinned_group_slots,
@@ -431,7 +438,8 @@ impl Tty7App {
                 };
                 // Elision is measured against this budget so the label and
                 // branch never wrap or overflow into CSS truncation.
-                let label_avail = (row_metrics::text_budget(width) - badge_extra).max(48.);
+                let label_avail =
+                    (row_metrics::text_budget(width) - content_indent - badge_extra).max(48.);
                 let title_size = 0.875 * rem;
                 let meta_size = 0.75 * rem;
                 let title_font = if is_active { &title_font_active } else { &font };
@@ -858,6 +866,7 @@ impl Tty7App {
 
                 let row = h_flex()
                     .id(("tab-row", i))
+                    .debug_selector(move || format!("sidebar-tab-row-{i}"))
                     .group(SharedString::from(format!("tab-row-{i}")))
                     .cursor_pointer()
                     .on_drag(DragTab, {
@@ -931,14 +940,20 @@ impl Tty7App {
                         cx.stop_propagation();
                         this.activate(i, window, cx);
                     }))
-                    .child(self.tab_avatar(
-                        ("sidebar-avatar", i),
-                        avatar,
-                        agent_indicator,
-                        22.,
-                        ssh,
-                        cx,
-                    ))
+                    .child(
+                        div()
+                            .debug_selector(move || format!("sidebar-tab-avatar-{i}"))
+                            .flex_shrink_0()
+                            .ml(px(content_indent))
+                            .child(self.tab_avatar(
+                                ("sidebar-avatar", i),
+                                avatar,
+                                agent_indicator,
+                                22.,
+                                ssh,
+                                cx,
+                            )),
+                    )
                     .child(label_region)
                     .when(show_badges && badge_pos < 9, |row| {
                         row.child(
@@ -1115,6 +1130,7 @@ impl Tty7App {
                     .child(
                         div()
                             .flex_shrink_0()
+                            .ml(px(content_indent))
                             .size(px(row_metrics::AVATAR))
                             .rounded_full()
                             .border_1()
@@ -2476,6 +2492,61 @@ mod tests {
         assert!(header_shows_chevron(false, true, true));
         assert!(header_shows_chevron(false, false, true));
         assert!(!header_shows_chevron(false, false, false));
+    }
+
+    #[gpui::test]
+    fn grouped_rows_indent_their_contents_but_keep_the_full_click_target(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use crate::ui::app::{Tab, test_window::harness};
+        use crate::ui::pane::Pane;
+
+        let (app, mut vcx) = harness(cx);
+        vcx.simulate_resize(size(px(800.), px(600.)));
+        app.update(&mut vcx, |app, cx| {
+            cx.global_mut::<Config>().sidebar_grouping = SidebarGrouping::Repo;
+            app.tabs = [Some(p("/w/project")), Some(p("/w/project")), None]
+                .into_iter()
+                .map(|group| {
+                    let tab = Tab::new(Pane::Empty);
+                    *tab.sidebar_group.borrow_mut() = group;
+                    tab
+                })
+                .collect();
+            app.active = 0;
+            cx.notify();
+        });
+        vcx.run_until_parked();
+
+        let grouped_row = vcx.debug_bounds("sidebar-tab-row-0").unwrap();
+        let grouped_project = vcx.debug_bounds("sidebar-tab-avatar-0").unwrap();
+        let grouped_scratch = vcx.debug_bounds("sidebar-tab-avatar-2").unwrap();
+        let second_row = vcx.debug_bounds("sidebar-tab-row-1").unwrap();
+        vcx.simulate_click(
+            point(second_row.left() + px(2.), second_row.center().y),
+            gpui::Modifiers::none(),
+        );
+        vcx.run_until_parked();
+        assert_eq!(app.read_with(&vcx, |app, _| app.active), 1);
+
+        app.update(&mut vcx, |_, cx| {
+            cx.global_mut::<Config>().sidebar_grouping = SidebarGrouping::None;
+            cx.notify();
+        });
+        vcx.run_until_parked();
+        let flat_row = vcx.debug_bounds("sidebar-tab-row-0").unwrap();
+        let flat_project = vcx.debug_bounds("sidebar-tab-avatar-0").unwrap();
+        let flat_scratch = vcx.debug_bounds("sidebar-tab-avatar-2").unwrap();
+        assert_eq!(grouped_row.left(), flat_row.left());
+        assert_eq!(grouped_row.size.width, flat_row.size.width);
+        assert_eq!(
+            grouped_project.left() - flat_project.left(),
+            px(row_metrics::GROUP_INDENT)
+        );
+        assert_eq!(
+            grouped_scratch.left() - flat_scratch.left(),
+            px(row_metrics::GROUP_INDENT)
+        );
     }
 
     #[gpui::test]
