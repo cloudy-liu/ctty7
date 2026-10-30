@@ -11,6 +11,16 @@ description: "The diff overlay: side-by-side or unified, from the sidebar or the
 | Source Control | **Open Changes** on a file, or click the row |
 | History | Click a file inside a commit's detail view |
 
+For a managed native SSH tab, sidebar counts and the opened diff belong to that
+pane's remote repository. Tracked changes, untracked previews, and expanded file
+context use its existing SSH connection. Changes made outside the app refresh
+while the tab is active; disconnecting clears stale remote results. This path
+is read-only. A manually nested `ssh` command does not supply remote Git routing.
+
+Commit documents keep diff actions beside fill/restore in the top document strip.
+Drag the separator between the message and diff to resize their independent
+scroll regions. Diff-only controls hide when an ordinary file is active.
+
 A diff docks beside the terminal, in the same column an open file uses, so the
 pane you were reading stays on screen. <kbd>Esc</kbd> closes it, and its header
 right-clicks to a menu that fills the window with it if you prefer that —

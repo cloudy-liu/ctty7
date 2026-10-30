@@ -49,7 +49,7 @@ ctty7 完整保留这些，把重心放在日常使用真正需要的地方：Wi
   </tr>
 </table>
 
-**远程工作不用折腾。** WSL 解析账户的登录 shell，Windows 安装包内置启动 WSL 所需的 Linux server。原生 SSH 支持保存的主机配置、系统密钥链、跳板机、SFTP 和端口转发。面板内启动的 `ssh` 会被识别，顶部标签和侧栏行显示蓝色 Remote 标识，把远程会话和本地会话分开。SSH 标签保留连接名，进入项目目录时显示连接名与目录，任务名称下方也保留连接信息。[远程工作区](docs/remote/workspaces.mdx) · [SSH](docs/remote/ssh.mdx)
+**远程工作不用折腾。** WSL 解析账户的登录 shell，Windows 安装包内置启动 WSL 所需的 Linux server。原生 SSH 支持保存的主机配置、系统密钥链、跳板机、SFTP 和端口转发。托管的 SSH tab 显示远端分支与增删统计，点击数字即可通过该面板已有的连接查看远端 diff。重启后会重新附着或连接保存的 SSH 会话，并在远端 shell 就绪后恢复已知的 Claude Code/Codex 对话。手动在面板内启动的 `ssh` 会显示 Remote 标识，但不提供托管的远端 Git 查询。SSH 标签保留连接名称、项目目录和连接信息。[远程工作区](docs/remote/workspaces.mdx) · [SSH](docs/remote/ssh.mdx)
 
 <table>
   <tr>

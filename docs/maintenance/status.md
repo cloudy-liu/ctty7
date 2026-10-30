@@ -1,26 +1,29 @@
 # Project status
 
-Checked on 2026-10-28 against GitHub and the release candidate checkout.
+Checked on 2026-10-29 against GitHub and the release candidate checkout.
 This is a dated snapshot; query GitHub again before merging or preparing a release.
 
 ## Open work
 
-The latest published release at preparation time is v0.8.2, published on
-2026-10-25. The v0.8.3 candidate includes Git History author photos and
-independent complete commit documents (#209), source overflow scrollbars (#210),
-GitHub-style Diff context controls (#206), and optional unsupported-preview
-hints (#211), installed Windows taskbar reminders (#212), selectable Diff file
-names (#213), and folder-rename text selection (#214). PRs #206 and #209–#213
-are merged into fork main; #214 is completing native acceptance and CI. See its
-[English notes](../releases/v0.8.3.md) and
-[preserved-change audit](../testing/local-change-audit-v0.8.3.md).
+The latest published release at preparation time is v0.8.3, published on
+2026-10-27. The v0.9.0 source adds native SSH Git status and diffs (#224),
+SSH connection and exact supported-agent restoration (#217), commit-detail
+layout refinements (#218), the working-agent comet (#219), and Diff backgrounds
+that follow the application theme (#225). See its
+[English notes](../releases/v0.9.0.md) and
+[preserved-change audit](../testing/local-change-audit-v0.9.0.md).
 
-PR #209 passed all ten source CI checks before squash merge at `635eddd9`.
-Release preparation changes only version metadata and documentation. The final
-candidate's source CI and Release workflow must pass, and all downloaded assets
-and checksums must be verified while the Release remains a draft. Ongoing local
-custom-name hover and Mermaid-control simplification remain preserved outside
-this candidate; the taskbar correction is included through #212.
+Native evidence covers remote Git, external edits, disconnect/reconnect, SSH
+restoration, final commit-strip actions, and light/dark comet states on Windows.
+See [Native SSH Git acceptance](../testing/native-ssh-git-diff.md),
+[SSH restoration](../testing/ssh-agent-resume.md), and
+[commit layout](../testing/commit-detail-layout.md). Parent issue #220 retains
+the approved spec; its implementation tickets are #221–223.
+
+Final source CI and Release builds must pass, and all downloaded assets and
+checksums must be verified while the Release remains a draft. Publication is
+explicit. The separate background-attention branch, untracked prototypes,
+and archived Mermaid/sidebar experiments remain outside this scope.
 
 Issue #175 is closed for the delivered native HTML preview implementation.
 PR #178 implements macOS preview; both architecture-specific native CI artifacts
@@ -82,6 +85,8 @@ been checked. macOS/Linux native source-editor screenshots remain unverified;
 these are verification gaps, not additional open GitHub tickets.
 
 ## Source and release state
+
+- Published tag `v0.8.3` remains available with twelve program assets and `checksums.txt`; its [English notes](../releases/v0.8.3.md) and [local-change audit](../testing/local-change-audit-v0.8.3.md) record accepted behavior and verification limits.
 
 - Published tag `v0.8.2` is the release-preparation baseline. Its [English notes](../releases/v0.8.2.md) and [local-change audit](../testing/local-change-audit-v0.8.2.md) record the included changes and verification limits.
 

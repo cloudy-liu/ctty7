@@ -36,6 +36,16 @@ nonexistent history. Once you type into the agent or it reports conversation
 activity, tty7 needs the exact session id to resume it. An unknown session
 leaves a fresh shell.
 
+For native SSH panes, automatic conversation restoration supports Claude Code
+and Codex with a known exact session ID. The command is queued on the owning SSH
+connection until an actual remote shell prompt arrives, then sent once in the
+saved remote directory. Reopening an already live pane only reattaches; manual
+Reconnect follows the same restoration path. User input cancels a queued restore.
+An unknown ID, unsupported agent, disabled SSH shell integration, or history
+opt-out leaves an interactive remote shell. Untouched new-agent launches are
+not replayed over SSH, and remote hook installation or remote Codex history-picker
+identity discovery is not automatic.
+
 <Note>
   Hooks capture the id for new conversations. tty7 can also recover a complete
   id from an agent's saved, explicit resume command. Names, numeric indexes,

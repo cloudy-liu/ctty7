@@ -112,6 +112,31 @@ Also under Security: **Warn before closing** a live connection, off by default.
 <kbd>⌘ ⇧ R</kbd> — or *SSH: Reconnect* in the palette — restarts the session in
 the current pane. Useful after a laptop sleeps or a network changes.
 
+Saved native SSH panes reattach to a live connection when the application reopens.
+If the pane no longer exists, tty7 reconnects over SSH using the saved connection
+and remote working directory. Known Claude Code and Codex conversations resume
+with their exact session IDs and original flags after the remote shell reports
+a prompt; manual Reconnect uses the same path. User input cancels a queued resume.
+Restoration settings, session-history opt-outs, and shell-integration settings
+are respected. Unknown session IDs leave an interactive remote shell.
+
+## Git in a native SSH tab
+
+Open a managed SSH tab from the new-tab menu or a saved profile, then enter a
+remote Git repository. Once shell integration reports its directory, the sidebar
+shows the remote branch and `+N −M` counts. Click the counts to open that pane's
+read-only remote diff, including untracked-file previews and full-file context.
+External edits refresh while the tab is active; disconnecting clears stale Git
+results, and reconnecting starts a new pane identity.
+
+Git commands use the pane's existing SSH connection. This does not require
+installing `tty7-server` or turning the local workspace into a remote workspace.
+A remote workspace remains the option for a complete remote file tree and
+workspace-wide Git operations. Native-tab Git requires a POSIX shell and remote
+Git support for `--path-format=absolute`; manually nested SSH commands are outside
+this feature. See [diffs](/git/diffs) and the
+[native acceptance record](https://github.com/cloudy-liu/ctty7/blob/main/docs/testing/native-ssh-git-diff.md).
+
 ## What is not supported
 
 - No fallback to the system `ssh` binary
