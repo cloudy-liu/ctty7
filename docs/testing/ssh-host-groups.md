@@ -5,6 +5,34 @@ becomes its own sidebar group between the local project groups and Scratch,
 with an `SSH` chip on the header; local shells without a repository keep
 Scratch. Pinning and "New tab here" are not offered for these groups.
 
+## Current Windows acceptance
+
+These are unedited Local Computer Use captures of the running production GPUI
+application on 2026-10-31. Both use the same deterministic six-session fixture,
+light theme, 1200 x 660 logical viewport, 100% display scale, sidebar grouping
+set to Repo, and active `Fix login` session. No SSH connection is opened.
+
+| Phase | Source | Capture | Binary SHA-256 |
+| --- | --- | --- | --- |
+| Before | base `5ec55456`, with this branch's fixture overlaid | [before](images/ssh-host-groups/before-windows-current.jpg) | `778cc67ff07623fa415e021cdcd417b9e68fd55d68bb39bb810f20583653407d` |
+| After | feature head `25772ed0` | [after](images/ssh-host-groups/after-windows-current.jpg) | `9c3d3a5ea8f4316a9249c732a6bff4178942b525fa6ae7fe1cf37da05e51d507` |
+
+To make Scratch visible on both versions, both builds additionally set the
+first local tab's existing `sidebar_group` fixture cache to
+`Some(PathBuf::from("C:/visual/Project"))` immediately after `Tab::new`. The
+application's grouping and rendering code is unchanged. Reproduce the base
+fixture overlay with `scripts/ssh-tabs-native-visual.py prepare-before`, apply
+the same one-line fixture assignment in both worktrees, and build with
+`cargo build --locked --features markdown-visual-tests --bin tty7-app`. Launch
+with `--ssh-tab-visual` and the options documented below.
+
+Before, the three SSH sessions appear in Scratch. After, `prod-web` and
+`dev-box` have their own groups with outline SSH pills, while the two remaining
+local sessions stay in Scratch. The cached Project group is fixture data rather
+than a live repository probe. The before/after image SHA-256 values are
+`c35fbdfadebcfedfd5485a85a65c5ae6ed0116aff1a7e655aa0415b8e30a4cac` and
+`3b0aef9c6c52ad18935df2532436507017dabcc93575bf791b5087a60625567b`.
+
 ## Current-head Linux CI preview (supplementary)
 
 The following unedited screenshots come from the production GPUI application in
@@ -17,9 +45,8 @@ parents `5ec55456` and feature head `cf87a514`.
 - [Before: SSH sessions in the flat sidebar](images/ssh-host-groups/before-ci-sidebar.png)
 - [After: per-host groups with the transparent SSH pill](images/ssh-host-groups/after-ci-sidebar.png)
 
-These images are supplementary previews. Windows Local Computer Use captures of
-the current base and head are still needed for visual acceptance; the Windows
-captures below predate the rebase and the transparent pill.
+These images are supplementary previews. The older Windows captures below
+predate the rebase and the transparent pill.
 
 ## Historical native UI evidence
 
