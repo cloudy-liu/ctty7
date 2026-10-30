@@ -631,7 +631,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsSidebarGroupArrows => "グループの矢印を表示",
         L10nKey::SettingsSidebarGroupArrowsDesc => {
-            "プロジェクトとスクラッチの展開・折りたたみ矢印を表示します。非表示でも見出しをクリックできます。"
+            "プロジェクトとスクラッチの展開・折りたたみ矢印を表示します。非表示でも見出しはクリックでき、フォルダのみ表示のときスクラッチは矢印を残します。"
         }
         L10nKey::SettingsSidebarGroupFolders => "プロジェクトのフォルダアイコンを表示",
         L10nKey::SettingsSidebarGroupFoldersDesc => {

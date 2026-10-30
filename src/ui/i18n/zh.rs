@@ -556,7 +556,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsSidebarGroupArrows => "显示分组箭头",
         L10nKey::SettingsSidebarGroupArrowsDesc => {
-            "控制项目和草稿分组的展开、折叠箭头。关闭后仍可点击分组标题。"
+            "控制项目和草稿分组的展开、折叠箭头。关闭后仍可点击分组标题；仅显示文件夹图标时，草稿分组保留箭头。"
         }
         L10nKey::SettingsSidebarGroupFolders => "显示项目文件夹图标",
         L10nKey::SettingsSidebarGroupFoldersDesc => {

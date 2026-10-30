@@ -621,7 +621,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         }
         L10nKey::SettingsSidebarGroupArrows => "Show group arrows",
         L10nKey::SettingsSidebarGroupArrowsDesc => {
-            "Show expand and collapse arrows for project and Scratch groups. Group titles remain clickable when arrows are hidden."
+            "Show expand and collapse arrows for project and Scratch groups. Group titles stay clickable when arrows are hidden; Scratch keeps its arrow in folder-only mode."
         }
         L10nKey::SettingsSidebarGroupFolders => "Show project folder icons",
         L10nKey::SettingsSidebarGroupFoldersDesc => {

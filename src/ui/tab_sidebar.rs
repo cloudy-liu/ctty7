@@ -1214,6 +1214,11 @@ impl Tty7App {
                     show_arrow,
                     effective_collapsed,
                 );
+                let show_chevron = header_shows_chevron(
+                    section.key.is_some(),
+                    show_arrow,
+                    cfg.sidebar_group_folders,
+                );
                 let chevron = div()
                     .flex_shrink_0()
                     .size(px(16.))
@@ -1364,7 +1369,7 @@ impl Tty7App {
                             this.toggle_group_collapsed(&click_key_str, cx);
                         }
                     }))
-                    .when(show_arrow, |header| header.child(chevron))
+                    .when(show_chevron, |header| header.child(chevron))
                     .children(folder)
                     .child(
                         div()
@@ -1373,7 +1378,7 @@ impl Tty7App {
                             .truncate()
                             .font_weight(FontWeight::MEDIUM)
                             .when(
-                                folded_active && !show_arrow && folder_path.is_none(),
+                                folded_active && !show_chevron && folder_path.is_none(),
                                 |label| label.text_color(accent),
                             )
                             .child(label),
@@ -2152,6 +2157,13 @@ fn group_folder_icon(
     }
 }
 
+/// Scratch has no folder, so with folder icons enabled and arrows hidden the
+/// arrow stays: it is the only state cue the Scratch header can show. When
+/// both icon styles are hidden no header shows an arrow.
+fn header_shows_chevron(is_project: bool, show_arrow: bool, show_folder: bool) -> bool {
+    show_arrow || (!is_project && show_folder)
+}
+
 /// A hop this pane made with `ssh` (or tty7's own SSH engine) from a local
 /// window. The far side is not a Host we can git-probe, so the tab must not
 /// keep the local repo group it started in.
@@ -2450,6 +2462,20 @@ mod tests {
             group_folder_icon(true, true, false, true),
             Some("icons/folder-closed.svg")
         );
+    }
+
+    #[test]
+    fn scratch_keeps_its_arrow_when_only_folder_icons_are_shown() {
+        // Projects swap the arrow for the folder when arrows are hidden.
+        assert!(header_shows_chevron(true, true, false));
+        assert!(header_shows_chevron(true, true, true));
+        assert!(!header_shows_chevron(true, false, true));
+        assert!(!header_shows_chevron(true, false, false));
+        // Scratch has no folder, so it keeps the arrow while folders are on.
+        assert!(header_shows_chevron(false, true, false));
+        assert!(header_shows_chevron(false, true, true));
+        assert!(header_shows_chevron(false, false, true));
+        assert!(!header_shows_chevron(false, false, false));
     }
 
     #[gpui::test]
