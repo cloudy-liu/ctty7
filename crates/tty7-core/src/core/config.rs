@@ -227,8 +227,13 @@ pub struct Config {
     pub scm_remote_avatars: bool,
     #[serde(default, deserialize_with = "de_lenient")]
     pub sidebar_grouping: SidebarGrouping,
+    /// Show expand and collapse arrows on sidebar group headers. With the
+    /// arrows hidden, folder icons and the clickable titles take over; the
+    /// Scratch group keeps its arrow while folder icons are shown.
     #[serde(default = "default_true")]
     pub sidebar_group_arrows: bool,
+    /// Show a folder on project group headers. With the arrows hidden the
+    /// folder doubles as the open and closed state indicator.
     #[serde(default)]
     pub sidebar_group_folders: bool,
     #[serde(default = "default_true")]
