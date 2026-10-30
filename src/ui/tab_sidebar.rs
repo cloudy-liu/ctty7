@@ -2442,8 +2442,14 @@ mod tests {
         let flat_scratch = vcx.debug_bounds("sidebar-tab-avatar-2").unwrap();
         assert_eq!(grouped_row.left(), flat_row.left());
         assert_eq!(grouped_row.size.width, flat_row.size.width);
-        assert_eq!(grouped_project.left() - flat_project.left(), px(12.));
-        assert_eq!(grouped_scratch.left() - flat_scratch.left(), px(12.));
+        assert_eq!(
+            grouped_project.left() - flat_project.left(),
+            px(row_metrics::GROUP_INDENT)
+        );
+        assert_eq!(
+            grouped_scratch.left() - flat_scratch.left(),
+            px(row_metrics::GROUP_INDENT)
+        );
     }
 
     #[gpui::test]
