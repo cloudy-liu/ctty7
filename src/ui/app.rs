@@ -1435,6 +1435,7 @@ impl Tty7App {
             // Ctrl+Tab panel would hang waiting for a commit that cannot come.
             this.switcher_release_hold(cx);
             if window.is_window_active() {
+                crate::ui::tray::acknowledge_background_attention(cx);
                 WorkspaceStore::focus(cx, this.workspace);
                 this.refresh_git_status_all(cx);
             }
@@ -1967,7 +1968,6 @@ impl Tty7App {
                     leaf_id: leaf.entity_id().as_u64(),
                     agent,
                     status,
-                    unread: view.agent_result_unread(),
                     detail,
                 });
             }
