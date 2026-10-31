@@ -123,6 +123,12 @@ pub(crate) struct PaneChrome {
     /// The pane being dragged, drawn faded where it came from.
     pub lifted: Option<gpui::EntityId>,
     pub drag: crate::ui::pane_drag::PaneDragState,
+    /// Draw a recognized agent pane's icon and name above its terminal
+    /// (`Config::show_agent_pane_titles`).
+    pub agent_titles: bool,
+    /// The pane filling the tab alone, whose toolbar offers restore where
+    /// zoom was.
+    pub zoomed: Option<gpui::EntityId>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -938,6 +944,14 @@ impl Pane<PaneSlot> {
                 let focused = v.contains_focused(window, cx);
                 let lifted = chrome.lifted == Some(id);
                 let grip = chrome.rearrangeable && chrome.lifted.is_none();
+                let agent = match v {
+                    PaneSlot::Ready(t) => t.read(cx).agent(),
+                    PaneSlot::Connecting(_) => None,
+                };
+                let agent_chrome = crate::ui::pane_title::chrome_for(agent, chrome.agent_titles);
+                // The toolbar is revealed by the same band as the grip, so a
+                // pane with either needs the band.
+                let band = grip || agent_chrome.toolbar;
                 // The terminal renders itself at this opacity by blending its
                 // colours toward the window background (`TerminalView::dim`,
                 // whose field docs explain why that beats an element-opacity
@@ -951,6 +965,7 @@ impl Pane<PaneSlot> {
                     1.0
                 };
                 div()
+                    .debug_selector(move || format!("pane-leaf-{}", id.as_u64()))
                     .size_full()
                     .relative()
                     .overflow_hidden()
@@ -960,20 +975,42 @@ impl Pane<PaneSlot> {
                     .map(|d| match v {
                         PaneSlot::Ready(t) => {
                             t.update(cx, |v, _cx| v.set_dim(dim));
-                            d.child(t.clone())
+                            match agent.filter(|_| agent_chrome.title) {
+                                // A column: the row takes its height and the
+                                // terminal measures itself against the rest.
+                                Some(agent) => d
+                                    .flex()
+                                    .flex_col()
+                                    .child(crate::ui::pane_title::title_row(id, agent, dim, cx))
+                                    .child(div().flex_1().min_h(px(0.)).w_full().child(t.clone())),
+                                None => d.child(t.clone()),
+                            }
                         }
                         PaneSlot::Connecting(p) => {
                             d.when(dim < 1., |d| d.opacity(dim)).child(p.clone())
                         }
                     })
-                    .when(grip, |d| {
+                    .when(agent_chrome.toolbar, |d| {
+                        d.child(crate::ui::pane_title::toolbar(
+                            v,
+                            chrome.zoomed == Some(id),
+                            &chrome.hovered,
+                            cx,
+                        ))
+                    })
+                    // The band comes after the toolbar so it sits above it: a
+                    // hitbox that blocks (the tiles) would otherwise take the
+                    // pointer away from the band that revealed them.
+                    .when(band, |d| {
                         d.child(crate::ui::pane_drag::reveal_band(id, &chrome.hovered))
-                            .child(crate::ui::pane_drag::handle(
-                                id,
-                                chrome.hovered.get() == Some(id),
-                                &chrome.drag,
-                                cx,
-                            ))
+                    })
+                    .when(grip, |d| {
+                        d.child(crate::ui::pane_drag::handle(
+                            id,
+                            chrome.hovered.get() == Some(id),
+                            &chrome.drag,
+                            cx,
+                        ))
                     })
                     .into_any_element()
             }

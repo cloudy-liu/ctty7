@@ -645,6 +645,10 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSidebarAgentStatusTextDesc => {
             "タブの2行目に IDLE、RUN、INPUT、DONE の状態タグを表示します。オフにするとアバターのバッジのみで表示されます。"
         }
+        L10nKey::SettingsShowAgentPaneTitles => "エージェントペインのタイトルを表示",
+        L10nKey::SettingsShowAgentPaneTitlesDesc => {
+            "エージェントのアイコンと名前をターミナルの上の行に表示します。通常のターミナルには表示されず、エージェントペインのホバー操作はどちらでも使えます。"
+        }
         L10nKey::DocumentDock => "ターミナルの隣にドック",
         L10nKey::DocumentFill => "ウィンドウ全体",
         L10nKey::DocumentFillTooltip => "ワークスペース全体に表示",
@@ -870,6 +874,9 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsSearchSidebarAgentStatusTextKeywords => {
             "サイドバーにエージェント状態テキストを表示 エージェント 状態 テキスト idle working バッジ サイドバー agent status text words badge sidebar"
+        }
+        L10nKey::SettingsSearchShowAgentPaneTitlesKeywords => {
+            "エージェント ペイン タイトル アイコン 名前 agent pane title icon name header row split zoom close hover"
         }
         L10nKey::SettingsSearchDimInactivePanesKeywords => {
             "非アクティブ ペイン 暗く フォーカス 分割 fade unfocused inactive split pane focus opacity highlight active dimming"
@@ -1710,6 +1717,11 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::AppSshReconnectFailed => "SSH 再接続に失敗しました: {error}",
         L10nKey::AppSplitPaneFailed => "ペインを分割できませんでした: {error}",
         L10nKey::PaneDragHandleTooltip => "ドラッグしてこのペインを移動",
+        L10nKey::PaneToolbarSplitRight => "右に分割",
+        L10nKey::PaneToolbarSplitDown => "下に分割",
+        L10nKey::PaneToolbarZoom => "ペインを拡大",
+        L10nKey::PaneToolbarRestore => "ペインを元に戻す",
+        L10nKey::PaneToolbarClose => "ペインを閉じる",
         L10nKey::AppWorktreeRemoved => "ワークツリー「{branch}」を削除しました",
         L10nKey::AppWorktreeRemoveFailed => "ワークツリーの削除に失敗しました: {error}",
         L10nKey::AppForkStillConnecting => "フォークできませんでした: ペインはまだ接続中です",

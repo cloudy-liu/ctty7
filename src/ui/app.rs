@@ -3230,6 +3230,10 @@ impl Tty7App {
         self.update_config(cx, |cfg| cfg.sidebar_agent_status_text = on);
     }
 
+    pub(crate) fn set_show_agent_pane_titles(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.update_config(cx, |cfg| cfg.show_agent_pane_titles = on);
+    }
+
     pub(crate) fn toggle_tab_sidebar(&mut self, cx: &mut Context<Self>) {
         let next = match cx.global::<Config>().tab_bar_position {
             TabBarPosition::Top => TabBarPosition::Left,
@@ -7688,11 +7692,25 @@ impl Render for Tty7App {
                         .any(|l| l.entity_id() == leaf.entity_id())
                 });
                 match maximized {
-                    Some(leaf) => div()
-                        .size_full()
-                        .overflow_hidden()
-                        .child(leaf.clone())
-                        .into_any_element(),
+                    Some(leaf) => {
+                        // Alone in the tab, but still an agent pane: the same
+                        // title and toolbar, with restore where zoom was.
+                        let chrome = crate::ui::pane::PaneChrome {
+                            dim_inactive: false,
+                            rearrangeable: false,
+                            hovered: self.pane_hover.clone(),
+                            lifted: None,
+                            drag: self.pane_drag.clone(),
+                            agent_titles: cx.global::<Config>().show_agent_pane_titles,
+                            zoomed: Some(leaf.entity_id()),
+                        };
+                        let leaf = crate::ui::pane::PaneSlot::Ready(leaf.clone());
+                        div()
+                            .size_full()
+                            .overflow_hidden()
+                            .child(crate::ui::pane::Pane::leaf(leaf).render(&chrome, window, cx))
+                            .into_any_element()
+                    }
                     None => {
                         let several = active_tab.pane.leaves().len() > 1;
                         let chrome = crate::ui::pane::PaneChrome {
@@ -7701,6 +7719,8 @@ impl Render for Tty7App {
                             hovered: self.pane_hover.clone(),
                             lifted: crate::ui::pane_drag::lifted(&self.pane_drag),
                             drag: self.pane_drag.clone(),
+                            agent_titles: cx.global::<Config>().show_agent_pane_titles,
+                            zoomed: None,
                         };
                         active_tab.pane.render(&chrome, window, cx)
                     }

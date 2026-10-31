@@ -28,6 +28,7 @@ pub mod markdown_preview;
 pub mod palette;
 pub mod pane;
 pub mod pane_drag;
+pub mod pane_title;
 pub mod path_display;
 pub mod pending_pane;
 pub mod perf;

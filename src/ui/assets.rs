@@ -55,6 +55,8 @@ fn agent_icon(path: &str) -> Option<&'static [u8]> {
         "icons/diff-expand-down.svg" => include_bytes!("../../assets/icons/diff-expand-down.svg"),
         "icons/panel-left.svg" => include_bytes!("../../assets/icons/panel-left.svg"),
         "icons/panel-right.svg" => include_bytes!("../../assets/icons/panel-right.svg"),
+        "icons/split-right.svg" => include_bytes!("../../assets/icons/split-right.svg"),
+        "icons/split-down.svg" => include_bytes!("../../assets/icons/split-down.svg"),
         "icons/plus.svg" => include_bytes!("../../assets/icons/plus.svg"),
         "icons/ellipsis.svg" => include_bytes!("../../assets/icons/ellipsis.svg"),
         "icons/folder-closed.svg" => include_bytes!("../../assets/icons/folder-closed.svg"),
@@ -339,6 +341,20 @@ mod tests {
             Assets.load("stock/icons/check.svg").unwrap(),
             Assets.load("icons/check.svg").unwrap(),
         );
+    }
+
+    #[test]
+    fn pane_toolbar_split_icons_resolve_to_svg_artwork() {
+        for path in ["icons/split-right.svg", "icons/split-down.svg"] {
+            let bytes = Assets
+                .load(path)
+                .unwrap()
+                .expect("pane toolbar split icon must be served");
+            let doc = resvg::usvg::roxmltree::Document::parse(std::str::from_utf8(&bytes).unwrap())
+                .unwrap();
+            assert_eq!(doc.root_element().tag_name().name(), "svg");
+            assert!(doc.root_element().children().any(|node| node.is_element()));
+        }
     }
 
     #[test]
