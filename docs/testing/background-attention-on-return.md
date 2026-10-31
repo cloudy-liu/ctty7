@@ -57,26 +57,69 @@ toast channels are disabled in this regression.
 - `cargo fmt --all -- --check`, `git diff --check`, and the Host boundary check
   passed. Existing compiler warnings remain.
 - Independent Standards and Spec reviews against fork main `1063bc9b`
-  reported zero actionable findings on both axes. Native visual acceptance
-  remains unverified and requires a draft PR.
+  reported zero actionable findings on both axes.
 - The primary checkout and original `fix/background-attention-on-return`
   worktree were preserved. The follow-up lives in
   `fix/background-attention-return-v090` for independent review and delivery.
 
+## Native Windows acceptance on 2026-11-01
+
+The following are lossless crops of actual full-desktop PNG captures made with
+Windows Screenshot Tool through LCU. They show the running GPUI application
+and Explorer taskbar, not unit-test renders or repainted icons. Each saved
+crop was inspected; no mouse pointer is visible. The capture button moves the
+pointer outside both retained regions before capture.
+
+Both binaries were built with `cargo build --offline --locked --bin tty7-app
+--features markdown-visual-tests`, from baseline `1063bc9b` and corrected
+`9c7fb7ab`. Both use the same two-window `--agent-attention-visual` fixture,
+light theme, 1120 x 640 logical-pixel client, 175% display scale, Windows 11
+build 22000, and 2560 x 1600 desktop. Sound and toast channels are disabled;
+the tray preference is enabled. The binaries use the same separate Cargo
+development taskbar identity; the installed application is left running.
+
+Select Other terminal, minimize the fixture through its native title-bar
+button, and send `{"sequence":3,"reports":[[1,0,"done"]]}` while both fixture
+windows are inactive. Capture the taskbar. Restore the same fixture through
+native input, retaining Other terminal as the selected tab, then capture
+again. Returning never selects Agent A. Screenshot Tool briefly takes focus
+for capture; the activation observations below independently establish the
+actual return and subsequent departure.
+
+| Inspect | Before (`1063bc9b`) | After (`9c7fb7ab`) |
+| --- | --- | --- |
+| Background completion raises the dark circle and white dot in both builds. | ![Before: background taskbar badge](images/background-attention-return/before-background-taskbar.png) | ![After: background taskbar badge](images/background-attention-return/after-background-taskbar.png) |
+| Return to Other terminal: the old badge remains; the corrected badge clears. | ![Before: badge persists after return](images/background-attention-return/before-return-taskbar.png) | ![After: badge clears after return](images/background-attention-return/after-return-taskbar.png) |
+| Other terminal remains selected and Agent A retains its unread done mark. | ![Before: unrelated tab and unread result](images/background-attention-return/before-return-sidebar.png) | ![After: unrelated tab and unread result](images/background-attention-return/after-return-sidebar.png) |
+
+Taskbar crops retain the same physical rectangle `(1620, 1500, 100, 100)`;
+sidebar crops retain `(300, 310, 450, 450)`. No scaling, compositing, or pixel
+modification was applied. Agent B's working animation can have a different
+phase without changing the fixture state. Full desktop originals remain local;
+only the fixture's taskbar button and sidebar are included in the repository.
+
+The [five native observations](background-attention-on-return-results.ndjson)
+record the real activation, focused pane, unread result, and aggregate
+attention. Before and After both have `attention: true` in the background.
+On return to the unrelated tab, Before retains `attention: true`; After has
+`attention: false`, while both retain the completed pane's `unread: true`.
+After leaving again, the corrected attention remains false. A local observer
+recorded fixture state-file transitions without changing focus, Agent reports,
+or application state. This also avoids losing short native activation states
+when desktop input returns to the user's previous window.
+
+The earlier capture attempt was blocked by minimized-window activation and
+browser URL policy. This follow-up used only native fixture and Screenshot
+Tool surfaces, refreshed bindings before actions, and restored the minimized
+fixture through native input. These captures supersede that taskbar blocker.
+
 ## Known limitations
 
-Fresh native Before/After taskbar and tray captures are unverified. LCU reached
-the baseline fixture and minimized it; the fixture observed a background Done
-report with `attention: true`, `unread: true`, and both windows inactive.
-Restoring that minimized fixture failed because its bound surface lacked an
-activation operation. A subsequent attempt to select the background Chrome
-window stopped Computer Use for the turn because the current browser URL could
-not be determined with sufficient confidence to enforce policy. No further UI
-input was attempted. Historical screenshots in
-[Agent completion badge acceptance](agent-attention-badge.md) describe the old
-unread-based behavior and are not visual evidence for this follow-up.
-
-Any PR for this change must remain a draft until matched native screenshots
-resolve visual acceptance or the limitation is explicitly accepted. This
-follow-up does not replace the published v0.9.0 package or modify an installed
-application.
+The tray overflow icon and the shortcut-backed installed taskbar group were
+not visually captured in this follow-up. The captures verify the real Windows
+development taskbar button and pane state. Keep the PR in draft until the
+remaining visual claims have matched native captures or an explicitly accepted
+limitation. Native macOS/Linux interaction, Explorer restart, and installation
+of a final package remain unverified. The fixture sends deterministic Agent
+reports through production terminal streams; it does not run a live coding
+Agent, shell, or SSH connection.
