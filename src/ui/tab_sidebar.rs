@@ -1393,6 +1393,21 @@ impl Tty7App {
                     }))
                     .when(show_chevron, |header| header.child(chevron))
                     .children(folder)
+                    .when(section.key.is_none(), |header| {
+                        header.child(
+                            div()
+                                .flex_shrink_0()
+                                .size(px(if show_chevron { 13. } else { 16. }))
+                                .flex()
+                                .items_center()
+                                .justify_center()
+                                .text_color(chevron_color)
+                                .when(!folded_active, |d| {
+                                    d.group_hover(header_group.clone(), move |s| s.text_color(fg))
+                                })
+                                .child(Icon::new(IconName::Inbox).size(px(13.))),
+                        )
+                    })
                     .when(is_ssh_group, |b| {
                         // A quiet marker: a muted outline pill with no fill
                         // and no colour of its own. The row badge already says
