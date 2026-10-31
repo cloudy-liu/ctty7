@@ -941,6 +941,7 @@ impl Tty7App {
                                     .items_center()
                                     .justify_center()
                                     .size(px(Self::AVATAR_PX))
+                                    .debug_selector(|| "workspace-head-avatar".into())
                                     .rounded_full()
                                     .bg(cx.theme().secondary)
                                     .text_size(px(10.))

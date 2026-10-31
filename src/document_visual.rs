@@ -42,6 +42,12 @@ struct Options {
     #[serde(default)]
     dark: bool,
     #[serde(default)]
+    sidebar_group_arrows: Option<bool>,
+    #[serde(default)]
+    sidebar_group_folders: Option<bool>,
+    #[serde(default)]
+    sidebar_width: Option<f32>,
+    #[serde(default)]
     dock: bool,
     #[serde(default)]
     right_panel: bool,
@@ -167,6 +173,15 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     .insert(archive.clone(), "Playground".into());
                 config.sidebar_pinned_groups.push(root);
                 config.sidebar_collapsed_groups.insert(archive);
+            }
+            if let Some(arrows) = options.sidebar_group_arrows {
+                config.sidebar_group_arrows = arrows;
+            }
+            if let Some(folders) = options.sidebar_group_folders {
+                config.sidebar_group_folders = folders;
+            }
+            if let Some(width) = options.sidebar_width {
+                config.sidebar_width = width;
             }
             cx.set_global(config);
             if options.history {

@@ -34,6 +34,9 @@ const GRAB_HANDLE_W: f32 = 48.;
 
 const ROW_GAP: f32 = 2.;
 
+// Match workspace_head: 5px outer inset + 6px button padding + half its 20px avatar.
+const LEADING_ICON_CENTER: f32 = 21.;
+
 /// The row chrome the text budget has to be measured around. These are the
 /// numbers the layout below is built from, not a second guess at it — a row
 /// that elides against a budget wider than it really has falls back to CSS
@@ -57,6 +60,8 @@ mod row_metrics {
     pub(super) const META_GAP: f32 = 6.;
     /// The branch icon.
     pub(super) const BRANCH_ICON: f32 = 11.;
+    /// Tab title size in rem (13px on a 16px rem).
+    pub(super) const TITLE_REM: f32 = 0.8125;
     /// Status tags use smaller type than the metadata, at semibold weight.
     pub(super) const STATUS_REM: f32 = 0.6875;
     /// Horizontal padding on each side of the status tag.
@@ -240,8 +245,8 @@ impl Tty7App {
 
         let pointer = window.mouse_position();
         // The row text is measured against real glyphs before it is elided:
-        // `text_sm` is 0.875rem and `text_xs` 0.75rem, resolved here so the
-        // measurement and the render use the same sizes and family.
+        // tab title uses `TITLE_REM` (0.8125rem / 13px) and `text_xs` 0.75rem,
+        // resolved here so the measurement and the render use the same sizes and family.
         let font = gpui::Font {
             family: cx.theme().font_family.clone(),
             features: Default::default(),
@@ -444,7 +449,7 @@ impl Tty7App {
                 // branch never wrap or overflow into CSS truncation.
                 let label_avail =
                     (row_metrics::text_budget(width) - content_indent - badge_extra).max(48.);
-                let title_size = 0.875 * rem;
+                let title_size = row_metrics::TITLE_REM * rem;
                 let meta_size = 0.75 * rem;
                 let title_font = if is_active { &title_font_active } else { &font };
                 // An agent row opens its second line with a status tag, in the
@@ -786,7 +791,7 @@ impl Tty7App {
                                             c.child(
                                                 div()
                                                     .max_w(px(420.))
-                                                    .text_sm()
+                                                    .text_size(px(title_size))
                                                     .font_weight(FontWeight::MEDIUM)
                                                     .child(title),
                                             )
@@ -859,7 +864,7 @@ impl Tty7App {
                             div()
                                 .w_full()
                                 .truncate()
-                                .text_sm()
+                                .text_size(px(title_size))
                                 .when(is_active, |d| d.font_weight(FontWeight::MEDIUM))
                                 .child(shown_title),
                         )
@@ -1177,7 +1182,7 @@ impl Tty7App {
                     .h(px(28.))
                     .items_center()
                     .gap_1()
-                    .pl_1()
+                    .pl(px(LEADING_ICON_CENTER - row_metrics::LIST_PAD - 8.))
                     .pr_1p5()
                     .rounded_md()
                     .cursor_pointer()
@@ -1240,6 +1245,7 @@ impl Tty7App {
                     cfg.sidebar_group_folders,
                 );
                 let chevron = div()
+                    .debug_selector(move || format!("sidebar-group-chevron-{group_ix}"))
                     .flex_shrink_0()
                     .size(px(16.))
                     .flex()
@@ -1252,6 +1258,7 @@ impl Tty7App {
                     .child(Icon::empty().path(chevron_path).size(px(12.)));
                 let folder = folder_path.map(|path| {
                     div()
+                        .debug_selector(move || format!("sidebar-group-folder-{group_ix}"))
                         .flex_shrink_0()
                         .size(px(if show_arrow { 13. } else { 16. }))
                         .flex()
@@ -1674,7 +1681,7 @@ impl Tty7App {
             .pt(px(4.))
             .child(self.workspace_head(cx));
 
-        let chip_inset = crate::ui::app::CONTENT_INSET - 7. + 4.;
+        let chip_inset = LEADING_ICON_CENTER - Self::AVATAR_PX / 2.;
         let toggle_all_btn = (!headed_keys.is_empty()).then(|| {
             let toggle_headed = headed_keys.clone();
             let icon_path = if all_collapsed {
@@ -1712,6 +1719,7 @@ impl Tty7App {
                     .items_center()
                     .justify_center()
                     .size(px(Self::AVATAR_PX))
+                    .debug_selector(|| "sidebar-search-icon".into())
                     .child(
                         Icon::new(IconName::Search)
                             .size(px(14.))
@@ -2589,6 +2597,61 @@ mod tests {
         assert!(header_shows_chevron(false, true, true));
         assert!(header_shows_chevron(false, false, true));
         assert!(!header_shows_chevron(false, false, false));
+    }
+
+    #[gpui::test]
+    fn leading_icons_share_the_workspace_axis(cx: &mut gpui::TestAppContext) {
+        use crate::ui::app::{Tab, test_window::harness};
+        use crate::ui::pane::Pane;
+
+        let (app, mut vcx) = harness(cx);
+        vcx.simulate_resize(size(px(800.), px(600.)));
+        app.update(&mut vcx, |app, cx| {
+            cx.global_mut::<Config>().sidebar_grouping = SidebarGrouping::Repo;
+            let tab = Tab::new(Pane::Empty);
+            *tab.sidebar_group.borrow_mut() = Some(p("/w/project"));
+            app.tabs = vec![tab, Tab::new(Pane::Empty)];
+            app.active = 0;
+            cx.notify();
+        });
+
+        for (arrows, folders) in [(true, false), (false, true), (true, true)] {
+            app.update(&mut vcx, |_, cx| {
+                let cfg = cx.global_mut::<Config>();
+                cfg.sidebar_group_arrows = arrows;
+                cfg.sidebar_group_folders = folders;
+                cx.notify();
+            });
+            vcx.run_until_parked();
+            let axis = vcx
+                .debug_bounds("workspace-head-avatar")
+                .unwrap()
+                .center()
+                .x;
+            let search = vcx.debug_bounds("sidebar-search-icon").unwrap().center().x;
+            assert_eq!(
+                search, axis,
+                "workspace/search: arrows={arrows}, folders={folders}"
+            );
+            let first = if arrows {
+                "sidebar-group-chevron-0"
+            } else {
+                "sidebar-group-folder-0"
+            };
+            assert_eq!(
+                vcx.debug_bounds(first).unwrap().center().x,
+                axis,
+                "group: arrows={arrows}, folders={folders}"
+            );
+            assert_eq!(
+                vcx.debug_bounds("sidebar-group-chevron-1")
+                    .unwrap()
+                    .center()
+                    .x,
+                axis,
+                "Scratch: arrows={arrows}, folders={folders}"
+            );
+        }
     }
 
     #[gpui::test]
