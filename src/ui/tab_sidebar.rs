@@ -34,6 +34,9 @@ const GRAB_HANDLE_W: f32 = 48.;
 
 const ROW_GAP: f32 = 2.;
 
+// Match workspace_head: 5px outer inset + 6px button padding + half its 20px avatar.
+const LEADING_ICON_CENTER: f32 = 21.;
+
 /// The row chrome the text budget has to be measured around. These are the
 /// numbers the layout below is built from, not a second guess at it — a row
 /// that elides against a budget wider than it really has falls back to CSS
@@ -1179,7 +1182,7 @@ impl Tty7App {
                     .h(px(28.))
                     .items_center()
                     .gap_1()
-                    .pl_1()
+                    .pl(px(LEADING_ICON_CENTER - row_metrics::LIST_PAD - 8.))
                     .pr_1p5()
                     .rounded_md()
                     .cursor_pointer()
@@ -1242,6 +1245,7 @@ impl Tty7App {
                     cfg.sidebar_group_folders,
                 );
                 let chevron = div()
+                    .debug_selector(move || format!("sidebar-group-chevron-{group_ix}"))
                     .flex_shrink_0()
                     .size(px(16.))
                     .flex()
@@ -1254,6 +1258,7 @@ impl Tty7App {
                     .child(Icon::empty().path(chevron_path).size(px(12.)));
                 let folder = folder_path.map(|path| {
                     div()
+                        .debug_selector(move || format!("sidebar-group-folder-{group_ix}"))
                         .flex_shrink_0()
                         .size(px(if show_arrow { 13. } else { 16. }))
                         .flex()
@@ -1676,7 +1681,7 @@ impl Tty7App {
             .pt(px(4.))
             .child(self.workspace_head(cx));
 
-        let chip_inset = crate::ui::app::CONTENT_INSET - 7. + 4.;
+        let chip_inset = LEADING_ICON_CENTER - Self::AVATAR_PX / 2.;
         let toggle_all_btn = (!headed_keys.is_empty()).then(|| {
             let toggle_headed = headed_keys.clone();
             let icon_path = if all_collapsed {
@@ -1714,6 +1719,7 @@ impl Tty7App {
                     .items_center()
                     .justify_center()
                     .size(px(Self::AVATAR_PX))
+                    .debug_selector(|| "sidebar-search-icon".into())
                     .child(
                         Icon::new(IconName::Search)
                             .size(px(14.))
@@ -2591,6 +2597,61 @@ mod tests {
         assert!(header_shows_chevron(false, true, true));
         assert!(header_shows_chevron(false, false, true));
         assert!(!header_shows_chevron(false, false, false));
+    }
+
+    #[gpui::test]
+    fn leading_icons_share_the_workspace_axis(cx: &mut gpui::TestAppContext) {
+        use crate::ui::app::{Tab, test_window::harness};
+        use crate::ui::pane::Pane;
+
+        let (app, mut vcx) = harness(cx);
+        vcx.simulate_resize(size(px(800.), px(600.)));
+        app.update(&mut vcx, |app, cx| {
+            cx.global_mut::<Config>().sidebar_grouping = SidebarGrouping::Repo;
+            let tab = Tab::new(Pane::Empty);
+            *tab.sidebar_group.borrow_mut() = Some(p("/w/project"));
+            app.tabs = vec![tab, Tab::new(Pane::Empty)];
+            app.active = 0;
+            cx.notify();
+        });
+
+        for (arrows, folders) in [(true, false), (false, true), (true, true)] {
+            app.update(&mut vcx, |_, cx| {
+                let cfg = cx.global_mut::<Config>();
+                cfg.sidebar_group_arrows = arrows;
+                cfg.sidebar_group_folders = folders;
+                cx.notify();
+            });
+            vcx.run_until_parked();
+            let axis = vcx
+                .debug_bounds("workspace-head-avatar")
+                .unwrap()
+                .center()
+                .x;
+            let search = vcx.debug_bounds("sidebar-search-icon").unwrap().center().x;
+            assert_eq!(
+                search, axis,
+                "workspace/search: arrows={arrows}, folders={folders}"
+            );
+            let first = if arrows {
+                "sidebar-group-chevron-0"
+            } else {
+                "sidebar-group-folder-0"
+            };
+            assert_eq!(
+                vcx.debug_bounds(first).unwrap().center().x,
+                axis,
+                "group: arrows={arrows}, folders={folders}"
+            );
+            assert_eq!(
+                vcx.debug_bounds("sidebar-group-chevron-1")
+                    .unwrap()
+                    .center()
+                    .x,
+                axis,
+                "Scratch: arrows={arrows}, folders={folders}"
+            );
+        }
     }
 
     #[gpui::test]
