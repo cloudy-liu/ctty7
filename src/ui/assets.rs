@@ -84,8 +84,6 @@ fn agent_icon(path: &str) -> Option<&'static [u8]> {
         "icons/copy.svg" => include_bytes!("../../assets/icons/copy.svg"),
         "icons/diagram-expand.svg" => include_bytes!("../../assets/icons/diagram-expand.svg"),
         "icons/diagram-reset.svg" => include_bytes!("../../assets/icons/diagram-reset.svg"),
-        "icons/diagram-zoom-in.svg" => include_bytes!("../../assets/icons/diagram-zoom-in.svg"),
-        "icons/diagram-zoom-out.svg" => include_bytes!("../../assets/icons/diagram-zoom-out.svg"),
         "icons/folder.svg" => include_bytes!("../../assets/icons/folder.svg"),
         "icons/file.svg" => include_bytes!("../../assets/icons/file.svg"),
         "icons/circle-info.svg" => include_bytes!("../../assets/icons/circle-info.svg"),
@@ -343,12 +341,7 @@ mod tests {
 
     #[test]
     fn mermaid_control_icons_resolve_to_svg_artwork() {
-        for path in [
-            "icons/diagram-expand.svg",
-            "icons/diagram-reset.svg",
-            "icons/diagram-zoom-in.svg",
-            "icons/diagram-zoom-out.svg",
-        ] {
+        for path in ["icons/diagram-expand.svg", "icons/diagram-reset.svg"] {
             let bytes = Assets
                 .load(path)
                 .unwrap()
