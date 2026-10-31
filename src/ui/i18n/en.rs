@@ -635,6 +635,10 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsSidebarAgentStatusTextDesc => {
             "Display IDLE, RUN, INPUT, and DONE tags in tab rows. Off shows status only through the avatar badge."
         }
+        L10nKey::SettingsShowAgentPaneTitles => "Show agent pane titles",
+        L10nKey::SettingsShowAgentPaneTitlesDesc => {
+            "Draw the agent's icon and name in a row above its terminal. Ordinary terminals never get one, and the hover actions on agent panes stay available either way."
+        }
         L10nKey::DocumentDock => "Dock beside terminal",
         L10nKey::DocumentFill => "Fill window",
         L10nKey::DocumentFillTooltip => "Fill workspace",
@@ -842,6 +846,9 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         }
         L10nKey::SettingsSearchSidebarAgentStatusTextKeywords => {
             "agent status text words idle working badge sidebar"
+        }
+        L10nKey::SettingsSearchShowAgentPaneTitlesKeywords => {
+            "agent pane title icon name header row split zoom close hover"
         }
         L10nKey::SettingsSearchDimInactivePanesKeywords => {
             "fade unfocused inactive split pane focus opacity highlight active dimming"
@@ -1648,6 +1655,11 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::AppSshReconnectFailed => "SSH reconnect failed: {error}",
         L10nKey::AppSplitPaneFailed => "Could not split the pane: {error}",
         L10nKey::PaneDragHandleTooltip => "Drag to move this pane",
+        L10nKey::PaneToolbarSplitRight => "Split right",
+        L10nKey::PaneToolbarSplitDown => "Split down",
+        L10nKey::PaneToolbarZoom => "Zoom pane",
+        L10nKey::PaneToolbarRestore => "Restore pane",
+        L10nKey::PaneToolbarClose => "Close pane",
         L10nKey::AppWorktreeRemoved => "Removed worktree \"{branch}\"",
         L10nKey::AppWorktreeRemoveFailed => "Worktree removal failed: {error}",
         L10nKey::AppForkStillConnecting => "Could not fork: the pane is still connecting",

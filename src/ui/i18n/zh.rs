@@ -570,6 +570,10 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSidebarAgentStatusTextDesc => {
             "在侧栏标签页第二行显示 IDLE、RUN、INPUT、DONE 状态标签。关闭时仅通过头像角标指示状态。"
         }
+        L10nKey::SettingsShowAgentPaneTitles => "显示 Agent 窗格标题",
+        L10nKey::SettingsShowAgentPaneTitlesDesc => {
+            "在 Agent 窗格的终端上方显示一行图标和名称。普通终端不受影响；无论是否开启，Agent 窗格的悬浮操作都可用。"
+        }
         L10nKey::DocumentDock => "停靠在终端旁",
         L10nKey::DocumentFill => "铺满窗口",
         L10nKey::DocumentFillTooltip => "铺满主工作区",
@@ -777,6 +781,9 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsSearchSidebarAgentStatusTextKeywords => {
             "在侧栏显示 Agent 状态文本 状态 文本 文字 agent status text words idle working badge sidebar"
+        }
+        L10nKey::SettingsSearchShowAgentPaneTitlesKeywords => {
+            "显示 Agent 窗格标题 窗格 标题 图标 名称 agent pane title icon name header row split zoom close hover"
         }
         L10nKey::SettingsSearchDimInactivePanesKeywords => {
             "调暗 非活动窗格 淡化 未聚焦 分屏 高亮 active dimming pane focus"
@@ -1563,6 +1570,11 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::AppSshReconnectFailed => "SSH 重新连接失败：{error}",
         L10nKey::AppSplitPaneFailed => "无法拆分窗格：{error}",
         L10nKey::PaneDragHandleTooltip => "拖动可把这个窗格挪到别处",
+        L10nKey::PaneToolbarSplitRight => "向右拆分",
+        L10nKey::PaneToolbarSplitDown => "向下拆分",
+        L10nKey::PaneToolbarZoom => "放大窗格",
+        L10nKey::PaneToolbarRestore => "还原窗格",
+        L10nKey::PaneToolbarClose => "关闭窗格",
         L10nKey::AppWorktreeRemoved => "已删除 worktree“{branch}”",
         L10nKey::AppWorktreeRemoveFailed => "删除 worktree 失败：{error}",
         L10nKey::AppForkStillConnecting => "无法 fork：窗格仍在连接中",
