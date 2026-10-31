@@ -57,6 +57,8 @@ mod row_metrics {
     pub(super) const META_GAP: f32 = 6.;
     /// The branch icon.
     pub(super) const BRANCH_ICON: f32 = 11.;
+    /// Tab title size in rem (13px on a 16px rem).
+    pub(super) const TITLE_REM: f32 = 0.8125;
     /// Status tags use smaller type than the metadata, at semibold weight.
     pub(super) const STATUS_REM: f32 = 0.6875;
     /// Horizontal padding on each side of the status tag.
@@ -240,8 +242,8 @@ impl Tty7App {
 
         let pointer = window.mouse_position();
         // The row text is measured against real glyphs before it is elided:
-        // `text_sm` is 0.875rem and `text_xs` 0.75rem, resolved here so the
-        // measurement and the render use the same sizes and family.
+        // tab title uses `TITLE_REM` (0.8125rem / 13px) and `text_xs` 0.75rem,
+        // resolved here so the measurement and the render use the same sizes and family.
         let font = gpui::Font {
             family: cx.theme().font_family.clone(),
             features: Default::default(),
@@ -444,7 +446,7 @@ impl Tty7App {
                 // branch never wrap or overflow into CSS truncation.
                 let label_avail =
                     (row_metrics::text_budget(width) - content_indent - badge_extra).max(48.);
-                let title_size = 0.875 * rem;
+                let title_size = row_metrics::TITLE_REM * rem;
                 let meta_size = 0.75 * rem;
                 let title_font = if is_active { &title_font_active } else { &font };
                 // An agent row opens its second line with a status tag, in the
@@ -786,7 +788,7 @@ impl Tty7App {
                                             c.child(
                                                 div()
                                                     .max_w(px(420.))
-                                                    .text_sm()
+                                                    .text_size(px(title_size))
                                                     .font_weight(FontWeight::MEDIUM)
                                                     .child(title),
                                             )
@@ -859,7 +861,7 @@ impl Tty7App {
                             div()
                                 .w_full()
                                 .truncate()
-                                .text_sm()
+                                .text_size(px(title_size))
                                 .when(is_active, |d| d.font_weight(FontWeight::MEDIUM))
                                 .child(shown_title),
                         )
