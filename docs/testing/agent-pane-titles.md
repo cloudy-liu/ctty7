@@ -81,6 +81,26 @@ off.
 ![Before: default](images/agent-pane-titles/before-default-dark.png)
 ![After: default](images/agent-pane-titles/after-default-dark.png)
 
+## LCU captures
+
+The three pairs below were captured again through the LCU native-app surface
+(`cua.getApp` on the fixture window, then `getScreenshot`) to satisfy the
+repository's capture-tool requirement: same binaries, fixture options and
+posted pointer and wheel messages as above, with the real pointer parked at
+the screen's top-left corner outside the window before each capture, and none
+shows it. LCU returns the window's on-screen region as a JPEG at logical
+resolution, so the settings pair shows the part of the clamped 1400px window
+that fits on screen; the PNG set above remains the full-resolution record.
+Inspect the same things: tiles at the hovered pane's top-right, the rows on
+the three agent panes and not on PowerShell, and the new switch after the
+sidebar status row.
+
+| LCU Before | LCU After |
+| --- | --- |
+| ![pointer on Claude Code, titles off: before](images/agent-pane-titles/before-hover-dark-lcu.jpg) | ![pointer on Claude Code, titles off: after](images/agent-pane-titles/after-hover-dark-lcu.jpg) |
+| ![pointer on Claude Code, titles on: before](images/agent-pane-titles/before-titles-hover-dark-lcu.jpg) | ![pointer on Claude Code, titles on: after](images/agent-pane-titles/after-titles-hover-dark-lcu.jpg) |
+| ![Window & Tabs, Tabs block: before](images/agent-pane-titles/before-settings-light-lcu.jpg) | ![Window & Tabs, Tabs block: after](images/agent-pane-titles/after-settings-light-lcu.jpg) |
+
 ## Automated checks
 
 On this Windows machine: the config round trip (`show_agent_pane_titles`
