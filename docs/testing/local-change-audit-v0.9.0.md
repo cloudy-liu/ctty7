@@ -3,6 +3,24 @@
 Checked on 2026-10-29 against the latest published release v0.8.3, the complete
 candidate range, registered worktrees, and all eight retained stashes.
 
+## 2026-10-31 preparation update
+
+The published baseline was still v0.8.3. Fork main had gained sidebar group
+icons (#227), the deleted-document close fix (#228), and grouped-row indentation
+(#229) after the initial release preparation. SSH host groups (#230) and the
+Scratch Inbox icon (#233) are dependencies of the updated release notes and
+must be merged and verified before the release is tagged.
+
+The primary checkout's untracked `docs/prototypes/` and `docs/research/` remain
+outside the release. The separate settings-surface and background-attention
+branches contain independent work and are preserved. The integration worktree
+`D:/gh-prj/ctty7-release-0.9.0` still has uncommitted documentation changes;
+they were not cleared during this audit. All eight stash hashes below were
+rechecked and remain unchanged. Temporary fixture worktrees are verification
+material, not additional product scope.
+
+## Initial preparation audit
+
 | Preserved source | Finding and disposition |
 | --- | --- |
 | Native SSH Git at `70bd558b` | Included through cloudy-liu/ctty7#224: pane-owned read-only transport, status/diff routing, bounded refresh, lifetime cleanup, and native captures. Integration with SSH restoration also registers a Git host when reattaching a pane. |

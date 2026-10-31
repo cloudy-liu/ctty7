@@ -1,15 +1,18 @@
 # Project status
 
-Checked on 2026-10-29 against GitHub and the release candidate checkout.
+Checked on 2026-10-31 against GitHub and the release candidate checkout.
 This is a dated snapshot; query GitHub again before merging or preparing a release.
 
-## Open work
+## Release scope and open work
 
 The latest published release at preparation time is v0.8.3, published on
 2026-10-27. The v0.9.0 source adds native SSH Git status and diffs (#224),
 SSH connection and exact supported-agent restoration (#217), commit-detail
 layout refinements (#218), the working-agent comet (#219), and Diff backgrounds
-that follow the application theme (#225). See its
+that follow the application theme (#225). The candidate also includes sidebar
+group icon settings (#227), grouped-row indentation (#229), and the deleted-file
+preview close fix (#228). SSH host groups (#230) and the Scratch Inbox icon
+(#233) are release dependencies; merge and verify them before tagging. See the
 [English notes](../releases/v0.9.0.md) and
 [preserved-change audit](../testing/local-change-audit-v0.9.0.md).
 
@@ -88,7 +91,7 @@ these are verification gaps, not additional open GitHub tickets.
 
 - Published tag `v0.8.3` remains available with twelve program assets and `checksums.txt`; its [English notes](../releases/v0.8.3.md) and [local-change audit](../testing/local-change-audit-v0.8.3.md) record accepted behavior and verification limits.
 
-- Published tag `v0.8.2` is the release-preparation baseline. Its [English notes](../releases/v0.8.2.md) and [local-change audit](../testing/local-change-audit-v0.8.2.md) record the included changes and verification limits.
+- Published tag `v0.8.2` remains available. Its [English notes](../releases/v0.8.2.md) and [local-change audit](../testing/local-change-audit-v0.8.2.md) record the included changes and verification limits.
 
 - Published tag `v0.8.1` remains available. Its [English notes](../releases/v0.8.1.md) and [local-change audit](../testing/local-change-audit-v0.8.1.md) record the included changes and verification limits.
 
