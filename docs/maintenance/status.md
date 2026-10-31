@@ -91,7 +91,7 @@ these are verification gaps, not additional open GitHub tickets.
 
 - Published tag `v0.8.3` remains available with twelve program assets and `checksums.txt`; its [English notes](../releases/v0.8.3.md) and [local-change audit](../testing/local-change-audit-v0.8.3.md) record accepted behavior and verification limits.
 
-- Published tag `v0.8.2` is the release-preparation baseline. Its [English notes](../releases/v0.8.2.md) and [local-change audit](../testing/local-change-audit-v0.8.2.md) record the included changes and verification limits.
+- Published tag `v0.8.2` remains available. Its [English notes](../releases/v0.8.2.md) and [local-change audit](../testing/local-change-audit-v0.8.2.md) record the included changes and verification limits.
 
 - Published tag `v0.8.1` remains available. Its [English notes](../releases/v0.8.1.md) and [local-change audit](../testing/local-change-audit-v0.8.1.md) record the included changes and verification limits.
 
