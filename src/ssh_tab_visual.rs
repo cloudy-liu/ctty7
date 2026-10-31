@@ -73,7 +73,13 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             config.install_cli_on_path = false;
             config.cursor_blink = false;
             config.sidebar_width = 260.;
-            config.sidebar_grouping = SidebarGrouping::None;
+            // The sidebar captures exist to show grouping behaviour: local
+            // sessions land in Scratch, in-pane SSH hops split out per host.
+            config.sidebar_grouping = if options.sidebar {
+                SidebarGrouping::Repo
+            } else {
+                SidebarGrouping::None
+            };
             config.tab_bar_position = if options.sidebar {
                 TabBarPosition::Left
             } else {
