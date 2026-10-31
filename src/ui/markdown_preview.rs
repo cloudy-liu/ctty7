@@ -3097,11 +3097,20 @@ mod tests {
         assert_eq!(reset.top(), expand.top());
         assert_eq!(reset.top(), copy.top());
         assert!(reset.right() <= expand.left() && expand.right() <= copy.left());
-        assert!(reset.top() >= viewport.top() && copy.right() <= viewport.right());
+        assert!(
+            reset.bottom() <= viewport.top() && copy.right() <= viewport.right(),
+            "the toolbar must sit above the diagram, not over it"
+        );
         let fit = vcx.debug_bounds("diagram-content").unwrap();
         assert!(
             (fit.size.width - (viewport.size.width - px(32.))).abs() <= px(1.),
             "wide diagrams must reclaim the old navigation reservation"
+        );
+        assert!(
+            !vcx.debug_bounds("diagram-toolbar")
+                .unwrap()
+                .intersects(&fit),
+            "the toolbar must not overlap the diagram"
         );
         let drag_start = viewport.center();
         let scroll_before_zoom = preview.read_with(&vcx, |preview, _| preview.scroll.offset());

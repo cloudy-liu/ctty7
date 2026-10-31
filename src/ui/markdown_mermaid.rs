@@ -419,21 +419,27 @@ impl Render for DiagramViewer {
             available
         };
         self.image_width = image_width;
+        // The toolbar and the gesture hint share one row above the diagram so
+        // that nothing is drawn over the image. Narrow viewers shrink the
+        // buttons so the three of them still fit beside the hint.
+        let controls_scale = scale.min(width / px(144.));
+        let toolbar_height = px(40. * controls_scale);
+        let compact_size = (controls_scale < scale).then_some(px(32. * controls_scale));
         self.height = if self.expanded {
             // The dialog starts 10% down the window and adds 32px padding,
-            // two border pixels, a one-rem title and a half-rem gap. Keep
-            // another 16px below it so the scrollbar and controls stay visible.
-            let max_height =
-                (window.viewport_size().height * 0.9 - px(50.) - window.rem_size() * 1.5)
-                    .min(window.viewport_size().height * 0.75)
-                    .max(px(1.));
+            // two border pixels, a one-rem title and a half-rem gap, then the
+            // toolbar row. Keep another 16px below it so the scrollbar stays
+            // visible.
+            let max_height = (window.viewport_size().height * 0.9
+                - px(50.)
+                - window.rem_size() * 1.5
+                - toolbar_height)
+                .min(window.viewport_size().height * 0.75 - toolbar_height)
+                .max(px(1.));
             (image_width / self.aspect).clamp(px(200. * scale).min(max_height), max_height)
         } else {
             (image_width / self.aspect).max(px(200. * scale))
         };
-        // Three buttons share one row, including in short or narrow viewers.
-        let controls_scale = scale.min(self.height / px(48.)).min(width / px(144.));
-        let compact_size = (controls_scale < scale).then_some(px(32. * controls_scale));
         let reset = Self::control(
             "diagram-reset",
             Icon::default().path("icons/diagram-reset.svg"),
@@ -579,9 +585,8 @@ impl Render for DiagramViewer {
         } else {
             content.into_any_element()
         };
-        div()
+        let viewport = div()
             .id("diagram-viewport")
-            .group("diagram-viewport")
             .debug_selector(|| "diagram-viewport".into())
             .relative()
             .track_focus(&focus)
@@ -658,56 +663,6 @@ impl Render for DiagramViewer {
                 )
             })
             .child(
-                div()
-                    .id("diagram-toolbar")
-                    .debug_selector(|| "diagram-toolbar".into())
-                    .absolute()
-                    .top(px(8. * controls_scale))
-                    .right(px(if expanded { 24. } else { 8. } * controls_scale))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(toolbar),
-            )
-            .when(self.drag.is_none(), |el| {
-                let theme = super::markdown_preview::current(cx).theme;
-                let palette = theme.palette(cx.theme().mode.is_dark());
-                let background = if theme.id == crate::core::markdown_theme::DEFAULT_ID {
-                    cx.theme().tokens.background.into()
-                } else {
-                    super::markdown_preview::color(palette.background)
-                };
-                let label = if expanded {
-                    L10nKey::MarkdownDiagramExpandedHint
-                } else if cfg!(target_os = "macos") {
-                    L10nKey::MarkdownDiagramInlineMacHint
-                } else {
-                    L10nKey::MarkdownDiagramInlineHint
-                };
-                el.child(
-                    div()
-                        .id("diagram-gesture-hint")
-                        .debug_selector(|| "diagram-gesture-hint".into())
-                        .absolute()
-                        .bottom(px(if expanded && self.scroll_limit().x > px(0.) {
-                            24.
-                        } else {
-                            8.
-                        } * controls_scale))
-                        .left(px(8. * controls_scale))
-                        .max_w((width - px(32. * controls_scale)).max(px(0.)))
-                        .px(px(6. * controls_scale))
-                        .py(px(4. * controls_scale))
-                        .rounded(px(4. * controls_scale))
-                        .bg(background)
-                        .text_color(super::markdown_preview::color(palette.muted))
-                        .text_size(px(12. * controls_scale))
-                        .truncate()
-                        .invisible()
-                        .when(focus.contains_focused(window, cx), |hint| hint.visible())
-                        .group_hover("diagram-viewport", |style| style.visible())
-                        .child(t(label)),
-                )
-            })
-            .child(
                 canvas(
                     move |bounds, _, cx| {
                         let _ = owner.update(cx, |this, cx| {
@@ -737,7 +692,60 @@ impl Render for DiagramViewer {
                 .top_0()
                 .left_0()
                 .size_full(),
+            );
+        let theme = super::markdown_preview::current(cx).theme;
+        let palette = theme.palette(cx.theme().mode.is_dark());
+        let label = if expanded {
+            L10nKey::MarkdownDiagramExpandedHint
+        } else if cfg!(target_os = "macos") {
+            L10nKey::MarkdownDiagramInlineMacHint
+        } else {
+            L10nKey::MarkdownDiagramInlineHint
+        };
+        // The hint is removed while dragging so the row stays quiet during
+        // movement; otherwise it appears while the block is hovered or the
+        // diagram has keyboard focus.
+        let hint = div().flex_1().min_w_0().when(self.drag.is_none(), |el| {
+            el.child(
+                div()
+                    .id("diagram-gesture-hint")
+                    .debug_selector(|| "diagram-gesture-hint".into())
+                    .w_full()
+                    .text_color(super::markdown_preview::color(palette.muted))
+                    .text_size(px(12. * controls_scale))
+                    .truncate()
+                    .invisible()
+                    .when(focus.contains_focused(window, cx), |hint| hint.visible())
+                    .group_hover("diagram-viewport", |style| style.visible())
+                    .child(t(label)),
             )
+        });
+        div()
+            .id("diagram-block")
+            .debug_selector(|| "diagram-block".into())
+            .group("diagram-viewport")
+            .flex()
+            .flex_col()
+            .w_full()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8. * controls_scale))
+                    .w_full()
+                    .h(toolbar_height)
+                    .px(px(8. * controls_scale))
+                    .child(hint)
+                    .child(
+                        div()
+                            .id("diagram-toolbar")
+                            .debug_selector(|| "diagram-toolbar".into())
+                            .flex_none()
+                            .child(toolbar),
+                    ),
+            )
+            .child(viewport)
     }
 }
 
@@ -1146,11 +1154,11 @@ mod tests {
             "the toolbar must remain visible in a short window"
         );
         assert!(
-            vcx.debug_bounds("diagram-toolbar").unwrap().top()
-                >= vcx.debug_bounds("diagram-viewport").unwrap().top()
+            vcx.debug_bounds("diagram-toolbar").unwrap().bottom()
+                <= vcx.debug_bounds("diagram-viewport").unwrap().top()
                 && vcx.debug_bounds("diagram-toolbar").unwrap().right()
                     <= vcx.debug_bounds("diagram-viewport").unwrap().right(),
-            "all three toolbar buttons must fit inside the short viewer"
+            "the toolbar row must sit above the short viewer, not over it"
         );
         assert!(
             vcx.debug_bounds("diagram-viewport").unwrap().size.width <= px(400.),
