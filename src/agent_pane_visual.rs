@@ -31,9 +31,6 @@ struct Options {
     dark: bool,
     #[serde(default)]
     zoom: bool,
-    /// For drivers that cannot move a pointer: the pane whose top edge the
-    /// fixture reports as hovered. Drivers that can move one should.
-    hover_pane: Option<usize>,
     /// Open Settings on Window & Tabs instead of showing the panes.
     #[serde(default)]
     settings: bool,
@@ -208,13 +205,9 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                         "agent pane fixture did not settle"
                     );
                 }
-                let hovered = options.hover_pane.map(|i| views[i].entity_id());
                 cx.update_window(handle.into(), |_, window, cx| {
                     owner.update(cx, |app, cx| {
                         app.focus_active(window, cx);
-                        if let Some(id) = hovered {
-                            app.pane_hover.set(Some(id));
-                        }
                         if options.settings {
                             app.open_settings_section(
                                 crate::ui::settings::SettingsSection::WindowTabs,

@@ -291,14 +291,20 @@ mod gpui_tests {
         }
     }
 
+    /// `debug_bounds` takes a `&'static str`, and these selectors name a pane
+    /// the test only knows at runtime. Leaking one short string per lookup is
+    /// the price of asking about a specific pane; there are a handful per test.
+    fn sel(prefix: &str, pane: EntityId) -> &'static str {
+        Box::leak(format!("{prefix}-{}", pane.as_u64()).into_boxed_str())
+    }
+
     fn drawn(vcx: &mut VisualTestContext, what: &str, pane: EntityId) -> bool {
-        vcx.debug_bounds(&format!("{what}-{}", pane.as_u64()))
-            .is_some()
+        vcx.debug_bounds(sel(what, pane)).is_some()
     }
 
     fn hover_top_edge(vcx: &mut VisualTestContext, pane: EntityId) {
         let bounds = vcx
-            .debug_bounds(&format!("pane-leaf-{}", pane.as_u64()))
+            .debug_bounds(sel("pane-leaf", pane))
             .expect("pane drawn");
         let edge = bounds.origin + point(bounds.size.width / 2., px(4.));
         vcx.simulate_mouse_move(edge, None, Modifiers::none());
@@ -319,9 +325,15 @@ mod gpui_tests {
             "titles are off by default"
         );
 
+        let leaf = vcx.debug_bounds(sel("pane-leaf", agent));
         hover_top_edge(&mut vcx, agent);
         assert!(drawn(&mut vcx, "agent-pane-toolbar", agent));
         assert!(!drawn(&mut vcx, "agent-pane-toolbar", shell));
+        assert_eq!(
+            vcx.debug_bounds(sel("pane-leaf", agent)),
+            leaf,
+            "an overlay: nothing reflows"
+        );
 
         hover_top_edge(&mut vcx, shell);
         assert!(
@@ -366,7 +378,7 @@ mod gpui_tests {
 
         hover_top_edge(&mut vcx, agent);
         let zoom = vcx
-            .debug_bounds(&format!("agent-pane-zoom-{}", agent.as_u64()))
+            .debug_bounds(sel("agent-pane-zoom", agent))
             .expect("zoom tile");
         vcx.simulate_click(zoom.center(), Modifiers::default());
         settle(&mut vcx);
@@ -381,7 +393,7 @@ mod gpui_tests {
 
         hover_top_edge(&mut vcx, agent);
         let restore = vcx
-            .debug_bounds(&format!("agent-pane-zoom-{}", agent.as_u64()))
+            .debug_bounds(sel("agent-pane-zoom", agent))
             .expect("restore tile");
         vcx.simulate_click(restore.center(), Modifiers::default());
         settle(&mut vcx);
