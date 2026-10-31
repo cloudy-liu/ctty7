@@ -8,7 +8,7 @@ use gpui::{
     div, img, point, prelude::*, px,
 };
 use gpui_component::{
-    ActiveTheme as _, Disableable as _, Icon, IconName, Sizable as _, WindowExt as _,
+    ActiveTheme as _, Icon, IconName, Sizable as _, WindowExt as _,
     button::{Button, ButtonVariants as _},
     scroll::{Scrollbar, ScrollbarShow},
 };
@@ -412,107 +412,34 @@ impl Render for DiagramViewer {
         } else {
             window.viewport_size().width - px(64.)
         };
-        let available =
-            (width - px(if self.expanded { 32. } else { 120. } * scale)).max(px(64. * scale));
+        let available = (width - px(32. * scale)).max(px(64. * scale));
         let image_width = if self.natural_width > px(0.) {
             available.min(self.natural_width * scale)
         } else {
             available
         };
         self.image_width = image_width;
+        // The toolbar and the gesture hint share one row above the diagram so
+        // that nothing is drawn over the image. Narrow viewers shrink the
+        // buttons so the three of them still fit beside the hint.
+        let controls_scale = scale.min(width / px(144.));
+        let toolbar_height = px(40. * controls_scale);
+        let compact_size = (controls_scale < scale).then_some(px(32. * controls_scale));
         self.height = if self.expanded {
             // The dialog starts 10% down the window and adds 32px padding,
-            // two border pixels, a one-rem title and a half-rem gap. Keep
-            // another 16px below it so the scrollbar and controls stay visible.
-            let max_height =
-                (window.viewport_size().height * 0.9 - px(50.) - window.rem_size() * 1.5)
-                    .min(window.viewport_size().height * 0.75)
-                    .max(px(1.));
+            // two border pixels, a one-rem title and a half-rem gap, then the
+            // toolbar row. Keep another 16px below it so the scrollbar stays
+            // visible.
+            let max_height = (window.viewport_size().height * 0.9
+                - px(50.)
+                - window.rem_size() * 1.5
+                - toolbar_height)
+                .min(window.viewport_size().height * 0.75 - toolbar_height)
+                .max(px(1.));
             (image_width / self.aspect).clamp(px(200. * scale).min(max_height), max_height)
         } else {
             (image_width / self.aspect).max(px(200. * scale))
         };
-        // Fit the copy button, three navigation rows and their insets without
-        // clipping controls when a short window uses a large interface font.
-        let controls_scale = if self.expanded {
-            scale.min(self.height / px(176.)).min(width / px(152.))
-        } else {
-            scale
-        };
-        let compact_size = (controls_scale < scale).then_some(px(32. * controls_scale));
-        let controls = [
-            (
-                "diagram-pan-up",
-                IconName::ChevronUp,
-                L10nKey::MarkdownPanUp,
-                0.,
-                64.,
-            ),
-            (
-                "diagram-pan-left",
-                IconName::ChevronLeft,
-                L10nKey::MarkdownPanLeft,
-                64.,
-                0.,
-            ),
-            (
-                "diagram-pan-right",
-                IconName::ChevronRight,
-                L10nKey::MarkdownPanRight,
-                -64.,
-                0.,
-            ),
-            (
-                "diagram-pan-down",
-                IconName::ChevronDown,
-                L10nKey::MarkdownPanDown,
-                0.,
-                -64.,
-            ),
-        ]
-        .map(|(id, icon, label, x, y)| {
-            let limit = self.scroll_limit();
-            let disabled = self.expanded
-                && if x != 0. {
-                    limit.x == px(0.)
-                } else {
-                    limit.y == px(0.)
-                };
-            Self::control(id, icon, t(label), compact_size, cx)
-                .disabled(disabled)
-                .when(disabled, |button| button.opacity(0.4))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    cx.stop_propagation();
-                    if this.pan_by(point(px(x * scale), px(y * scale))) {
-                        cx.notify();
-                    }
-                }))
-        });
-        let [up, left, right, down] = controls;
-        let zoom_in = Self::control(
-            "diagram-zoom-in",
-            Icon::default().path("icons/diagram-zoom-in.svg"),
-            t(L10nKey::MarkdownZoomIn),
-            compact_size,
-            cx,
-        )
-        .on_click(cx.listener(|this, _, _, cx| {
-            cx.stop_propagation();
-            this.zoom_by(1.25);
-            cx.notify();
-        }));
-        let zoom_out = Self::control(
-            "diagram-zoom-out",
-            Icon::default().path("icons/diagram-zoom-out.svg"),
-            t(L10nKey::MarkdownZoomOut),
-            compact_size,
-            cx,
-        )
-        .on_click(cx.listener(|this, _, _, cx| {
-            cx.stop_propagation();
-            this.zoom_by(1. / 1.25);
-            cx.notify();
-        }));
         let reset = Self::control(
             "diagram-reset",
             Icon::default().path("icons/diagram-reset.svg"),
@@ -527,7 +454,8 @@ impl Render for DiagramViewer {
         }));
         let toolbar = div()
             .flex()
-            .gap_2()
+            .gap(px(8. * controls_scale))
+            .child(reset)
             .when(self.expanded, |el| {
                 el.child(
                     Self::control(
@@ -657,7 +585,7 @@ impl Render for DiagramViewer {
         } else {
             content.into_any_element()
         };
-        div()
+        let viewport = div()
             .id("diagram-viewport")
             .debug_selector(|| "diagram-viewport".into())
             .relative()
@@ -735,48 +663,6 @@ impl Render for DiagramViewer {
                 )
             })
             .child(
-                div()
-                    .absolute()
-                    .top(px(8. * controls_scale))
-                    .right(px(if expanded { 24. } else { 8. } * controls_scale))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(toolbar),
-            )
-            .child(
-                div()
-                    .absolute()
-                    .bottom(px(if expanded { 24. } else { 8. } * controls_scale))
-                    .right(px(if expanded { 24. } else { 8. } * controls_scale))
-                    .flex()
-                    .flex_col()
-                    .gap(px(4. * controls_scale))
-                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(4. * controls_scale))
-                            .child(div().w(px(32. * controls_scale)))
-                            .child(up)
-                            .child(zoom_in),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(4. * controls_scale))
-                            .child(left)
-                            .child(reset)
-                            .child(right),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(4. * controls_scale))
-                            .child(div().w(px(32. * controls_scale)))
-                            .child(down)
-                            .child(zoom_out),
-                    ),
-            )
-            .child(
                 canvas(
                     move |bounds, _, cx| {
                         let _ = owner.update(cx, |this, cx| {
@@ -806,7 +692,60 @@ impl Render for DiagramViewer {
                 .top_0()
                 .left_0()
                 .size_full(),
+            );
+        let theme = super::markdown_preview::current(cx).theme;
+        let palette = theme.palette(cx.theme().mode.is_dark());
+        let label = if expanded {
+            L10nKey::MarkdownDiagramExpandedHint
+        } else if cfg!(target_os = "macos") {
+            L10nKey::MarkdownDiagramInlineMacHint
+        } else {
+            L10nKey::MarkdownDiagramInlineHint
+        };
+        // The hint is removed while dragging so the row stays quiet during
+        // movement; otherwise it appears while the block is hovered or the
+        // diagram has keyboard focus.
+        let hint = div().flex_1().min_w_0().when(self.drag.is_none(), |el| {
+            el.child(
+                div()
+                    .id("diagram-gesture-hint")
+                    .debug_selector(|| "diagram-gesture-hint".into())
+                    .w_full()
+                    .text_color(super::markdown_preview::color(palette.muted))
+                    .text_size(px(12. * controls_scale))
+                    .truncate()
+                    .invisible()
+                    .when(focus.contains_focused(window, cx), |hint| hint.visible())
+                    .group_hover("diagram-viewport", |style| style.visible())
+                    .child(t(label)),
             )
+        });
+        div()
+            .id("diagram-block")
+            .debug_selector(|| "diagram-block".into())
+            .group("diagram-viewport")
+            .flex()
+            .flex_col()
+            .w_full()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap(px(8. * controls_scale))
+                    .w_full()
+                    .h(toolbar_height)
+                    .px(px(8. * controls_scale))
+                    .child(hint)
+                    .child(
+                        div()
+                            .id("diagram-toolbar")
+                            .debug_selector(|| "diagram-toolbar".into())
+                            .flex_none()
+                            .child(toolbar),
+                    ),
+            )
+            .child(viewport)
     }
 }
 
@@ -1211,13 +1150,15 @@ mod tests {
             "a large text scale in a short window must keep the viewer within the window"
         );
         assert!(
-            vcx.debug_bounds("diagram-zoom-out").unwrap().bottom() <= px(284.),
-            "bottom controls must remain visible in a short window"
+            vcx.debug_bounds("diagram-toolbar").unwrap().bottom() <= px(284.),
+            "the toolbar must remain visible in a short window"
         );
         assert!(
-            vcx.debug_bounds("diagram-zoom-in").unwrap().top()
-                >= vcx.debug_bounds("diagram-viewport").unwrap().top(),
-            "top controls must fit inside the short viewer"
+            vcx.debug_bounds("diagram-toolbar").unwrap().bottom()
+                <= vcx.debug_bounds("diagram-viewport").unwrap().top()
+                && vcx.debug_bounds("diagram-toolbar").unwrap().right()
+                    <= vcx.debug_bounds("diagram-viewport").unwrap().right(),
+            "the toolbar row must sit above the short viewer, not over it"
         );
         assert!(
             vcx.debug_bounds("diagram-viewport").unwrap().size.width <= px(400.),
@@ -1226,9 +1167,7 @@ mod tests {
     }
 
     #[gpui::test]
-    fn expanded_horizontal_buttons_move_only_after_zoom_creates_overflow(
-        cx: &mut gpui::TestAppContext,
-    ) {
+    fn expanded_keyboard_navigation_reaches_horizontal_overflow(cx: &mut gpui::TestAppContext) {
         let (_, mut vcx) = crate::ui::app::test_window::harness(cx);
         vcx.simulate_resize(gpui::size(px(1000.), px(800.)));
         vcx.update(|window, cx| {
@@ -1253,25 +1192,13 @@ mod tests {
         let initial = vcx.debug_bounds("diagram-image").unwrap();
         let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
         assert!(initial.size.width <= viewport.size.width);
-        let button = vcx.debug_bounds("diagram-pan-right").unwrap().center();
-        vcx.simulate_click(button, gpui::Modifiers::none());
-        vcx.update(|window, cx| {
-            let _ = window.draw(cx);
-        });
-        assert_eq!(
-            vcx.debug_bounds("diagram-image").unwrap().origin.x,
-            initial.origin.x
-        );
-
-        let button = vcx.debug_bounds("diagram-zoom-in").unwrap().center();
-        vcx.simulate_click(button, gpui::Modifiers::none());
+        vcx.simulate_keystrokes("+");
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
         let zoomed = vcx.debug_bounds("diagram-image").unwrap();
         assert!(zoomed.size.width > viewport.size.width);
-        let button = vcx.debug_bounds("diagram-pan-right").unwrap().center();
-        vcx.simulate_click(button, gpui::Modifiers::none());
+        vcx.simulate_keystrokes("right");
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
@@ -1281,8 +1208,7 @@ mod tests {
             "Right must reveal content on the right after zoom"
         );
         assert_eq!(moved.size, zoomed.size);
-        let button = vcx.debug_bounds("diagram-pan-left").unwrap().center();
-        vcx.simulate_click(button, gpui::Modifiers::none());
+        vcx.simulate_keystrokes("left");
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
@@ -1290,8 +1216,7 @@ mod tests {
             (vcx.debug_bounds("diagram-image").unwrap().left() - zoomed.left()).abs() <= px(1.)
         );
         for _ in 0..20 {
-            let button = vcx.debug_bounds("diagram-pan-right").unwrap().center();
-            vcx.simulate_click(button, gpui::Modifiers::none());
+            vcx.simulate_keystrokes("right");
             vcx.update(|window, cx| {
                 let _ = window.draw(cx);
             });
@@ -1327,8 +1252,7 @@ mod tests {
             window.refresh();
             let _ = window.draw(cx);
         });
-        let zoom_button = vcx.debug_bounds("diagram-zoom-in").unwrap();
-        vcx.simulate_click(zoom_button.center(), gpui::Modifiers::none());
+        vcx.simulate_keystrokes("+");
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
@@ -1357,7 +1281,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn expanded_mermaid_buttons_and_wheel_repaint_the_diagram(cx: &mut gpui::TestAppContext) {
+    fn expanded_mermaid_keyboard_wheel_and_reset_repaint_the_diagram(
+        cx: &mut gpui::TestAppContext,
+    ) {
         let (_, mut vcx) = crate::ui::app::test_window::harness(cx);
         vcx.simulate_resize(gpui::size(px(1000.), px(800.)));
         vcx.update(|window, cx| {
@@ -1384,8 +1310,9 @@ mod tests {
         });
         let fitted = vcx.debug_bounds("diagram-content").unwrap();
         let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
-        let zoom = vcx.debug_bounds("diagram-zoom-in").unwrap();
-        vcx.simulate_click(zoom.center(), gpui::Modifiers::none());
+        assert!(vcx.debug_bounds("diagram-zoom-in").is_none());
+        assert!(vcx.debug_bounds("diagram-pan-right").is_none());
+        vcx.simulate_keystrokes("+");
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
@@ -1452,7 +1379,7 @@ mod tests {
     }
 
     #[test]
-    fn fitted_inline_diagrams_can_be_dragged_and_moved_with_the_controls() {
+    fn fitted_inline_diagrams_can_be_dragged() {
         let mut viewer = DiagramViewer::new("diagram.svg".into(), "".into(), 2., false);
         viewer.image_width = px(600.);
         viewer.height = px(400.);

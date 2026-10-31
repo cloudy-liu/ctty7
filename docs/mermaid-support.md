@@ -18,16 +18,23 @@ zoom and preserve their full aspect ratio and height; a tall diagram stays at
 its reading width instead of shrinking to a height limit. Ordinary wheel input
 continues scrolling the document, including after inline diagram zoom.
 Click the canvas or Expand to open a larger viewer. A tall diagram opens at the
-top with readable nodes and a visible vertical scrollbar. Copy preserves the
-original Mermaid source.
+top with readable nodes and a visible vertical scrollbar. A toolbar row above
+the diagram holds Reset, Expand and Copy at its right edge, so no control is
+drawn over the image; the expanded viewer replaces Expand with
+**Fit whole diagram**. Copy preserves the original Mermaid source.
 
-In the expanded viewer, ordinary wheel input zooms around the pointer. The zoom
-buttons and Ctrl+wheel (Command+wheel on macOS) also work, from 25% to 800%.
+In the expanded viewer, ordinary wheel input zooms around the pointer.
+Ctrl+wheel (Command+wheel on macOS) also works, from 25% to 800%.
 Drag with the left button to pan short or tall diagrams; Shift+wheel scrolls
 horizontally, and the scrollbars and keyboard navigation reach the remaining
 content. **Fit whole diagram** (`F`) shows the complete diagram, including very
 tall diagrams below the normal 25% zoom limit. Reset restores its initial reading
-size and position.
+size and position. Inline diagrams use Ctrl+wheel (Command+wheel on macOS) to
+zoom, leaving ordinary wheel input available for document scrolling at every
+diagram zoom level. A gesture hint appears at the left of the toolbar row on
+hover or keyboard focus and hides while dragging. Zoom and directional buttons
+are omitted; mouse gestures and keyboard navigation provide these operations
+without a separate navigation pad.
 
 SVG rasters follow display DPI, reading scale and diagram zoom. Each viewer
 retains one raster of at most 16,777,216 RGBA pixels (64 MiB), with neither axis
@@ -36,8 +43,9 @@ sharp at that allocation limit. Moving between displays regenerates the raster
 for the current scale.
 
 Opening the larger viewer does not necessarily create horizontal overflow.
-Directional buttons are dimmed when their axis has no scrollable content;
-left-button dragging can still reposition a fitted diagram.
+Left-button dragging can still reposition a fitted diagram; zooming beyond the
+available width adds horizontal scrolling. The inline canvas reserves only its
+reading inset, allowing wide diagrams to use the old navigation pad's space.
 
 In the focused diagram, `+`/`-` zoom, arrows move, Page Up/Down or Space move by
 a viewport, and End reaches the bottom. Home scrolls the expanded diagram to its
@@ -125,11 +133,13 @@ heading. See the [navigation and performance verification](testing/markdown-navi
 for the fixture, measurements and native interaction evidence.
 The latest [GitHub-style reading verification](testing/github-mermaid-reading.md)
 records the scroll viewer, compact controls and updated measurements.
+The [toolbar simplification verification](testing/mermaid-controls-simplification.md)
+records the current three-button toolbar and native comparison screenshots.
 
 ### Source files
 
 - [markdown_mermaid.rs](../src/ui/markdown_mermaid.rs) handles theme integration, rendering and the expanded viewer.
-- [markdown_preview.rs](../src/ui/markdown_preview.rs) handles fence preprocessing, background work, image state and toolbar controls.
+- [markdown_preview.rs](../src/ui/markdown_preview.rs) handles fence preprocessing, background work and image state.
 
 ### Custom theme mapping
 
@@ -178,9 +188,9 @@ listed in [project status](maintenance/status.md).
 
 ## Viewer controls
 
-Expand and source Copy appear at the upper right. Directional movement, Reset,
-and zoom controls appear at the lower right, both inline and in the larger
-viewer. Drag the diagram to move it; Reset restores its initial reading size and
-position. Expanded scrollbars stay visible whenever content overflows. Controls
-follow the active Markdown palette and retain the original
-source when copying.
+A toolbar row above the diagram holds Reset, Expand (or Fit whole diagram) and
+Copy at its right edge; nothing is drawn over the image. Drag to move the
+diagram. Inline diagrams zoom with Ctrl+wheel or Command+wheel; the expanded
+viewer also zooms with the ordinary wheel. Keyboard shortcuts and scrollbars
+remain available in the expanded viewer. A contextual hint appears at the left
+of the toolbar row when the diagram is hovered or focused.
