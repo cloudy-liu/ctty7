@@ -43,7 +43,6 @@ struct Reports {
 
 struct NativeWindow {
     handle: WindowHandle<Root>,
-    owner: Entity<Tty7App>,
     panes: Vec<Entity<TerminalView>>,
     streams: Vec<Stream>,
     title: String,
@@ -146,7 +145,6 @@ fn open(index: usize, split: bool, cx: &mut App) -> NativeWindow {
     );
     NativeWindow {
         handle,
-        owner,
         panes,
         streams,
         title,
@@ -209,12 +207,10 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                         sequence = reports.sequence;
                     }
                     let mut snapshots = Vec::new();
-                    let mut agents = Vec::new();
                     for native in &windows {
                         if let Ok(snapshot) =
                             cx.update_window(native.handle.into(), |_, window, cx| {
                                 window.set_window_title(&native.title);
-                                agents.extend(native.owner.read(cx).agent_rows(cx));
                                 serde_json::json!({
                                     "active": window.is_window_active(),
                                     "panes": native.panes.iter().map(|pane| {
@@ -231,11 +227,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                             snapshots.push(snapshot);
                         }
                     }
-                    let attention = crate::ui::tray::TraySnapshot {
-                        agents,
-                        ..Default::default()
-                    }
-                    .attention();
+                    let attention = cx.update(|cx| crate::ui::tray::app_snapshot(cx).attention());
                     let snapshot = serde_json::json!({
                         "sequence": sequence, "attention": attention, "windows": snapshots,
                     });
