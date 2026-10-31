@@ -120,6 +120,20 @@ a prompt; manual Reconnect uses the same path. User input cancels a queued resum
 Restoration settings, session-history opt-outs, and shell-integration settings
 are respected. Unknown session IDs leave an interactive remote shell.
 
+## SSH sessions in a local sidebar
+
+With the tab bar on the left and sidebar grouping enabled, in-pane SSH sessions
+started from a local workspace appear in groups named for their displayed
+connection target. This includes native SSH tabs and `ssh` commands tty7
+detects inside a pane. Local project groups appear first and Scratch appears
+last. Choose `none` for sidebar grouping to keep a flat list.
+
+SSH groups can be folded and renamed. They cannot be pinned or used to create a
+local tab because their host is not a local project directory. Group identity is
+the displayed target: profiles or aliases with the same display name can share
+a group, while a command tty7 cannot identify may stay in its existing group.
+Remote workspace windows and WSL hops keep their existing grouping behavior.
+
 ## Git in a native SSH tab
 
 Open a managed SSH tab from the new-tab menu or a saved profile, then enter a
