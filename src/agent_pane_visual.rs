@@ -34,6 +34,9 @@ struct Options {
     /// Open Settings on Window & Tabs instead of showing the panes.
     #[serde(default)]
     settings: bool,
+    /// "grid" (2x2, default) or "column": one wide pane beside three stacked.
+    #[serde(default)]
+    layout: String,
     height: Option<f32>,
     hold_seconds: Option<u64>,
 }
@@ -150,6 +153,35 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                             }
                             let leaf =
                                 |v: &Entity<TerminalView>| Pane::leaf(PaneSlot::Ready(v.clone()));
+                            let tree = if options.layout == "column" {
+                                // One wide pane beside a column of three: the
+                                // shape in which review found agent names cut
+                                // down to an ellipsis.
+                                let lower = Pane::split_node(
+                                    Axis::Vertical,
+                                    0.5,
+                                    leaf(&views[2]),
+                                    leaf(&views[3]),
+                                );
+                                let column =
+                                    Pane::split_node(Axis::Vertical, 0.4, leaf(&views[1]), lower);
+                                Pane::split_node(Axis::Horizontal, 0.5, leaf(&views[0]), column)
+                            } else {
+                                let top = Pane::split_node(
+                                    Axis::Horizontal,
+                                    0.5,
+                                    leaf(&views[0]),
+                                    leaf(&views[1]),
+                                );
+                                let bottom = Pane::split_node(
+                                    Axis::Horizontal,
+                                    0.5,
+                                    leaf(&views[2]),
+                                    leaf(&views[3]),
+                                );
+                                Pane::split_node(Axis::Vertical, 0.5, top, bottom)
+                            };
+                            app.tabs.push(Tab::new(tree));
                             let top = Pane::split_node(
                                 Axis::Horizontal,
                                 0.5,

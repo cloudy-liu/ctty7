@@ -60,14 +60,19 @@ pub(crate) struct AgentPaneChrome {
     pub toolbar: bool,
 }
 
-/// `agent` is what the pane is running right now; `titles_enabled` is the
-/// user's `show_agent_pane_titles` setting. An ordinary terminal gets nothing
-/// either way: the setting only decides whether an agent pane's identity is
-/// spelled out, never whether a shell grows chrome.
-pub(crate) fn chrome_for(agent: Option<CLIAgent>, titles_enabled: bool) -> AgentPaneChrome {
+/// `ready` is whether the pane has a terminal at all (a pane still connecting
+/// has nothing to split or zoom); `agent` is what it is running right now;
+/// `titles_enabled` is the user's `show_agent_pane_titles` setting. Every
+/// ready pane offers the toolbar, shell or agent alike; the title row is the
+/// agent's alone, and the setting only decides whether it is drawn.
+pub(crate) fn chrome_for(
+    ready: bool,
+    agent: Option<CLIAgent>,
+    titles_enabled: bool,
+) -> AgentPaneChrome {
     AgentPaneChrome {
         title: agent.is_some() && titles_enabled,
-        toolbar: agent.is_some(),
+        toolbar: ready,
     }
 }
 
@@ -228,29 +233,40 @@ mod tests {
     use super::*;
 
     #[test]
-    fn an_ordinary_terminal_gets_neither_title_nor_toolbar() {
+    fn an_ordinary_terminal_gets_the_toolbar_but_no_title() {
         for titles_enabled in [false, true] {
             assert_eq!(
-                chrome_for(None, titles_enabled),
+                chrome_for(true, None, titles_enabled),
                 AgentPaneChrome {
                     title: false,
-                    toolbar: false
+                    toolbar: true
                 }
             );
         }
     }
 
     #[test]
+    fn a_pane_still_connecting_gets_nothing() {
+        assert_eq!(
+            chrome_for(false, None, true),
+            AgentPaneChrome {
+                title: false,
+                toolbar: false
+            }
+        );
+    }
+
+    #[test]
     fn an_agent_pane_keeps_its_toolbar_whether_or_not_titles_are_on() {
         assert_eq!(
-            chrome_for(Some(CLIAgent::Claude), false),
+            chrome_for(true, Some(CLIAgent::Claude), false),
             AgentPaneChrome {
                 title: false,
                 toolbar: true
             }
         );
         assert_eq!(
-            chrome_for(Some(CLIAgent::Codex), true),
+            chrome_for(true, Some(CLIAgent::Codex), true),
             AgentPaneChrome {
                 title: true,
                 toolbar: true
@@ -339,7 +355,7 @@ mod gpui_tests {
     }
 
     #[gpui::test]
-    fn the_top_edge_reveals_a_toolbar_on_the_agent_pane_and_never_on_the_shell(
+    fn the_top_edge_reveals_a_toolbar_on_every_pane_and_a_title_only_on_the_agent(
         cx: &mut TestAppContext,
     ) {
         let (_app, mut vcx, [agent, shell], _streams) = split(cx);
@@ -350,6 +366,10 @@ mod gpui_tests {
         assert!(
             drawn(&mut vcx, "agent-pane-title", agent),
             "titles are on by default"
+        );
+        assert!(
+            !drawn(&mut vcx, "agent-pane-title", shell),
+            "a shell never gets a title"
         );
 
         let leaf = vcx.debug_bounds(sel("pane-leaf", agent));
@@ -364,8 +384,12 @@ mod gpui_tests {
 
         hover_top_edge(&mut vcx, shell);
         assert!(
-            !drawn(&mut vcx, "agent-pane-toolbar", shell),
-            "a shell grows no chrome"
+            drawn(&mut vcx, "agent-pane-toolbar", shell),
+            "a shell offers the same actions"
+        );
+        assert!(
+            !drawn(&mut vcx, "agent-pane-title", shell),
+            "but still no title"
         );
         assert!(
             !drawn(&mut vcx, "agent-pane-toolbar", agent),

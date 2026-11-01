@@ -948,7 +948,11 @@ impl Pane<PaneSlot> {
                     PaneSlot::Ready(t) => t.read(cx).agent(),
                     PaneSlot::Connecting(_) => None,
                 };
-                let agent_chrome = crate::ui::pane_title::chrome_for(agent, chrome.agent_titles);
+                let agent_chrome = crate::ui::pane_title::chrome_for(
+                    matches!(v, PaneSlot::Ready(_)),
+                    agent,
+                    chrome.agent_titles,
+                );
                 // The toolbar is revealed by the same band as the grip, so a
                 // pane with either needs the band.
                 let band = grip || agent_chrome.toolbar;

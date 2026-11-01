@@ -634,7 +634,7 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         }
         L10nKey::SettingsShowAgentPaneTitles => "Show agent pane titles",
         L10nKey::SettingsShowAgentPaneTitlesDesc => {
-            "Draw the agent's icon and name in a row above its terminal. Ordinary terminals never get one, and the hover actions on agent panes stay available either way."
+            "Draw the agent's icon and name in a row above its terminal. Ordinary terminals get no row; the hover actions (split, zoom, close) are on every pane either way."
         }
         L10nKey::DocumentDock => "Dock beside terminal",
         L10nKey::DocumentFill => "Fill window",

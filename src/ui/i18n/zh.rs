@@ -569,7 +569,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsShowAgentPaneTitles => "显示 Agent 窗格标题",
         L10nKey::SettingsShowAgentPaneTitlesDesc => {
-            "在 Agent 窗格的终端上方显示一行图标和名称。普通终端不受影响；无论是否开启，Agent 窗格的悬浮操作都可用。"
+            "在 Agent 窗格的终端上方显示一行图标和名称。普通终端不显示这一行；无论开关如何，悬浮操作（分屏、放大、关闭）每个窗格都有。"
         }
         L10nKey::DocumentDock => "停靠在终端旁",
         L10nKey::DocumentFill => "铺满窗口",

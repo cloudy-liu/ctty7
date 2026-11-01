@@ -644,7 +644,7 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SettingsShowAgentPaneTitles => "エージェントペインのタイトルを表示",
         L10nKey::SettingsShowAgentPaneTitlesDesc => {
-            "エージェントのアイコンと名前をターミナルの上の行に表示します。通常のターミナルには表示されず、エージェントペインのホバー操作はどちらでも使えます。"
+            "エージェントのアイコンと名前をターミナルの上の行に表示します。通常のターミナルには表示されません。ホバー操作（分割・拡大・閉じる）はどのペインでも使えます。"
         }
         L10nKey::DocumentDock => "ターミナルの隣にドック",
         L10nKey::DocumentFill => "ウィンドウ全体",
