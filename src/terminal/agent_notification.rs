@@ -27,6 +27,9 @@ pub(crate) fn deliver(title: &str, body: &str, pane: EntityId, source_focused: b
     // The source window is leased by its view update, so include its active
     // state directly. Other windows include Settings and auxiliary windows.
     let focused_at_event = source_focused || app_focused(cx);
+    if !focused_at_event {
+        crate::ui::tray::background_agent_event(cx);
+    }
     let cfg = cx.global::<Config>();
     let sound = allowed(cfg.agent_notification_sound, focused_at_event);
     let desktop = allowed(cfg.notify_on_command_finish, focused_at_event);

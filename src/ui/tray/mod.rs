@@ -76,7 +76,6 @@ pub(crate) struct AgentRow {
     pub leaf_id: u64,
     pub agent: crate::core::cli_agent::CLIAgent,
     pub status: AgentStatus,
-    pub unread: bool,
     pub detail: String,
 }
 
@@ -84,14 +83,13 @@ pub(crate) struct AgentRow {
 pub(crate) struct TraySnapshot {
     pub agents: Vec<AgentRow>,
     pub notify_mode: NotifyMode,
+    pub attention: bool,
 }
 
 impl TraySnapshot {
     #[cfg_attr(target_os = "macos", allow(dead_code))]
     pub(crate) fn attention(&self) -> bool {
-        self.agents.iter().any(|a| {
-            a.status == AgentStatus::Waiting || (a.status == AgentStatus::Done && a.unread)
-        })
+        self.attention
     }
 
     pub(crate) fn tooltip(&self) -> String {
@@ -124,6 +122,32 @@ impl TraySnapshot {
             )
         }
     }
+}
+
+#[derive(Default)]
+struct BackgroundAttention {
+    pending: bool,
+    wake: Option<smol::channel::Sender<()>>,
+}
+
+impl gpui::Global for BackgroundAttention {}
+
+fn set_attention(pending: bool, cx: &mut App) {
+    let attention = cx.default_global::<BackgroundAttention>();
+    if attention.pending != pending {
+        attention.pending = pending;
+        if let Some(wake) = &attention.wake {
+            let _ = wake.try_send(());
+        }
+    }
+}
+
+pub(crate) fn background_agent_event(cx: &mut App) {
+    set_attention(true, cx);
+}
+
+pub(crate) fn acknowledge_background_attention(cx: &mut App) {
+    set_attention(false, cx);
 }
 
 pub(crate) enum SpecItem {
@@ -230,10 +254,10 @@ mod tests {
                 leaf_id: 42,
                 agent: crate::core::cli_agent::CLIAgent::Claude,
                 status,
-                unread: false,
                 detail: "tty7 @ main".into(),
             }],
             notify_mode: NotifyMode::Unfocused,
+            attention: false,
         }
     }
 
@@ -266,22 +290,8 @@ mod tests {
     }
 
     #[test]
-    fn attention_follows_waiting_and_tooltip_counts() {
+    fn tooltip_counts_agent_states() {
         crate::ui::i18n::set_locale("en");
-        assert!(snapshot_with_agent(AgentStatus::Waiting).attention());
-        assert!(!snapshot_with_agent(AgentStatus::Working).attention());
-        assert!(!snapshot_with_agent(AgentStatus::Done).attention());
-        let mut completed = snapshot_with_agent(AgentStatus::Done);
-        completed.agents[0].unread = true;
-        assert!(
-            completed.attention(),
-            "completed results remain visible until read"
-        );
-        completed.agents[0].unread = false;
-        assert!(
-            !completed.attention(),
-            "viewing the result clears the reminder"
-        );
         assert_eq!(
             snapshot_with_agent(AgentStatus::Waiting).tooltip(),
             format!(
@@ -328,7 +338,7 @@ mod tests {
     }
 }
 
-fn app_snapshot(cx: &mut App) -> TraySnapshot {
+pub(crate) fn app_snapshot(cx: &mut App) -> TraySnapshot {
     let windows = crate::ui::windows::WindowRegistry::open_windows(cx);
     let mut agents = Vec::new();
     for (_, weak) in windows {
@@ -339,6 +349,7 @@ fn app_snapshot(cx: &mut App) -> TraySnapshot {
     TraySnapshot {
         agents,
         notify_mode: cx.global::<Config>().notify_on_command_finish,
+        attention: cx.default_global::<BackgroundAttention>().pending,
     }
 }
 
@@ -422,6 +433,8 @@ pub(crate) fn init(cx: &mut App) {
     }
 
     let (tx, rx) = smol::channel::unbounded::<TrayAction>();
+    let (wake, wake_rx) = smol::channel::bounded::<()>(1);
+    cx.default_global::<BackgroundAttention>().wake = Some(wake);
     if let Ok(mut slot) = SENDER.lock() {
         *slot = Some(tx.clone());
     }
@@ -443,7 +456,10 @@ pub(crate) fn init(cx: &mut App) {
         let mut attempts = 0u32;
         let mut cooldown = 0u32;
         loop {
-            cx.background_executor().timer(POLL).await;
+            smol::future::or(cx.background_executor().timer(POLL), async {
+                let _ = wake_rx.recv().await;
+            })
+            .await;
             let (enabled, snap) =
                 cx.update(|cx| (cx.global::<Config>().show_tray_icon, app_snapshot(cx)));
             // Taskbar reminders remain available when the tray is disabled.
