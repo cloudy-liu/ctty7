@@ -1,55 +1,27 @@
 # Project status
 
-Checked on 2026-10-31 against GitHub and the release candidate checkout.
-This is a dated snapshot; query GitHub again before merging or preparing a release.
+Checked on 2026-11-02 against GitHub, the v0.9.0 release, and registered local worktrees.
 
 ## Release scope and open work
 
-The latest published release at preparation time is v0.8.3, published on
-2026-10-27. The v0.9.0 source adds native SSH Git status and diffs (#224),
-SSH connection and exact supported-agent restoration (#217), commit-detail
-layout refinements (#218), the working-agent comet (#219), and Diff backgrounds
-that follow the application theme (#225). The candidate also includes sidebar
-group icon settings (#227), grouped-row indentation (#229), and the deleted-file
-preview close fix (#228). SSH host groups (#230) and the Scratch Inbox icon
-(#233) are release dependencies; merge and verify them before tagging. See the
-[English notes](../releases/v0.9.0.md) and
-[preserved-change audit](../testing/local-change-audit-v0.9.0.md).
+The latest published custom release is v0.9.0, published on 2026-10-31. The proposed v0.10.0 scope contains:
 
-Native evidence covers remote Git, external edits, disconnect/reconnect, SSH
-restoration, final commit-strip actions, and light/dark comet states on Windows.
-See [Native SSH Git acceptance](../testing/native-ssh-git-diff.md),
-[SSH restoration](../testing/ssh-agent-resume.md), and
-[commit layout](../testing/commit-detail-layout.md). Parent issue #220 retains
-the approved spec; its implementation tickets are #221–223.
+- Sidebar icon alignment and 13px tab titles (cloudy-liu/ctty7#236).
+- A single Mermaid toolbar above diagrams (cloudy-liu/ctty7#237).
+- Clearing application-level background attention on workspace activation (cloudy-liu/ctty7#238).
+- Optional names and hover actions for ready agent panes (cloudy-liu/ctty7#239).
+- Claude Code question detection across padded terminal-grid rows (cloudy-liu/ctty7#240).
+- A small blue Windows attention mark with no duplicate overlay (cloudy-liu/ctty7#241).
 
-Final source CI and Release builds must pass, and all downloaded assets and
-checksums must be verified while the Release remains a draft. Publication is
-explicit. The separate background-attention branch, untracked prototypes,
-and archived Mermaid/sidebar experiments remain outside this scope.
+At audit time, PRs #239 and #241 remain open. Require all fork CI checks to pass and squash-merge both before freezing the candidate. Then verify the complete source CI, all twelve program assets, and checksums.txt while the v0.10.0 Release remains a draft; publication is explicit.
 
-Issue #175 is closed for the delivered native HTML preview implementation.
-PR #178 implements macOS preview; both architecture-specific native CI artifacts
-were inspected. Unverified device/performance/package cases remain recorded
-limits. Linux retains source editing and external opening. Issue #182's tabs
-and HTML scroll preservation are implemented by PRs #186 and #191; merged PR #193
-fixes the fragment regression and closes the parent issue. Its
-code commit passed all ten CI checks, including both native macOS HTML runners.
-Issue #188's upper-right artwork is merged through PR #189. Continued Explorer
-acceptance found a stale icon after clearing; PR #194 fixes class-icon
-restoration and closes #188. See the
-[issue audit](../testing/open-issue-audit-2026-10-23.md) for the closing-reference
-history and remaining checks.
-
-The component fork `cloudy-liu/gpui-component` has a `ctty7` stable integration
-branch. The application now pins `f95e3b89b9a9ec704f9e3e502e4dc0e02cca636e`,
-including the per-input scrollbar policy used by #210; see
-[gpui-component maintenance](gpui-component.md).
+The current native visual records and the known platform and installation limits are summarized in the [English release notes](../releases/v0.10.0.md). The [local-change audit](../testing/local-change-audit-v0.10.0.md) records preserved work and temporary verification material. Independent settings-surface and background-attention work, the document-tabs-radius branch, untracked prototypes and research, and all retained stashes remain outside the release.
 
 ## Completed work
 
 | Work | Completion |
 | --- | --- |
+| v0.9.0 publication | Published on 2026-10-31 and set Latest after all twelve program assets and checksums were verified. |
 | v0.8.2 publication | Published on 2026-10-25 and set Latest, with direct titlebar actions and compact preview/tooltip controls through PRs #204 and #205. |
 | v0.8.1 publication | Published on 2026-10-25 and set Latest. Mermaid reading, compact document headers, menu icons, and Windows attention and HTML navigation corrections are included. |
 | v0.7.1 publication | Published on 2026-10-21. Default Windows HTML preview and terminal block-fill corrections are included through PR #176. |
@@ -88,6 +60,9 @@ been checked. macOS/Linux native source-editor screenshots remain unverified;
 these are verification gaps, not additional open GitHub tickets.
 
 ## Source and release state
+
+- Published tag v0.9.0 remains the current release baseline at preparation time. Its [English notes](../releases/v0.9.0.md) record the verified release scope and known limits.
+- Candidate v0.10.0 contains PRs #236 through #241; the final candidate and publication remain pending the last two PR merges, source CI, and complete draft asset verification.
 
 - Published tag `v0.8.3` remains available with twelve program assets and `checksums.txt`; its [English notes](../releases/v0.8.3.md) and [local-change audit](../testing/local-change-audit-v0.8.3.md) record accepted behavior and verification limits.
 
