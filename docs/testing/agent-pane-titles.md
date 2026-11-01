@@ -8,8 +8,9 @@ are the native application.
 
 Baseline source: `1063bc9b` (fork `main`) with only the fixture overlaid by
 `scripts/agent-pane-native-visual.py prepare-before`. Final application source:
-`fc788463` (the feature commit `0dec85b0` plus the borderless toolbar centred on the
-title row, the 13px name, and the `ctty7` head label for an unnamed workspace). Both are debug builds of the production app with
+`9026afa7` (the feature commit `0dec85b0` plus the borderless toolbar centred on the
+title row, the 13px name, the `ctty7` head label for an unnamed workspace, the
+name-width fix and optional pane cards). Both are debug builds of the production app with
 `--features markdown-visual-tests`, started as
 `tty7-app --config-dir <fresh dir> --agent-pane-visual <options.json>`.
 
@@ -77,6 +78,38 @@ on (the default since the user's review; the spec had proposed off).
 ![Before: settings](images/agent-pane-titles/before-settings-light.png)
 ![After: settings](images/agent-pane-titles/after-settings-light.png)
 
+**One wide pane beside a column of three, titles on, no pointer.** The shape in
+which review found agent names cut down to an ellipsis: the name element had no
+claim on the row's width and was measured at its minimum. Before is the
+baseline (no rows). After, "Codex" and "Cursor" read in full in the narrow
+column; the fixture's `layout: "column"` option builds this tree.
+
+![Before: column layout](images/agent-pane-titles/before-titles-column-dark.png)
+![After: column layout, names in full](images/agent-pane-titles/after-titles-column-dark.png)
+
+## Pane cards
+
+Added after review: a **Pane cards** switch (default off) draws every pane as a
+rounded card with a hairline edge on a field one tone lighter than the
+terminal, with 12px gutters between cards and between the cards and the
+sidebar, the right panel and the title bar, instead of divider lines. **Pane
+corner radius** offers 0 / 8 / 12 / 16 (default 12). Resizing still happens in
+the gutter; the title row and toolbar are unchanged. Before frames show the
+baseline, which has neither setting and ignores the keys the fixture sends.
+
+**Cards on, pointer on the Claude Code card, dark.** After: four cards with
+gutters, the hovered card's tiles on its title row, no divider lines.
+
+![Before: flat panes](images/agent-pane-titles/before-cards-hover-dark.png)
+![After: pane cards](images/agent-pane-titles/after-cards-hover-dark.png)
+
+**Cards on, light theme, column layout, no pointer.** After: white cards on a
+light field; the real pointer happened to rest on the Cursor card in both
+frames, so its grip (and after, its tiles) show.
+
+![Before: flat panes, light](images/agent-pane-titles/before-cards-light.png)
+![After: pane cards, light](images/agent-pane-titles/after-cards-light.png)
+
 **Control: titles off, no pointer.** Both binaries draw the same screen (the
 fixture sets the title setting explicitly; the shipped default is on).
 
@@ -114,7 +147,7 @@ split icons resolving to SVG artwork, and the locale parity test over the new
 keys. The app-level GPUI tests in `src/ui/pane_title.rs` (top-edge reveal on
 the agent pane and never on the shell, the setting adding and removing the row,
 a tile acting on its own pane rather than the focused one, an exiting agent
-taking its chrome with it) are unix-only like every pane test and run on CI.
+taking its chrome with it, pane cards opening a gutter where the divider was) are unix-only like every pane test and run on CI.
 
 ## Known limitations
 
