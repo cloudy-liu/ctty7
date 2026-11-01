@@ -56,6 +56,17 @@ impl Drop for Icon {
     }
 }
 
+/// Explorer's overlay channel with the standalone mark it will place on the
+/// installed identity's taskbar button. GPUI initializes COM on its Windows
+/// UI thread; callers elsewhere must have initialized it themselves.
+fn open_overlay() -> anyhow::Result<(ITaskbarList3, Icon)> {
+    let list: ITaskbarList3 =
+        unsafe { CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)? };
+    unsafe { list.HrInit()? };
+    let image = icon::attention_mark(32).context("could not render taskbar overlay")?;
+    Ok((list, Icon::from_image(image)?))
+}
+
 pub(super) struct Taskbar {
     icon: Icon,
     overlay: Option<(ITaskbarList3, Icon)>,
@@ -65,23 +76,18 @@ pub(super) struct Taskbar {
 impl Taskbar {
     fn new() -> anyhow::Result<Self> {
         // Explorer uses the registered shortcut's icon for the installed
-        // AppUserModelID, ignoring WM_SETICON on the grouped taskbar button.
-        // Keep the upper-right artwork for windows/Alt+Tab and dev builds;
-        // only shortcut-backed groups also need the shell's status overlay.
+        // AppUserModelID, ignoring WM_SETICON on that grouped taskbar button,
+        // so the installed identity delivers the mark through the shell's
+        // overlay. Cargo builds, and installs whose overlay channel fails,
+        // compose it into the window artwork instead. Never both: Explorer
+        // honors the window artwork whenever it does not substitute a
+        // shortcut's icon, and the button then shows two marks.
         let overlay = if std::env::current_exe()
             .is_ok_and(|exe| crate::core::aumid::taskbar_app_id(&exe) == crate::core::aumid::AUMID)
         {
-            // GPUI initializes COM on its Windows UI thread. Keep the window
-            // artwork available even if Explorer's overlay channel fails.
-            (|| -> anyhow::Result<_> {
-                let list: ITaskbarList3 =
-                    unsafe { CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)? };
-                unsafe { list.HrInit()? };
-                let image = icon::attention_mark(32).context("could not render taskbar overlay")?;
-                Ok((list, Icon::from_image(image)?))
-            })()
-            .map_err(|error| log::debug!("taskbar overlay unavailable: {error:#}"))
-            .ok()
+            open_overlay()
+                .map_err(|error| log::debug!("taskbar overlay unavailable: {error:#}"))
+                .ok()
         } else {
             None
         };
@@ -97,11 +103,13 @@ impl Taskbar {
     fn apply(&mut self, hwnd: HWND, attention: bool) {
         if let Some((list, icon)) = &self.overlay {
             let mark = if attention { icon.0 } else { HICON::default() };
-            // Reapply even when the window artwork is unchanged, including
-            // after Explorer has recreated the group's taskbar button.
+            // Reapply even when nothing changed, including after Explorer has
+            // recreated the group's taskbar button.
             if let Err(error) = unsafe { list.SetOverlayIcon(hwnd, mark, w!("Agent attention")) } {
                 log::debug!("could not update taskbar attention overlay: {error}");
             }
+            // The overlay carries the mark; the window icon stays plain.
+            return;
         }
         if attention {
             let current = KINDS.map(|kind| unsafe {
@@ -219,6 +227,7 @@ mod tests {
     use windows::{
         Win32::{
             Foundation::{LPARAM, WPARAM},
+            System::Com::{COINIT_APARTMENTTHREADED, CoInitializeEx},
             UI::WindowsAndMessaging::{
                 CreateWindowExW, DefWindowProcW, DestroyWindow, GCLP_HICON, GCLP_HICONSM,
                 GetClassLongPtrW, ICON_BIG, ICON_SMALL, IDI_APPLICATION, LoadIconW, RegisterClassW,
@@ -321,6 +330,34 @@ mod tests {
         fn drop(&mut self) {
             let _ = unsafe { DestroyWindow(self.0) };
         }
+    }
+
+    #[test]
+    fn the_overlay_path_leaves_the_window_icon_plain() {
+        // Explorer may honor WM_SETICON even for the installed identity, on a
+        // button it does not back with a registered shortcut. Painting both
+        // paths put two marks on that button.
+        let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
+        let Ok(overlay) = open_overlay() else {
+            return; // the shell's TaskbarList class is not available here
+        };
+        let window = TestWindow::new();
+        let original = window.icons();
+        let mut taskbar = Taskbar {
+            icon: Icon::new(256).unwrap(),
+            overlay: Some(overlay),
+            originals: HashMap::new(),
+        };
+        taskbar.apply(window.0, true);
+        assert_eq!(
+            window.icons(),
+            original,
+            "the shell overlay carries the mark; the window artwork must stay plain"
+        );
+        taskbar.apply(window.0, false);
+        assert_eq!(window.icons(), original);
+        drop(taskbar);
+        assert_eq!(window.icons(), original);
     }
 
     #[test]
