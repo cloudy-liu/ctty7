@@ -29,6 +29,9 @@ const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 
 /// File-tab labels follow the UI scale: 13px at the default 16px rem.
 const FILE_TAB_TEXT: f32 = 13. / 16.;
+/// How far a file tab sits below the strip's top edge, so its rounded top
+/// corners read against the strip rather than running into the chrome above.
+const FILE_TAB_TOP: f32 = 4.;
 
 #[cfg(all(feature = "markdown-visual-tests", any(windows, target_os = "macos")))]
 pub(crate) mod native_html;
@@ -2038,6 +2041,8 @@ impl Tty7App {
                     .flex_1()
                     .min_w_0()
                     .h_full()
+                    .items_end()
+                    .gap(px(2.))
                     .bg(gpui::rgb(inactive_tab))
                     .overflow_x_scroll()
                     .when_some(self.tab_code(), |strip, code| {
@@ -2069,13 +2074,14 @@ impl Tty7App {
                                     .debug_selector(move || format!("editor-file-tab-{ix}"))
                                     .occlude()
                                     .flex_none()
-                                    .h_full()
+                                    .h(px(crate::ui::app::TITLE_BAR_HEIGHT - FILE_TAB_TOP))
                                     .w(px(tab_width))
                                     .max_w_full()
                                     .px_2()
                                     .gap_1p5()
-                                    .border_r_1()
-                                    .border_color(cx.theme().border)
+                                    // A tab, not a cell: rounded on top, open at the
+                                    // bottom where the active one meets its document.
+                                    .rounded_t_md()
                                     .text_size(rems(FILE_TAB_TEXT))
                                     .cursor_pointer()
                                     .when(ix == code.active && !commit_front, |tab| {
