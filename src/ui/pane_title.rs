@@ -145,8 +145,9 @@ pub(crate) fn toolbar(
     } else {
         (Icon::new(IconName::Maximize), L10nKey::PaneToolbarZoom)
     };
-    // No backdrop: the tiles sit straight on the pane, the way the grip's
-    // dots do, and only appear while the pointer is on the top edge.
+    // No box: no edge, no shadow. But a fill in the pane's own background,
+    // because on a pane without a title row the tiles land on the first
+    // line of terminal text, and glyphs over text read as neither.
     div()
         .debug_selector(move || format!("agent-pane-toolbar-{}", pane.as_u64()))
         .occlude()
@@ -156,6 +157,8 @@ pub(crate) fn toolbar(
         .flex()
         .items_center()
         .gap(px(TOOLBAR_GAP))
+        .px(px(3.))
+        .bg(cx.theme().background)
         .child(tile(
             "split-right",
             pane,
