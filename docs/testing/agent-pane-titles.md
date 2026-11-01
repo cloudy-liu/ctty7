@@ -31,7 +31,7 @@ and config dir, so Before and After differ only in the binary.
 
 ## Matched Before and After
 
-**Pointer on the Claude Code pane's top edge, titles off (the default).** Before,
+**Pointer on the Claude Code pane's top edge, titles off.** Before,
 only the existing drag grip appears. After, the same grip plus the four tiles
 at the pane's top-right: split right, split down, zoom (outward arrows), close.
 The terminal does not move: the toolbar is an overlay.
@@ -72,12 +72,13 @@ filling the tab keeps its row and toolbar, with inward arrows for restore.
 
 **Settings, Window & Tabs, scrolled to the end of the Tabs block.** After, a
 "Show agent pane titles" switch follows "Show agent status text in sidebar",
-off.
+on (the default since the user's review; the spec had proposed off).
 
 ![Before: settings](images/agent-pane-titles/before-settings-light.png)
 ![After: settings](images/agent-pane-titles/after-settings-light.png)
 
-**Control: titles off, no pointer.** Both binaries draw the same screen.
+**Control: titles off, no pointer.** Both binaries draw the same screen (the
+fixture sets the title setting explicitly; the shipped default is on).
 
 ![Before: default](images/agent-pane-titles/before-default-dark.png)
 ![After: default](images/agent-pane-titles/after-default-dark.png)

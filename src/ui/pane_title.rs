@@ -338,8 +338,8 @@ mod gpui_tests {
             "nothing before the pointer arrives"
         );
         assert!(
-            !drawn(&mut vcx, "agent-pane-title", agent),
-            "titles are off by default"
+            drawn(&mut vcx, "agent-pane-title", agent),
+            "titles are on by default"
         );
 
         let leaf = vcx.debug_bounds(sel("pane-leaf", agent));
@@ -366,11 +366,7 @@ mod gpui_tests {
     #[gpui::test]
     fn the_setting_adds_and_removes_the_title_row_for_the_agent_pane_only(cx: &mut TestAppContext) {
         let (app, mut vcx, [agent, shell], _streams) = split(cx);
-        app.update_in(&mut vcx, |app, _, cx| {
-            app.set_show_agent_pane_titles(true, cx)
-        });
-        settle(&mut vcx);
-        assert!(drawn(&mut vcx, "agent-pane-title", agent));
+        assert!(drawn(&mut vcx, "agent-pane-title", agent), "on by default");
         assert!(!drawn(&mut vcx, "agent-pane-title", shell));
         assert!(
             !drawn(&mut vcx, "agent-pane-toolbar", agent),
@@ -382,6 +378,12 @@ mod gpui_tests {
         });
         settle(&mut vcx);
         assert!(!drawn(&mut vcx, "agent-pane-title", agent));
+
+        app.update_in(&mut vcx, |app, _, cx| {
+            app.set_show_agent_pane_titles(true, cx)
+        });
+        settle(&mut vcx);
+        assert!(drawn(&mut vcx, "agent-pane-title", agent));
     }
 
     #[gpui::test]

@@ -241,9 +241,9 @@ pub struct Config {
     #[serde(default = "default_true")]
     pub sidebar_agent_status_text: bool,
     /// Draw a recognized agent pane's icon and name in a row above its
-    /// terminal. Off by default; the hover toolbar on agent panes does not
+    /// terminal. On by default; the hover toolbar on agent panes does not
     /// depend on it.
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub show_agent_pane_titles: bool,
     /// Custom sidebar group titles, keyed by the group's root path — `""`
     /// stands for the Scratch group. A group without an entry keeps the name
@@ -664,7 +664,7 @@ impl Default for Config {
             sidebar_group_folders: false,
             sidebar_diff_preview: true,
             sidebar_agent_status_text: true,
-            show_agent_pane_titles: false,
+            show_agent_pane_titles: true,
             sidebar_group_names: BTreeMap::new(),
             sidebar_collapsed_groups: BTreeSet::new(),
             sidebar_pinned_groups: Vec::new(),
@@ -1463,17 +1463,17 @@ mod tests {
     }
 
     #[test]
-    fn show_agent_pane_titles_defaults_off_and_round_trips() {
-        assert!(!Config::default().show_agent_pane_titles);
+    fn show_agent_pane_titles_defaults_on_and_round_trips() {
+        assert!(Config::default().show_agent_pane_titles);
 
         let old: Config = serde_json::from_str(r#"{"font_size": 15.0}"#).unwrap();
-        assert!(!old.show_agent_pane_titles, "absent key keeps titles off");
+        assert!(old.show_agent_pane_titles, "absent key means titles on");
 
-        let on: Config = serde_json::from_str(r#"{"show_agent_pane_titles": true}"#).unwrap();
-        assert!(on.show_agent_pane_titles);
-        let json = serde_json::to_string(&on).unwrap();
+        let off: Config = serde_json::from_str(r#"{"show_agent_pane_titles": false}"#).unwrap();
+        assert!(!off.show_agent_pane_titles);
+        let json = serde_json::to_string(&off).unwrap();
         assert!(
-            json.contains("\"show_agent_pane_titles\":true"),
+            json.contains("\"show_agent_pane_titles\":false"),
             "persisted"
         );
     }

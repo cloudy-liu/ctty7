@@ -46,7 +46,7 @@ SCENES = [  # (name, titles, dark, hover pane, zoom, settings page)
     ("titles-hover-light", True, False, 0, False, False),
     ("ordinary-hover-dark", True, True, 3, False, False),
     ("zoom-hover-dark", True, True, 0, True, False),
-    ("settings-light", False, False, None, False, True),
+    ("settings-light", True, False, None, False, True),
 ]
 SETTINGS_HEIGHT = 1400  # the Window & Tabs page is taller than the pane scenes
 
