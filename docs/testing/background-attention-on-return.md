@@ -113,13 +113,50 @@ browser URL policy. This follow-up used only native fixture and Screenshot
 Tool surfaces, refreshed bindings before actions, and restored the minimized
 fixture through native input. These captures supersede that taskbar blocker.
 
+## Shared installed-group field captures on 2026-11-01
+
+An additional LCU run copied the same Before/After binaries outside Cargo's
+`CACHEDIR.TAG` ancestry. Production identity selection therefore uses
+`com.github.tty7`, including the existing shortcut-backed overlay path. The
+fixture joins the already-running installed application's taskbar group; it
+does not rewrite its shortcut, replace its executable, or alter its sessions.
+The display, fixture settings, native minimize/restore operations, and report
+sequence match the earlier run. These additional lossless taskbar crops use
+the same physical rectangle `(1500, 1500, 100, 100)`. Each was inspected and
+contains no pointer.
+
+| Inspect | Before | After |
+| --- | --- | --- |
+| Live background completion, shared installed taskbar group. | ![Before: shared group background badge](images/background-attention-installed/before-background-taskbar.png) | ![After: shared group background badge](images/background-attention-installed/after-background-taskbar.png) |
+| Return to Other terminal; a mark remains in the shared group in both captures. | ![Before: shared group after return](images/background-attention-installed/before-return-taskbar.png) | ![After: shared group after return](images/background-attention-installed/after-return-taskbar.png) |
+
+This shared-group visual result is **inconclusive**, not a passing clearing
+assertion. The [four production-identity observations](background-attention-installed-results.ndjson)
+show the corrected process reaching `attention: false` after activation while
+its completed pane remains unread. The old process retains `attention: true`.
+After the corrected fixture exited, the installed application alone still
+showed the same taskbar mark:
+
+![Installed application still has a mark after the test process exits](images/background-attention-installed/installed-only-taskbar.png)
+
+An isolated native group run needs the installed GUI to exit temporarily.
+Its existing windows were left intact pending the user's answer to that
+specific request. These captures establish the observed interference, not
+whether a completely isolated installed group clears correctly.
+
 ## Known limitations
 
-The tray overflow icon and the shortcut-backed installed taskbar group were
-not visually captured in this follow-up. The captures verify the real Windows
-development taskbar button and pane state. Keep the PR in draft until the
-remaining visual claims have matched native captures or an explicitly accepted
-limitation. Native macOS/Linux interaction, Explorer restart, and installation
-of a final package remain unverified. The fixture sends deterministic Agent
-reports through production terminal streams; it does not run a live coding
-Agent, shell, or SSH connection.
+The development taskbar button and pane state passed native acceptance. The
+shared installed group now has field captures, but clearing is inconclusive
+while the existing installed application retains its own mark. An isolated
+group run is pending permission to close and reopen that application's GUI.
+The tray overflow icon is still unverified: the available LCU inventory exposes
+application windows but no taskbar/overflow target. No separate SLCU tool is
+advertised in this session; the alternate computer-use surface reports
+`Computer Use native pipe is unavailable`.
+
+The user explicitly requested Ready for review status; keep that requested PR
+state while recording the remaining visual gaps. Native macOS/Linux
+interaction, Explorer restart, and installation of a final package remain
+unverified. The fixture sends deterministic Agent reports through production
+terminal streams; it does not run a live coding Agent, shell, or SSH connection.
