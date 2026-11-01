@@ -108,7 +108,8 @@ pub(crate) fn toolbar(
     } else {
         (Icon::new(IconName::Maximize), L10nKey::PaneToolbarZoom)
     };
-    let theme = cx.theme();
+    // No backdrop: the tiles sit straight on the pane, the way the grip's
+    // dots do, and only appear while the pointer is on the top edge.
     div()
         .debug_selector(move || format!("agent-pane-toolbar-{}", pane.as_u64()))
         .occlude()
@@ -118,12 +119,6 @@ pub(crate) fn toolbar(
         .flex()
         .items_center()
         .gap(px(TOOLBAR_GAP))
-        .p(px(1.5))
-        .rounded(px(6.))
-        .bg(theme.sidebar)
-        .border_1()
-        .border_color(theme.border)
-        .shadow_sm()
         .child(tile(
             "split-right",
             pane,
