@@ -26,6 +26,9 @@ pub(crate) const TITLE_ROW: f32 = crate::ui::app::SECONDARY_BAR_HEIGHT;
 /// The agent mark in that row.
 pub(crate) const TITLE_ICON: f32 = 14.;
 const TITLE_PAD_X: f32 = 10.;
+/// Room on the right for the four tiles, so a long name truncates before it
+/// would run under them.
+const TITLE_PAD_RIGHT: f32 = 4. * TILE_SIZE_XS + 3. * TOOLBAR_GAP + TOOLBAR_RIGHT + 6.;
 const TITLE_GAP: f32 = 7.;
 /// Where the tiles sit below whatever the pane reserves above its content
 /// (the drag grip's strip, in a split): centred on the title row when there
@@ -80,7 +83,8 @@ pub(crate) fn title_row(pane: EntityId, agent: CLIAgent, dim: f32, cx: &App) -> 
         .flex()
         .items_center()
         .gap(px(TITLE_GAP))
-        .px(px(TITLE_PAD_X))
+        .pl(px(TITLE_PAD_X))
+        .pr(px(TITLE_PAD_RIGHT))
         .when(dim < 1., |d| d.opacity(dim))
         .child(
             gpui::svg()
@@ -90,7 +94,13 @@ pub(crate) fn title_row(pane: EntityId, agent: CLIAgent, dim: f32, cx: &App) -> 
                 .text_color(gpui::rgb(ink)),
         )
         .child(
+            // The repository's truncation idiom: take the rest of the row and be
+            // allowed to shrink, so the ellipsis only ever comes from a pane
+            // that is really too narrow, not from a min-content measurement.
             div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
                 .text_size(px(TITLE_TEXT))
                 .text_color(cx.theme().foreground)
                 .overflow_hidden()
