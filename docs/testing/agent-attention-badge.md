@@ -389,6 +389,13 @@ the development identity and shows the window artwork; a copy of the same
 executable outside the build directory takes the installed identity and the
 shell overlay. The installed ctty7 release stayed running in the same taskbar.
 
+The installed identity used to paint both paths, the overlay and the window
+artwork. On a button Explorer does not back with a registered shortcut it
+honors the window artwork too, so that button showed two marks, which the
+Before crop below records. The overlay now carries the mark alone and the
+window icon stays plain; Cargo builds, and installs whose overlay channel
+fails, still compose it into the window artwork.
+
 | Location | Before | After |
 | --- | --- | --- |
 | Window artwork, development identity | ![Grey disc with white dot on the window artwork](images/agent-attention-dot/before-taskbar-window.png) ![Enlarged](images/agent-attention-dot/before-taskbar-window-x4.png) | ![Small blue dot on the window artwork](images/agent-attention-dot/after-taskbar-window.png) ![Enlarged](images/agent-attention-dot/after-taskbar-window-x4.png) |
@@ -402,6 +409,10 @@ shell overlay. The installed ctty7 release stayed running in the same taskbar.
   assert the solid `#0078D4` centre, that the old discs' reach now compares
   equal to the plain logo, that no grey or white opaque pixel survives, and that
   the artwork below the dot is untouched, at 16 to 256 pixels.
+- `cargo test --locked --bin tty7-app tray::taskbar::`: a new regression,
+  `the_overlay_path_leaves_the_window_icon_plain`, pins that a taskbar with an
+  overlay available never touches the window icon, next to the existing
+  window-artwork tests for the development identity.
 - `cargo test --offline --locked --workspace --target-dir D:/gh-prj/ctty7/target`
   passes 3,210 tests, with 12 ignored and no failures. `cargo fmt -p tty7 --
   --check` and `git diff --check` pass.
@@ -416,11 +427,12 @@ shell overlay. The installed ctty7 release stayed running in the same taskbar.
   `#202124`) comes from the prototype's contrast calculation; the capture
   machine's system theme was not switched for a native dark capture.
 - On this machine the installed-identity fixture did not join the running
-  release's taskbar group: Explorer gave it a button of its own, which carries
-  both delivery paths at once, the mark composed into the window artwork and
-  the shell overlay at the corner. That button is the one cropped, so it shows
-  two dots before and after; only their colour and size changed. The release's
-  own button next to it kept the previous grey overlay because that older build
-  was still running with an unread result.
+  release's taskbar group, so its own button is the one cropped: Before shows
+  both delivery paths on it, After the overlay alone. During the Before
+  capture the running release's button sat next to it with its own grey
+  overlay; that release had exited by the After capture.
+- With the overlay carrying the mark, the installed identity's window icon
+  stays plain, so Alt+Tab no longer shows the mark for installed builds; the
+  taskbar button does.
 - The tray capture shows the fixture's icon promoted into the visible
   notification area; the overflow flyout was not captured.
