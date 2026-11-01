@@ -4,7 +4,7 @@ Checked on 2026-11-02 against published v0.9.0, the candidate range, registered 
 
 ## Release range
 
-Fork main already contains PRs #236, #237, #238, and #240. PRs #239 and #241 were still open when this audit began; require their final fork CI checks to pass and squash-merge both before freezing the release candidate. The release notes describe only the user-visible changes in the v0.9.0-to-v0.10.0 range. The release preparation commit changes shared package versions and release documentation; it does not add product behavior.
+Fork main now contains PRs #236 through #241. PRs #239 and #241 were squash-merged after all fork CI checks passed. The release notes describe only the user-visible changes in the v0.9.0-to-v0.10.0 range. The release preparation commit changes shared package versions and release documentation; it does not add product behavior.
 
 ## Preserved local work
 
@@ -27,6 +27,11 @@ Fork main already contains PRs #236, #237, #238, and #240. PRs #239 and #241 wer
 | D:/gh-prj/ctty7-claude-evidence-src | Detached source checkout whose three modified files currently match fork main byte-for-byte. Remove after rechecking the merged tree and confirming there are no other local or untracked files. |
 | Root target, settings target, and .git/native-macos-check/target | Build outputs measured at approximately 30.7 GB, 9.8 GB, and 250 MB. Run cargo clean in those workspaces only after release publication; preserve the standalone native-macos-check source harness. |
 | fix/claude-input-detection at dddf2128 | Root checkout of the merged PR #240 head. Keep the root's untracked research directories; after publication, switch the root to main, fast-forward it to fork/main, and remove this merged local branch. |
+| tune-sidebar-tab-font-size at 9cb37686 | Exact local copy of the merged PR #236 head; remove this local branch after verifying the fork main contains the merged change. Do not delete the remote branch. |
+| feat/agent-pane-titles-234 at 6410fb07 | Exact local copy of merged PR #239; remove this local branch after verifying its squash merge. |
+| fix/attention-dot at f8bd59ea | Exact local copy of merged PR #241; remove this local branch after verifying its squash merge. |
+| fix/background-attention-return-v090 at 873a4478 | Remove this local branch only after confirming its merged PR #238 evidence and changes are present in fork main. |
+| release/v0.10.0 | Remove the release preparation checkout and local branch after the release PR is squash-merged; its commit remains in main history. |
 
 No remote branch is deleted by this audit. Remove only verified temporary local worktrees and branches after publication. Keep the release a draft until all twelve program assets and checksums.txt pass the existing downloaded-asset verifier.
 

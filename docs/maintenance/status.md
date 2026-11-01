@@ -13,7 +13,7 @@ The latest published custom release is v0.9.0, published on 2026-10-31. The prop
 - Claude Code question detection across padded terminal-grid rows (cloudy-liu/ctty7#240).
 - A small blue Windows attention mark with no duplicate overlay (cloudy-liu/ctty7#241).
 
-At audit time, PRs #239 and #241 remain open. Require all fork CI checks to pass and squash-merge both before freezing the candidate. Then verify the complete source CI, all twelve program assets, and checksums.txt while the v0.10.0 Release remains a draft; publication is explicit.
+PRs #239 and #241 have passed all fork CI checks and were squash-merged. The release preparation PR must now pass its source CI. Then verify the complete source CI, all twelve program assets, and checksums.txt while the v0.10.0 Release remains a draft; publication is explicit.
 
 The current native visual records and the known platform and installation limits are summarized in the [English release notes](../releases/v0.10.0.md). The [local-change audit](../testing/local-change-audit-v0.10.0.md) records preserved work and temporary verification material. Independent settings-surface and background-attention work, the document-tabs-radius branch, untracked prototypes and research, and all retained stashes remain outside the release.
 
@@ -62,7 +62,7 @@ these are verification gaps, not additional open GitHub tickets.
 ## Source and release state
 
 - Published tag v0.9.0 remains the current release baseline at preparation time. Its [English notes](../releases/v0.9.0.md) record the verified release scope and known limits.
-- Candidate v0.10.0 contains PRs #236 through #241; the final candidate and publication remain pending the last two PR merges, source CI, and complete draft asset verification.
+- Candidate v0.10.0 contains merged PRs #236 through #241; release preparation CI and complete draft asset verification remain before publication.
 
 - Published tag `v0.8.3` remains available with twelve program assets and `checksums.txt`; its [English notes](../releases/v0.8.3.md) and [local-change audit](../testing/local-change-audit-v0.8.3.md) record accepted behavior and verification limits.
 
