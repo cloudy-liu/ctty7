@@ -952,6 +952,16 @@ impl Pane<PaneSlot> {
                 // The toolbar is revealed by the same band as the grip, so a
                 // pane with either needs the band.
                 let band = grip || agent_chrome.toolbar;
+                let reserved_top = if chrome.rearrangeable {
+                    crate::ui::pane_drag::HANDLE_STRIP
+                } else {
+                    0.
+                };
+                let band_min = if agent_chrome.toolbar {
+                    crate::ui::pane_title::band_min(agent_chrome.title, reserved_top)
+                } else {
+                    0.
+                };
                 // The terminal renders itself at this opacity by blending its
                 // colours toward the window background (`TerminalView::dim`,
                 // whose field docs explain why that beats an element-opacity
@@ -994,6 +1004,8 @@ impl Pane<PaneSlot> {
                         d.child(crate::ui::pane_title::toolbar(
                             v,
                             chrome.zoomed == Some(id),
+                            agent_chrome.title,
+                            reserved_top,
                             &chrome.hovered,
                             cx,
                         ))
@@ -1002,7 +1014,11 @@ impl Pane<PaneSlot> {
                     // hitbox that blocks (the tiles) would otherwise take the
                     // pointer away from the band that revealed them.
                     .when(band, |d| {
-                        d.child(crate::ui::pane_drag::reveal_band(id, &chrome.hovered))
+                        d.child(crate::ui::pane_drag::reveal_band(
+                            id,
+                            &chrome.hovered,
+                            band_min,
+                        ))
                     })
                     .when(grip, |d| {
                         d.child(crate::ui::pane_drag::handle(

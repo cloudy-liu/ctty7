@@ -27,13 +27,23 @@ pub(crate) const TITLE_ROW: f32 = crate::ui::app::SECONDARY_BAR_HEIGHT;
 pub(crate) const TITLE_ICON: f32 = 14.;
 const TITLE_PAD_X: f32 = 10.;
 const TITLE_GAP: f32 = 7.;
-/// The tiles sit on the title row's centre line, so the agent mark, its name
-/// and the actions read as one row when the title is on; with the title off
-/// the same offset keeps the tile box inside the grip's reveal band
-/// (`pane_drag::REVEAL_MIN`), so hovering a tile is still hovering the band
-/// that revealed them.
-const TOOLBAR_TOP: f32 = (TITLE_ROW - TILE_SIZE_XS) / 2.;
+/// Where the tiles sit below whatever the pane reserves above its content
+/// (the drag grip's strip, in a split): centred on the title row when there
+/// is one, else just under that strip.
+const TOOLBAR_TOP_ON_ROW: f32 = (TITLE_ROW - TILE_SIZE_XS) / 2.;
+const TOOLBAR_TOP_BARE: f32 = 2.;
 const TOOLBAR_RIGHT: f32 = 6.;
+
+/// How tall the pane's reveal band must be for the tiles to stay inside it,
+/// so hovering a tile is still hovering the band that revealed it.
+pub(crate) fn band_min(on_title_row: bool, reserved_top: f32) -> f32 {
+    reserved_top
+        + if on_title_row {
+            TITLE_ROW
+        } else {
+            TOOLBAR_TOP_BARE + TILE_SIZE_XS + 2.
+        }
+}
 /// The name beside the mark: the sidebar's tab-title size, not body text.
 const TITLE_TEXT: f32 = 13.;
 const TOOLBAR_GAP: f32 = 2.;
@@ -99,10 +109,18 @@ pub(crate) fn title_row(pane: EntityId, agent: CLIAgent, dim: f32, cx: &App) -> 
 pub(crate) fn toolbar(
     slot: &PaneSlot,
     zoomed: bool,
+    on_title_row: bool,
+    reserved_top: f32,
     hovered: &Rc<Cell<Option<EntityId>>>,
     cx: &App,
 ) -> AnyElement {
     let pane = slot.entity_id();
+    let top = reserved_top
+        + if on_title_row {
+            TOOLBAR_TOP_ON_ROW
+        } else {
+            TOOLBAR_TOP_BARE
+        };
     if hovered.get() != Some(pane) {
         return div().into_any_element();
     }
@@ -118,7 +136,7 @@ pub(crate) fn toolbar(
         .debug_selector(move || format!("agent-pane-toolbar-{}", pane.as_u64()))
         .occlude()
         .absolute()
-        .top(px(TOOLBAR_TOP))
+        .top(px(top))
         .right(px(TOOLBAR_RIGHT))
         .flex()
         .items_center()

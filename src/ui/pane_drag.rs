@@ -230,9 +230,14 @@ fn dots(pane: EntityId, ink: gpui::Hsla) -> impl IntoElement {
 /// It draws nothing and takes nothing: an ordinary hitbox does not stand in
 /// front of the ones beneath it, so the terminal under the band still reads
 /// its own presses, its own selection and its own links.
+///
+/// `min_h` lets a pane that reveals more than the grip (an agent pane's title
+/// row and tiles) ask for a band at least that tall; the grip's own minimum
+/// still applies.
 pub(crate) fn reveal_band(
     pane: EntityId,
     hovered: &Rc<Cell<Option<EntityId>>>,
+    min_h: f32,
 ) -> gpui::AnyElement {
     let hovered = hovered.clone();
     div()
@@ -242,7 +247,7 @@ pub(crate) fn reveal_band(
         .left_0()
         .right_0()
         .h(gpui::relative(REVEAL_SHARE))
-        .min_h(px(REVEAL_MIN))
+        .min_h(px(min_h.max(REVEAL_MIN)))
         .on_hover(move |over, window, _cx| {
             let next = match (*over, hovered.get() == Some(pane)) {
                 (true, _) => Some(pane),
