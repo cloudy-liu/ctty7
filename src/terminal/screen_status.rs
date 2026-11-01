@@ -554,6 +554,9 @@ fn compiled(agent: CLIAgent) -> Option<&'static CompiledManifest> {
                 .inspect_err(|e| log::warn!("{} screen manifest: {e}", agent.slug()))
                 .ok()?;
             let extension_source = match agent {
+                CLIAgent::Claude => Some(include_str!(
+                    "../../assets/agent-detection/extensions/claude.toml"
+                )),
                 CLIAgent::Cursor => Some(include_str!(
                     "../../assets/agent-detection/extensions/cursor.toml"
                 )),
@@ -869,6 +872,43 @@ mod tests {
                 assert!(!manifest.rules.is_empty(), "{} has no rules", agent.slug());
             }
         }
+    }
+
+    #[test]
+    fn claude_named_session_question_is_blocked() {
+        let text = concat!(
+            "  4. Type something.\n",
+            "  ──────────────────\n",
+            "    5. Chat about this\n",
+            "\n",
+            "Enter to select · ↑/↓ to navigate · Esc to cancel\n",
+            "──────────────────── probe named ─\n",
+            "    3 tasks (1 done, 1 in progress, 1 open)\n",
+            "    ✔ completed task\n",
+            "    ◾ active task\n",
+            "    ◻ open task\n",
+            "    … +2 pending\n",
+        );
+        let reading = screen(CLIAgent::Claude, text);
+        assert_eq!(reading.state, ScreenState::Blocked);
+        assert!(reading.matched);
+    }
+
+    #[test]
+    fn claude_named_session_question_survives_terminal_padding() {
+        let text = include_str!("../../docs/testing/fixtures/claude-named-question.txt");
+        let term = term_with_columns(32, 100, text.replace('\n', "\r\n").as_bytes());
+        let reading = screen(CLIAgent::Claude, &detection_text(&term));
+        assert_eq!(reading.state, ScreenState::Blocked);
+        assert!(reading.matched);
+
+        let newer = format!("{}\r\nNew activity\r\n", text.replace('\n', "\r\n"));
+        let term = term_with_columns(32, 100, newer.as_bytes());
+        assert_ne!(
+            screen(CLIAgent::Claude, &detection_text(&term)).state,
+            ScreenState::Blocked,
+            "an old question must not override newer activity"
+        );
     }
 
     #[test]
@@ -1352,9 +1392,17 @@ mod tests {
     }
 
     fn term_with(rows: usize, bytes: &[u8]) -> Term<alacritty_terminal::event::VoidListener> {
+        term_with_columns(rows, 20, bytes)
+    }
+
+    fn term_with_columns(
+        rows: usize,
+        columns: usize,
+        bytes: &[u8],
+    ) -> Term<alacritty_terminal::event::VoidListener> {
         use alacritty_terminal::term::Config;
         use alacritty_terminal::vte::ansi::Processor;
-        struct Size(usize);
+        struct Size(usize, usize);
         impl alacritty_terminal::grid::Dimensions for Size {
             fn total_lines(&self) -> usize {
                 self.0
@@ -1363,12 +1411,12 @@ mod tests {
                 self.0
             }
             fn columns(&self) -> usize {
-                20
+                self.1
             }
         }
         let mut term = Term::new(
             Config::default(),
-            &Size(rows),
+            &Size(rows, columns),
             alacritty_terminal::event::VoidListener,
         );
         let mut parser: Processor = Processor::new();
