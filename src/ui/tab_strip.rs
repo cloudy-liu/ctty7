@@ -910,8 +910,10 @@ impl Tty7App {
         }
 
         crate::terminal::pane_liveness::sweep(cx);
+        // A workspace nobody has named yet goes by the app's own name, which
+        // in this fork is not the upstream's.
         let current = crate::ui::machine_mirror::display_name_for(cx, self.workspace)
-            .unwrap_or_else(|| "tty7".to_string());
+            .unwrap_or_else(|| crate::ui::app::DISPLAY_NAME.to_string());
         let monogram: String = current
             .chars()
             .next()
