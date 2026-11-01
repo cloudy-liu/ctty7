@@ -48,7 +48,9 @@ available width adds horizontal scrolling. The inline canvas reserves only its
 reading inset, allowing wide diagrams to use the old navigation pad's space.
 
 In the focused diagram, `+`/`-` zoom, arrows move, Page Up/Down or Space move by
-a viewport, and End reaches the bottom. Home scrolls the expanded diagram to its
+a viewport, and End reaches the bottom. Arrows move a fitted inline diagram only
+once it is zoomed; until then they keep scrolling the document, and dragging
+moves the diagram. Home scrolls the expanded diagram to its
 top while retaining zoom; `0` resets its size and position. Escape
 closes the expanded viewer and returns focus to the reading view. Document
 Home/End shortcuts continue to navigate the reading view.

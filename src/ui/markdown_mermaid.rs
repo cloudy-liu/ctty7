@@ -422,7 +422,15 @@ impl Render for DiagramViewer {
         // The toolbar and the gesture hint share one row above the diagram so
         // that nothing is drawn over the image. Narrow viewers shrink the
         // buttons so the three of them still fit beside the hint.
-        let controls_scale = scale.min(width / px(144.));
+        let mut controls_scale = scale.min(width / px(144.));
+        if self.expanded {
+            // Keep the toolbar row to at most a third of the dialog budget so a
+            // large interface font in a short window still leaves room for the
+            // diagram.
+            let budget = (window.viewport_size().height * 0.9 - px(50.) - window.rem_size() * 1.5)
+                .max(px(1.));
+            controls_scale = controls_scale.min(budget / px(120.));
+        }
         let toolbar_height = px(40. * controls_scale);
         let compact_size = (controls_scale < scale).then_some(px(32. * controls_scale));
         self.height = if self.expanded {
@@ -716,14 +724,14 @@ impl Render for DiagramViewer {
                     .truncate()
                     .invisible()
                     .when(focus.contains_focused(window, cx), |hint| hint.visible())
-                    .group_hover("diagram-viewport", |style| style.visible())
+                    .group_hover("diagram-block", |style| style.visible())
                     .child(t(label)),
             )
         });
         div()
             .id("diagram-block")
             .debug_selector(|| "diagram-block".into())
-            .group("diagram-viewport")
+            .group("diagram-block")
             .flex()
             .flex_col()
             .w_full()
