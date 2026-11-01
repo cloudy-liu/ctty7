@@ -716,16 +716,6 @@ fn settings_search_entries() -> &'static [SearchEntry] {
         },
         SearchEntry {
             section: WindowTabs,
-            title: SettingsPaneCards,
-            keywords: SettingsSearchPaneCardsKeywords,
-        },
-        SearchEntry {
-            section: WindowTabs,
-            title: SettingsPaneCornerRadius,
-            keywords: SettingsSearchPaneCornerRadiusKeywords,
-        },
-        SearchEntry {
-            section: WindowTabs,
             title: SettingsNotifyOnCommandFinish,
             keywords: SettingsSearchNotifyOnCommandFinishKeywords,
         },
@@ -5926,8 +5916,6 @@ impl Tty7App {
         let sidebar_diff_preview = cfg.sidebar_diff_preview;
         let sidebar_agent_status_text = cfg.sidebar_agent_status_text;
         let show_agent_pane_titles = cfg.show_agent_pane_titles;
-        let pane_cards = cfg.pane_cards;
-        let pane_corner_radius = cfg.pane_corner_radius;
         let sidebar_group_arrows = cfg.sidebar_group_arrows;
         let sidebar_group_folders = cfg.sidebar_group_folders;
         let sidebar_grouping_idx = match cfg.sidebar_grouping {
@@ -6118,23 +6106,6 @@ impl Tty7App {
                 cx.listener(|this, on: &bool, _w, cx| this.set_show_agent_pane_titles(*on, cx)),
             )
             .into_any_element();
-        let pane_cards_switch = crate::ui::theme::switch("wt-pane-cards", cx)
-            .checked(pane_cards)
-            .on_click(cx.listener(|this, on: &bool, _w, cx| this.set_pane_cards(*on, cx)))
-            .into_any_element();
-        let radius_idx = crate::core::config::PANE_CORNER_STEPS
-            .iter()
-            .position(|step| *step == pane_corner_radius)
-            .unwrap_or(2);
-        let pane_corner_radius_control = self.segmented(
-            "wt-pane-corner-radius",
-            &["0", "8", "12", "16"],
-            radius_idx,
-            cx,
-            |this, ix, _w, cx| {
-                this.set_pane_corner_radius(crate::core::config::PANE_CORNER_STEPS[ix], cx)
-            },
-        );
         let sidebar_grouping_radio = self.segmented(
             "wt-sidebar-grouping",
             &[
@@ -6228,18 +6199,6 @@ impl Tty7App {
                 t(L10nKey::SettingsShowAgentPaneTitles),
                 t(L10nKey::SettingsShowAgentPaneTitlesDesc),
                 agent_pane_titles_switch,
-                cx,
-            ))
-            .child(self.settings_row(
-                t(L10nKey::SettingsPaneCards),
-                t(L10nKey::SettingsPaneCardsDesc),
-                pane_cards_switch,
-                cx,
-            ))
-            .child(self.settings_row(
-                t(L10nKey::SettingsPaneCornerRadius),
-                t(L10nKey::SettingsPaneCornerRadiusDesc),
-                pane_corner_radius_control,
                 cx,
             ))
             .child(self.section_rule(cx))

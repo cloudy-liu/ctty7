@@ -37,19 +37,16 @@ EDGES = {  # pane index -> logical (x, y) on that pane's top edge
     0: (SIDEBAR + PANE_W / 4, TITLE_BAR + TOP_EDGE),
     3: (SIDEBAR + PANE_W * 1.25, TITLE_BAR + PANE_H + TOP_EDGE),
 }
-SCENES = [  # (name, titles, dark, hover pane, zoom, settings page, layout, cards)
-    ("default-dark", False, True, None, False, False, "grid", False),
-    ("hover-dark", False, True, 0, False, False, "grid", False),
-    ("titles-dark", True, True, None, False, False, "grid", False),
-    ("titles-hover-dark", True, True, 0, False, False, "grid", False),
-    ("titles-light", True, False, None, False, False, "grid", False),
-    ("titles-hover-light", True, False, 0, False, False, "grid", False),
-    ("ordinary-hover-dark", True, True, 3, False, False, "grid", False),
-    ("zoom-hover-dark", True, True, 0, True, False, "grid", False),
-    ("settings-light", True, False, None, False, True, "grid", False),
-    ("titles-column-dark", True, True, None, False, False, "column", False),
-    ("cards-hover-dark", True, True, 0, False, False, "grid", True),
-    ("cards-light", True, False, None, False, False, "column", True),
+SCENES = [  # (name, titles, dark, hover pane, zoom, settings page)
+    ("default-dark", False, True, None, False, False),
+    ("hover-dark", False, True, 0, False, False),
+    ("titles-dark", True, True, None, False, False),
+    ("titles-hover-dark", True, True, 0, False, False),
+    ("titles-light", True, False, None, False, False),
+    ("titles-hover-light", True, False, 0, False, False),
+    ("ordinary-hover-dark", True, True, 3, False, False),
+    ("zoom-hover-dark", True, True, 0, True, False),
+    ("settings-light", True, False, None, False, True),
 ]
 SETTINGS_HEIGHT = 1400  # the Window & Tabs page is taller than the pane scenes
 
@@ -75,13 +72,13 @@ def prepare_before(destination):
 
 
 def capture_scene(binary, output, phase, scene, scale):
-    name, titles, dark, hover, zoom, settings, layout, cards = scene
+    name, titles, dark, hover, zoom, settings = scene
     png = output / f"{phase}-{name}.png"
     log = output / f"{phase}-{name}.log"
     with tempfile.TemporaryDirectory(prefix="ctty7-agent-pane-visual-") as temporary:
         options = pathlib.Path(temporary) / "options.json"
         options.write_text(json.dumps({"output": str(png), "titles": titles, "dark": dark,
-                                       "zoom": zoom, "settings": settings, "layout": layout, "cards": cards, "hold_seconds": 90,
+                                       "zoom": zoom, "settings": settings, "hold_seconds": 90,
                                        "height": SETTINGS_HEIGHT if settings else None}), encoding="utf-8")
         with log.open("w", encoding="utf-8") as log_stream:
             process = subprocess.Popen([str(binary), "--config-dir", temporary,
@@ -109,8 +106,6 @@ def capture_scene(binary, output, phase, scene, scale):
                            str(CAPTURE), "-ProcId", str(process.pid), "-Out", str(png), "-SettleMs", "1200"]
                 if hover is not None:
                     x, y = EDGES[hover]
-                    if cards:  # the pane area is inset by the gutter in card mode
-                        x, y = x + 12, y + 12
                     command += ["-MoveTo", f"{int(x * scale)},{int(y * scale)}"]
                 result = subprocess.run(command, check=True, capture_output=True, text=True)
                 print(f"  {name}: {result.stdout.strip()}", flush=True)
