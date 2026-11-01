@@ -554,6 +554,9 @@ fn compiled(agent: CLIAgent) -> Option<&'static CompiledManifest> {
                 .inspect_err(|e| log::warn!("{} screen manifest: {e}", agent.slug()))
                 .ok()?;
             let extension_source = match agent {
+                CLIAgent::Claude => Some(include_str!(
+                    "../../assets/agent-detection/extensions/claude.toml"
+                )),
                 CLIAgent::Cursor => Some(include_str!(
                     "../../assets/agent-detection/extensions/cursor.toml"
                 )),
@@ -869,6 +872,26 @@ mod tests {
                 assert!(!manifest.rules.is_empty(), "{} has no rules", agent.slug());
             }
         }
+    }
+
+    #[test]
+    fn claude_named_session_question_is_blocked() {
+        let text = concat!(
+            "  4. Type something.\n",
+            "  ──────────────────\n",
+            "    5. Chat about this\n",
+            "\n",
+            "Enter to select · ↑/↓ to navigate · Esc to cancel\n",
+            "──────────────────── probe named ─\n",
+            "    3 tasks (1 done, 1 in progress, 1 open)\n",
+            "    ✔ completed task\n",
+            "    ◾ active task\n",
+            "    ◻ open task\n",
+            "    … +2 pending\n",
+        );
+        let reading = screen(CLIAgent::Claude, text);
+        assert_eq!(reading.state, ScreenState::Blocked);
+        assert!(reading.matched);
     }
 
     #[test]
