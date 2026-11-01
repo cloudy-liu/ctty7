@@ -34,6 +34,14 @@ struct Options {
     /// Open Settings on Window & Tabs instead of showing the panes.
     #[serde(default)]
     settings: bool,
+    /// "grid" (2x2, default) or "column": one wide pane beside three stacked.
+    #[serde(default)]
+    layout: String,
+    /// Pane cards on, and their corner radius (both reach the config as JSON,
+    /// so a baseline without the settings builds the same fixture).
+    #[serde(default)]
+    cards: bool,
+    radius: Option<u32>,
     height: Option<f32>,
     hold_seconds: Option<u64>,
 }
@@ -91,6 +99,10 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             // built against does not know the setting and ignores the key.
             let mut value = serde_json::to_value(&config.0).unwrap();
             value["show_agent_pane_titles"] = serde_json::Value::Bool(options.titles);
+            value["pane_cards"] = serde_json::Value::Bool(options.cards);
+            if let Some(radius) = options.radius {
+                value["pane_corner_radius"] = serde_json::Value::from(radius);
+            }
             let config = Config(serde_json::from_value(value).unwrap());
             cx.set_global(config);
             crate::core::session::WorkspaceStore::init(cx);
@@ -150,6 +162,35 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                             }
                             let leaf =
                                 |v: &Entity<TerminalView>| Pane::leaf(PaneSlot::Ready(v.clone()));
+                            let tree = if options.layout == "column" {
+                                // One wide pane beside a column of three: the
+                                // shape in which review found agent names cut
+                                // down to an ellipsis.
+                                let lower = Pane::split_node(
+                                    Axis::Vertical,
+                                    0.5,
+                                    leaf(&views[2]),
+                                    leaf(&views[3]),
+                                );
+                                let column =
+                                    Pane::split_node(Axis::Vertical, 0.4, leaf(&views[1]), lower);
+                                Pane::split_node(Axis::Horizontal, 0.5, leaf(&views[0]), column)
+                            } else {
+                                let top = Pane::split_node(
+                                    Axis::Horizontal,
+                                    0.5,
+                                    leaf(&views[0]),
+                                    leaf(&views[1]),
+                                );
+                                let bottom = Pane::split_node(
+                                    Axis::Horizontal,
+                                    0.5,
+                                    leaf(&views[2]),
+                                    leaf(&views[3]),
+                                );
+                                Pane::split_node(Axis::Vertical, 0.5, top, bottom)
+                            };
+                            app.tabs.push(Tab::new(tree));
                             let top = Pane::split_node(
                                 Axis::Horizontal,
                                 0.5,

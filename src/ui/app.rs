@@ -2874,7 +2874,31 @@ impl Tty7App {
             drag: self.pane_drag.clone(),
             agent_titles: cx.global::<Config>().show_agent_pane_titles,
             zoomed,
+            cards: cx
+                .global::<Config>()
+                .pane_cards
+                .then(|| crate::ui::pane::PaneCards {
+                    radius: crate::core::config::CoreConfig::pane_corner_step(
+                        cx.global::<Config>().pane_corner_radius,
+                    ) as f32,
+                    gutter: crate::ui::pane::PANE_GUTTER,
+                }),
         }
+    }
+
+    /// In card mode the pane body sits on a field one tone off the cards, inset
+    /// by the gutter on every side so the cards keep the same distance from the
+    /// sidebar, the right panel and the title bar as from each other.
+    fn pane_cards_frame(&self, body: gpui::AnyElement, cx: &gpui::App) -> gpui::AnyElement {
+        if self.tabs.get(self.active).is_none() || !cx.global::<Config>().pane_cards {
+            return body;
+        }
+        div()
+            .size_full()
+            .p(px(crate::ui::pane::PANE_GUTTER))
+            .bg(cx.theme().sidebar)
+            .child(body)
+            .into_any_element()
     }
 
     pub(crate) fn set_link_url(&mut self, on: bool, cx: &mut Context<Self>) {
@@ -3256,6 +3280,16 @@ impl Tty7App {
 
     pub(crate) fn set_show_agent_pane_titles(&mut self, on: bool, cx: &mut Context<Self>) {
         self.update_config(cx, |cfg| cfg.show_agent_pane_titles = on);
+    }
+
+    pub(crate) fn set_pane_cards(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.update_config(cx, |cfg| cfg.pane_cards = on);
+    }
+
+    pub(crate) fn set_pane_corner_radius(&mut self, radius: u32, cx: &mut Context<Self>) {
+        self.update_config(cx, |cfg| {
+            cfg.pane_corner_radius = crate::core::config::CoreConfig::pane_corner_step(radius)
+        });
     }
 
     pub(crate) fn toggle_tab_sidebar(&mut self, cx: &mut Context<Self>) {
@@ -7737,6 +7771,7 @@ impl Render for Tty7App {
             }
         };
 
+        let body = self.pane_cards_frame(body, cx);
         let title_bar = TitleBar::new()
             .h(px(TITLE_BAR_HEIGHT))
             .bg(cx.theme().transparent)

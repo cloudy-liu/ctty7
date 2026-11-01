@@ -571,6 +571,12 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsShowAgentPaneTitlesDesc => {
             "在 Agent 窗格的终端上方显示一行图标和名称。普通终端不受影响；无论是否开启，Agent 窗格的悬浮操作都可用。"
         }
+        L10nKey::SettingsPaneCards => "窗格卡片",
+        L10nKey::SettingsPaneCardsDesc => {
+            "把每个窗格画成圆角卡片，窗格之间和窗格区域四周留出间距，不再用分隔线。"
+        }
+        L10nKey::SettingsPaneCornerRadius => "窗格圆角",
+        L10nKey::SettingsPaneCornerRadiusDesc => "窗格卡片和放大窗格的圆角大小。",
         L10nKey::DocumentDock => "停靠在终端旁",
         L10nKey::DocumentFill => "铺满窗口",
         L10nKey::DocumentFillTooltip => "铺满主工作区",
@@ -782,6 +788,10 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSearchShowAgentPaneTitlesKeywords => {
             "显示 Agent 窗格标题 窗格 标题 图标 名称 agent pane title icon name header row split zoom close hover"
         }
+        L10nKey::SettingsSearchPaneCardsKeywords => {
+            "窗格卡片 卡片 圆角 间距 分隔线 pane cards gutter divider"
+        }
+        L10nKey::SettingsSearchPaneCornerRadiusKeywords => "窗格圆角 圆角 卡片 pane corner radius",
         L10nKey::SettingsSearchDimInactivePanesKeywords => {
             "调暗 非活动窗格 淡化 未聚焦 分屏 高亮 active dimming pane focus"
         }

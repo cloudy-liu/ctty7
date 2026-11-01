@@ -245,6 +245,14 @@ pub struct Config {
     /// depend on it.
     #[serde(default = "default_true")]
     pub show_agent_pane_titles: bool,
+    /// Draw every pane as a rounded card with gutters between panes and
+    /// around the pane area, instead of divider lines. Off keeps today's
+    /// flat layout.
+    #[serde(default)]
+    pub pane_cards: bool,
+    /// Corner rounding of pane cards, one of [`PANE_CORNER_STEPS`].
+    #[serde(default = "default_pane_corner_radius")]
+    pub pane_corner_radius: u32,
     /// Custom sidebar group titles, keyed by the group's root path — `""`
     /// stands for the Scratch group. A group without an entry keeps the name
     /// derived from its path, and an entry is removed (not blanked) when the
@@ -665,6 +673,8 @@ impl Default for Config {
             sidebar_diff_preview: true,
             sidebar_agent_status_text: true,
             show_agent_pane_titles: true,
+            pane_cards: false,
+            pane_corner_radius: 12,
             sidebar_group_names: BTreeMap::new(),
             sidebar_collapsed_groups: BTreeSet::new(),
             sidebar_pinned_groups: Vec::new(),
@@ -744,6 +754,15 @@ impl LoadOutcome {
 }
 
 impl Config {
+    /// The step nearest to `radius`, so a hand-edited config still lands on
+    /// one of the offered roundings.
+    pub fn pane_corner_step(radius: u32) -> u32 {
+        *PANE_CORNER_STEPS
+            .iter()
+            .min_by_key(|step| step.abs_diff(radius))
+            .expect("steps are not empty")
+    }
+
     pub fn load() -> Self {
         Self::load_with_outcome().0
     }
@@ -1147,6 +1166,13 @@ fn default_preset() -> String {
     "default".to_string()
 }
 
+/// The corner roundings the Settings page offers for pane cards.
+pub const PANE_CORNER_STEPS: [u32; 4] = [0, 8, 12, 16];
+
+fn default_pane_corner_radius() -> u32 {
+    12
+}
+
 fn default_true() -> bool {
     true
 }
@@ -1460,6 +1486,31 @@ mod tests {
         assert!(json.contains("\"sidebar_diff_preview\":false"), "persisted");
         let back: Config = serde_json::from_str(&json).unwrap();
         assert!(!back.sidebar_diff_preview);
+    }
+
+    #[test]
+    fn pane_cards_default_off_with_a_12px_radius_and_round_trip() {
+        let cfg = Config::default();
+        assert!(!cfg.pane_cards);
+        assert_eq!(cfg.pane_corner_radius, 12);
+        assert_eq!(Config::pane_corner_step(12), 12);
+        assert_eq!(
+            Config::pane_corner_step(9),
+            8,
+            "off-step values snap to the nearest step"
+        );
+        assert_eq!(Config::pane_corner_step(99), 16);
+
+        let old: Config = serde_json::from_str(r#"{"font_size": 15.0}"#).unwrap();
+        assert!(!old.pane_cards);
+        assert_eq!(old.pane_corner_radius, 12);
+
+        let on: Config =
+            serde_json::from_str(r#"{"pane_cards": true, "pane_corner_radius": 16}"#).unwrap();
+        assert!(on.pane_cards);
+        assert_eq!(on.pane_corner_radius, 16);
+        let json = serde_json::to_string(&on).unwrap();
+        assert!(json.contains("\"pane_cards\":true") && json.contains("\"pane_corner_radius\":16"));
     }
 
     #[test]

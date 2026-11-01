@@ -129,7 +129,22 @@ pub(crate) struct PaneChrome {
     /// The pane filling the tab alone, whose toolbar offers restore where
     /// zoom was.
     pub zoomed: Option<gpui::EntityId>,
+    /// Draw panes as rounded cards with gutters instead of divider lines
+    /// (`Config::pane_cards`); `None` is today's flat layout.
+    pub cards: Option<PaneCards>,
 }
+
+/// The card treatment, when it is on.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct PaneCards {
+    pub radius: f32,
+    pub gutter: f32,
+}
+
+/// Space between cards, and between the cards and whatever frames the pane
+/// area (sidebar, right panel, title bar): the same number everywhere, so the
+/// gutters read as one field showing through.
+pub(crate) const PANE_GUTTER: f32 = 12.;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Rect {
@@ -974,11 +989,22 @@ impl Pane<PaneSlot> {
                 } else {
                     1.0
                 };
+                let card_bg = cx.theme().background;
+                let card_edge = cx.theme().border;
                 div()
                     .debug_selector(move || format!("pane-leaf-{}", id.as_u64()))
                     .size_full()
                     .relative()
                     .overflow_hidden()
+                    // A card paints the terminal's background itself; the
+                    // terminal leaves its default background unpainted, so
+                    // the rounded fill shows through the cells.
+                    .when_some(chrome.cards, |d, cards| {
+                        d.rounded(px(cards.radius))
+                            .bg(card_bg)
+                            .border_1()
+                            .border_color(card_edge)
+                    })
                     .when(chrome.rearrangeable, |d| {
                         d.pt(px(crate::ui::pane_drag::HANDLE_STRIP))
                     })
@@ -1100,13 +1126,22 @@ impl Pane<PaneSlot> {
                 .absolute()
                 .size_full();
 
-                let line_color = if dragging.get() { active } else { idle };
+                // In card mode the divider is a gutter of the card spacing: the
+                // same grab, no line until a drag is in flight.
+                let thickness = chrome.cards.map_or(DIVIDER_THICKNESS, |cards| cards.gutter);
+                let line_color = if dragging.get() {
+                    active
+                } else if chrome.cards.is_some() {
+                    gpui::transparent_black()
+                } else {
+                    idle
+                };
                 // The gutter stays 5px so the split looks the same; the target
                 // is the 8px the sidebar and right-panel edges already hand
                 // you. The extra 1.5px a side reaches into the pane's own 8px
                 // GRID_PAD_X, so it never covers a cell of terminal text.
                 let overhang =
-                    (crate::ui::right_panel::RESIZE_HANDLE_WIDTH - DIVIDER_THICKNESS).max(0.) / 2.;
+                    (crate::ui::right_panel::RESIZE_HANDLE_WIDTH - thickness).max(0.) / 2.;
                 let grab = div()
                     .occlude()
                     .absolute()
@@ -1114,14 +1149,14 @@ impl Pane<PaneSlot> {
                         d.top_0()
                             .h_full()
                             .left(px(-overhang))
-                            .w(px(DIVIDER_THICKNESS + overhang * 2.))
+                            .w(px(thickness + overhang * 2.))
                             .cursor_col_resize()
                     })
                     .when(!row, |d| {
                         d.left_0()
                             .w_full()
                             .top(px(-overhang))
-                            .h(px(DIVIDER_THICKNESS + overhang * 2.))
+                            .h(px(thickness + overhang * 2.))
                             .cursor_row_resize()
                     })
                     .on_mouse_down(MouseButton::Left, {
@@ -1138,8 +1173,8 @@ impl Pane<PaneSlot> {
                     .flex()
                     .items_center()
                     .justify_center()
-                    .when(row, |d| d.w(px(DIVIDER_THICKNESS)).h_full())
-                    .when(!row, |d| d.h(px(DIVIDER_THICKNESS)).w_full())
+                    .when(row, |d| d.w(px(thickness)).h_full())
+                    .when(!row, |d| d.h(px(thickness)).w_full())
                     .child(
                         div()
                             .when(row, |d| d.w(px(1.)).h_full())

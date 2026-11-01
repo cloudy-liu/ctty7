@@ -646,6 +646,12 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsShowAgentPaneTitlesDesc => {
             "エージェントのアイコンと名前をターミナルの上の行に表示します。通常のターミナルには表示されず、エージェントペインのホバー操作はどちらでも使えます。"
         }
+        L10nKey::SettingsPaneCards => "ペインカード",
+        L10nKey::SettingsPaneCardsDesc => {
+            "各ペインを角丸のカードとして描き、ペイン間とペイン領域の周囲に余白を取ります。区切り線は使いません。"
+        }
+        L10nKey::SettingsPaneCornerRadius => "ペインの角丸",
+        L10nKey::SettingsPaneCornerRadiusDesc => "ペインカードと拡大ペインの角の丸みです。",
         L10nKey::DocumentDock => "ターミナルの隣にドック",
         L10nKey::DocumentFill => "ウィンドウ全体",
         L10nKey::DocumentFillTooltip => "ワークスペース全体に表示",
@@ -875,6 +881,10 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSearchShowAgentPaneTitlesKeywords => {
             "エージェント ペイン タイトル アイコン 名前 agent pane title icon name header row split zoom close hover"
         }
+        L10nKey::SettingsSearchPaneCardsKeywords => {
+            "ペイン カード 角丸 余白 区切り線 pane cards gutter divider"
+        }
+        L10nKey::SettingsSearchPaneCornerRadiusKeywords => "ペイン 角丸 カード pane corner radius",
         L10nKey::SettingsSearchDimInactivePanesKeywords => {
             "非アクティブ ペイン 暗く フォーカス 分割 fade unfocused inactive split pane focus opacity highlight active dimming"
         }

@@ -103,9 +103,6 @@ pub(crate) fn title_row(pane: EntityId, agent: CLIAgent, dim: f32, cx: &App) -> 
                 .truncate()
                 .text_size(px(TITLE_TEXT))
                 .text_color(cx.theme().foreground)
-                .overflow_hidden()
-                .whitespace_nowrap()
-                .text_ellipsis()
                 .child(agent.display_name().to_string()),
         )
         .into_any_element()
@@ -430,6 +427,34 @@ mod gpui_tests {
             drawn(&mut vcx, "pane-leaf", shell),
             "restore brings the split back"
         );
+    }
+
+    #[gpui::test]
+    fn pane_cards_open_a_gutter_where_the_divider_was(cx: &mut TestAppContext) {
+        let (app, mut vcx, [agent, shell], _streams) = split(cx);
+        let gap = |vcx: &mut VisualTestContext| {
+            let a = vcx
+                .debug_bounds(sel("pane-leaf", agent))
+                .expect("agent pane drawn");
+            let b = vcx
+                .debug_bounds(sel("pane-leaf", shell))
+                .expect("shell pane drawn");
+            f32::from(b.left() - a.right())
+        };
+        let flat = gap(&mut vcx);
+        assert!((flat - 5.).abs() < 1., "today's divider is 5px, got {flat}");
+
+        app.update_in(&mut vcx, |app, _, cx| app.set_pane_cards(true, cx));
+        settle(&mut vcx);
+        let carded = gap(&mut vcx);
+        assert!(
+            (carded - crate::ui::pane::PANE_GUTTER).abs() < 1.,
+            "cards are a gutter apart, got {carded}"
+        );
+
+        app.update_in(&mut vcx, |app, _, cx| app.set_pane_cards(false, cx));
+        settle(&mut vcx);
+        assert!((gap(&mut vcx) - 5.).abs() < 1., "off restores the divider");
     }
 
     #[gpui::test]

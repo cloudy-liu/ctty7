@@ -636,6 +636,14 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsShowAgentPaneTitlesDesc => {
             "Draw the agent's icon and name in a row above its terminal. Ordinary terminals never get one, and the hover actions on agent panes stay available either way."
         }
+        L10nKey::SettingsPaneCards => "Pane cards",
+        L10nKey::SettingsPaneCardsDesc => {
+            "Draw each pane as a rounded card, with gutters between panes and around the pane area instead of divider lines."
+        }
+        L10nKey::SettingsPaneCornerRadius => "Pane corner radius",
+        L10nKey::SettingsPaneCornerRadiusDesc => {
+            "Corner rounding of pane cards and the zoomed pane."
+        }
         L10nKey::DocumentDock => "Dock beside terminal",
         L10nKey::DocumentFill => "Fill window",
         L10nKey::DocumentFillTooltip => "Fill workspace",
@@ -846,6 +854,12 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         }
         L10nKey::SettingsSearchShowAgentPaneTitlesKeywords => {
             "agent pane title icon name header row split zoom close hover"
+        }
+        L10nKey::SettingsSearchPaneCardsKeywords => {
+            "pane cards rounded card gutter gap divider split layout"
+        }
+        L10nKey::SettingsSearchPaneCornerRadiusKeywords => {
+            "pane corner radius rounded corners cards"
         }
         L10nKey::SettingsSearchDimInactivePanesKeywords => {
             "fade unfocused inactive split pane focus opacity highlight active dimming"
