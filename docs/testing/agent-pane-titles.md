@@ -8,7 +8,8 @@ are the native application.
 
 Baseline source: `1063bc9b` (fork `main`) with only the fixture overlaid by
 `scripts/agent-pane-native-visual.py prepare-before`. Final application source:
-`2b10418a` (the feature commit `0dec85b0` plus the borderless toolbar). Both are debug builds of the production app with
+`fc788463` (the feature commit `0dec85b0` plus the borderless toolbar centred on the
+title row, the 13px name, and the `ctty7` head label for an unnamed workspace). Both are debug builds of the production app with
 `--features markdown-visual-tests`, started as
 `tty7-app --config-dir <fresh dir> --agent-pane-visual <options.json>`.
 
@@ -93,7 +94,10 @@ resolution, so the settings pair shows the part of the clamped 1400px window
 that fits on screen; the PNG set above remains the full-resolution record.
 Inspect the same things: tiles at the hovered pane's top-right, the rows on
 the three agent panes and not on PowerShell, and the new switch after the
-sidebar status row.
+sidebar status row. The LCU After frames were captured at `2b10418a`: they
+show the borderless toolbar but predate the row alignment, the 13px name and
+the `ctty7` head label of the final revision; a re-capture waits for a free
+screen, since LCU reads the window's on-screen region.
 
 | LCU Before | LCU After |
 | --- | --- |
@@ -113,6 +117,8 @@ taking its chrome with it) are unix-only like every pane test and run on CI.
 
 ## Known limitations
 
+- The LCU After frames lag the final revision by the three cosmetic tweaks
+  named above; the PNG set is current.
 - Hover is a posted pointer message, not a physical pointer. The reveal path
   it exercises is the production `on_hover` band; a physical pointer takes the
   same path.
