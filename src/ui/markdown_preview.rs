@@ -3039,9 +3039,9 @@ mod tests {
     }
 
     #[gpui::test]
-    fn inline_mermaid_controls_zoom_pan_reset_and_copy(cx: &mut TestAppContext) {
+    fn inline_mermaid_toolbar_preserves_gestures_keyboard_reset_and_copy(cx: &mut TestAppContext) {
         let (app, mut vcx) = crate::ui::app::test_window::harness(cx);
-        let code = "flowchart LR\n A --> B\n";
+        let code = "flowchart LR\n A[Choose the Markdown reading theme for this workspace] --> B[Resolve the active application background and reading palette] --> C[Render the Markdown preview with readable Mermaid diagrams]\n";
         let content = format!(
             "# Controls\n\nWords to select.\n\n```mermaid\n{code}```\n\n{}",
             "After the diagram.\n\n".repeat(80)
@@ -3062,7 +3062,7 @@ mod tests {
                 window.refresh();
                 let _ = window.draw(cx);
             });
-            cx.debug_bounds("diagram-zoom-in").is_some()
+            cx.debug_bounds("diagram-reset").is_some()
         });
         let preview = app.read_with(&vcx, |app, _| {
             app.tab_code()
@@ -3076,62 +3076,79 @@ mod tests {
         let viewer = preview.read_with(&vcx, |this, _| {
             this.diagram_views.values().next().unwrap().clone()
         });
-        let zoom = vcx
-            .debug_bounds("diagram-zoom-in")
-            .expect("inline diagrams need zoom controls");
         let viewport = vcx.debug_bounds("diagram-viewport").unwrap();
-        let expand = vcx.debug_bounds("expand-diagram").unwrap();
-        assert!(zoom.size.width >= px(32.) && zoom.size.height >= px(32.));
-        assert!(zoom.center().y > viewport.center().y && expand.center().y < viewport.center().y);
-        let fit = vcx.debug_bounds("diagram-content").unwrap();
-        let right = vcx.debug_bounds("diagram-pan-right").unwrap();
         let reset = vcx.debug_bounds("diagram-reset").unwrap();
+        let expand = vcx.debug_bounds("expand-diagram").unwrap();
         let copy = vcx.debug_bounds("copy-diagram").unwrap();
-        vcx.simulate_mouse_move(zoom.center(), None, gpui::Modifiers::none());
-        vcx.update(|window, cx| {
-            let _ = window.draw(cx);
-        });
-        vcx.simulate_mouse_down(
-            zoom.center(),
-            gpui::MouseButton::Left,
-            gpui::Modifiers::none(),
+        for removed in [
+            "diagram-zoom-in",
+            "diagram-zoom-out",
+            "diagram-pan-up",
+            "diagram-pan-down",
+            "diagram-pan-left",
+            "diagram-pan-right",
+        ] {
+            assert!(
+                vcx.debug_bounds(removed).is_none(),
+                "{removed} must not be shown"
+            );
+        }
+        assert!(reset.size.width >= px(32.) && reset.size.height >= px(32.));
+        assert_eq!(reset.top(), expand.top());
+        assert_eq!(reset.top(), copy.top());
+        assert!(reset.right() <= expand.left() && expand.right() <= copy.left());
+        assert!(
+            reset.bottom() <= viewport.top() && copy.right() <= viewport.right(),
+            "the toolbar must sit above the diagram, not over it"
         );
-        vcx.update(|window, cx| {
-            let _ = window.draw(cx);
-        });
-        vcx.simulate_mouse_up(
-            zoom.center(),
-            gpui::MouseButton::Left,
-            gpui::Modifiers::none(),
+        let fit = vcx.debug_bounds("diagram-content").unwrap();
+        assert!(
+            (fit.size.width - (viewport.size.width - px(32.))).abs() <= px(1.),
+            "wide diagrams must reclaim the old navigation reservation"
         );
-        vcx.run_until_parked();
+        assert!(
+            !vcx.debug_bounds("diagram-toolbar")
+                .unwrap()
+                .intersects(&fit),
+            "the toolbar must not overlap the diagram"
+        );
+        let drag_start = viewport.center();
+        let scroll_before_zoom = preview.read_with(&vcx, |preview, _| preview.scroll.offset());
+        vcx.simulate_event(gpui::ScrollWheelEvent {
+            position: drag_start,
+            delta: gpui::ScrollDelta::Lines(point(0., 1.)),
+            modifiers: gpui::Modifiers {
+                control: true,
+                ..gpui::Modifiers::none()
+            },
+            touch_phase: gpui::TouchPhase::Moved,
+        });
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
         viewer.read_with(&vcx, |viewer, _| {
             assert!(
                 viewer.rendered_transform.0 > 1.,
-                "zoom must reach the rendered cached diagram"
+                "Ctrl+wheel must repaint the cached diagram"
             )
         });
-        vcx.simulate_click(right.center(), gpui::Modifiers::none());
-        vcx.run_until_parked();
-        vcx.update(|window, cx| {
-            let _ = window.draw(cx);
-        });
-        viewer.read_with(&vcx, |viewer, _| {
-            assert!(
-                viewer.rendered_transform.1.x < px(-1.),
-                "pan must reach the rendered cached diagram"
+        preview.read_with(&vcx, |preview, _| {
+            assert_eq!(
+                preview.scroll.offset(),
+                scroll_before_zoom,
+                "zoom must not scroll the document"
             )
         });
         let before_drag = viewer.read_with(&vcx, |viewer, _| viewer.rendered_transform.1);
-        let drag_start = viewport.origin + point(px(32.), px(64.));
         let drag_delta = point(px(10.), px(10.));
         vcx.simulate_mouse_down(drag_start, gpui::MouseButton::Left, gpui::Modifiers::none());
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
+        assert!(
+            vcx.debug_bounds("diagram-gesture-hint").is_none(),
+            "hide hints while dragging"
+        );
         vcx.simulate_mouse_move(
             drag_start + drag_delta,
             gpui::MouseButton::Left,
@@ -3152,30 +3169,26 @@ mod tests {
             gpui::MouseButton::Left,
             gpui::Modifiers::none(),
         );
-        vcx.simulate_click(reset.center(), gpui::Modifiers::none());
-        vcx.run_until_parked();
-        vcx.update(|window, cx| {
-            let _ = window.draw(cx);
-        });
-        viewer.read_with(&vcx, |viewer, _| {
-            assert_eq!(viewer.rendered_transform, (1., point(px(0.), px(0.))))
-        });
-        vcx.update(|window, cx| {
-            window.refresh();
-            let _ = window.draw(cx);
-        });
-        assert_eq!(vcx.debug_bounds("diagram-content").unwrap(), fit);
-        vcx.simulate_click(right.center(), gpui::Modifiers::none());
+        vcx.simulate_keystrokes("right");
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
         viewer.read_with(&vcx, |viewer, _| {
             assert!(
-                viewer.rendered_transform.1.x < px(-1.),
-                "fitted diagrams must also support panning"
+                viewer.rendered_transform.1.x < (before_drag + drag_delta).x,
+                "arrows must still pan the diagram"
             )
         });
-        let fitted_pan = viewer.read_with(&vcx, |viewer, _| viewer.rendered_transform.1);
+        vcx.simulate_click(reset.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            window.refresh();
+            let _ = window.draw(cx);
+        });
+        viewer.read_with(&vcx, |viewer, _| {
+            assert_eq!(viewer.rendered_transform, (1., point(px(0.), px(0.))))
+        });
+        assert_eq!(vcx.debug_bounds("diagram-content").unwrap(), fit);
         vcx.simulate_mouse_down(drag_start, gpui::MouseButton::Left, gpui::Modifiers::none());
         vcx.simulate_mouse_move(
             drag_start + drag_delta,
@@ -3186,7 +3199,10 @@ mod tests {
             let _ = window.draw(cx);
         });
         viewer.read_with(&vcx, |viewer, _| {
-            assert_eq!(viewer.rendered_transform.1, fitted_pan + drag_delta)
+            assert_eq!(
+                viewer.rendered_transform.1, drag_delta,
+                "fitted diagrams must remain draggable"
+            )
         });
         vcx.simulate_mouse_up(
             drag_start + drag_delta,
@@ -3201,12 +3217,11 @@ mod tests {
             assert_eq!(
                 viewer.rendered_transform,
                 (1., point(px(0.), px(0.))),
-                "0 must reset a fitted inline diagram after dragging"
+                "0 must reset the fitted diagram"
             )
         });
         vcx.simulate_click(copy.center(), gpui::Modifiers::none());
         vcx.update(|_, cx| assert_eq!(cx.read_from_clipboard().unwrap().text().unwrap(), code));
-        let scroll_before_zoom = preview.read_with(&vcx, |preview, _| preview.scroll.offset());
         vcx.simulate_event(gpui::ScrollWheelEvent {
             position: drag_start,
             delta: gpui::ScrollDelta::Lines(point(0., 1.)),
@@ -3219,24 +3234,7 @@ mod tests {
         vcx.update(|window, cx| {
             let _ = window.draw(cx);
         });
-        viewer.read_with(&vcx, |viewer, _| {
-            assert!(
-                viewer.rendered_transform.0 > 1.,
-                "Ctrl+wheel must zoom the cached diagram"
-            )
-        });
-        preview.read_with(&vcx, |preview, _| {
-            assert_eq!(
-                preview.scroll.offset(),
-                scroll_before_zoom,
-                "diagram zoom must not scroll the document"
-            )
-        });
-        vcx.simulate_click(reset.center(), gpui::Modifiers::none());
-        vcx.update(|window, cx| {
-            let _ = window.draw(cx);
-        });
-        let pan_before_wheel = viewer.read_with(&vcx, |viewer, _| viewer.rendered_transform.1);
+        let before_wheel = viewer.read_with(&vcx, |viewer, _| viewer.rendered_transform);
         vcx.simulate_event(gpui::ScrollWheelEvent {
             position: drag_start,
             delta: gpui::ScrollDelta::Lines(point(0., -1.)),
@@ -3247,12 +3245,12 @@ mod tests {
             let _ = window.draw(cx);
         });
         viewer.read_with(&vcx, |viewer, _| {
-            assert_eq!(viewer.rendered_transform.1, pan_before_wheel)
+            assert_eq!(viewer.rendered_transform, before_wheel)
         });
         preview.read_with(&vcx, |preview, _| {
             assert!(
-                preview.scroll.offset().y < px(-1.),
-                "fitted diagrams must let the document scroll"
+                preview.scroll.offset().y < scroll_before_zoom.y,
+                "ordinary wheel must scroll the document even after zoom"
             )
         });
     }

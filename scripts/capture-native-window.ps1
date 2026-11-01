@@ -46,13 +46,13 @@ if ($Click) {
 }
 Start-Sleep -Milliseconds $SettleMs
 $r = New-Object WinCap+RECT; [void][WinCap]::GetWindowRect($hwnd, [ref]$r)
-$e = New-Object WinCap+RECT; [void][WinCap]::DwmGetWindowAttribute($hwnd, 9, [ref]$e, 16)
+$e = New-Object WinCap+RECT; if ([WinCap]::DwmGetWindowAttribute($hwnd, 9, [ref]$e, 16) -ne 0) { $e = $r }
 $w = $r.R - $r.L; $h = $r.B - $r.T
 $bmp = New-Object System.Drawing.Bitmap $w, $h
 $g = [System.Drawing.Graphics]::FromImage($bmp)
 $hdc = $g.GetHdc()
 $ok = [WinCap]::PrintWindow($hwnd, $hdc, 2)
-$g.ReleaseHdc($hdc); $g.Dispose()
+$g.ReleaseHdc($hdc); $g.Dispose(); if (-not $ok) { $bmp.Dispose(); throw "PrintWindow failed for hwnd $hwnd" }
 $crop = New-Object System.Drawing.Rectangle ($e.L - $r.L), ($e.T - $r.T), ($e.R - $e.L), ($e.B - $e.T)
 $final = $bmp.Clone($crop, $bmp.PixelFormat)
 $final.Save($Out, [System.Drawing.Imaging.ImageFormat]::Png); $final.Dispose(); $bmp.Dispose()

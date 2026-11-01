@@ -1,4 +1,10 @@
-# Agent completion badge acceptance
+# Agent completion badge acceptance (historical)
+
+The tests and captures below describe the earlier unread-based reminder. The
+current background-event behavior is specified in
+[Background Agent attention on return](../agents/background-attention-on-return.md).
+See the [follow-up regression and current acceptance limits](background-attention-on-return.md)
+for the change based on the v0.9.0 mainline.
 
 Agent results that have not been viewed leave a dark circular mark with a
 white dot on the Windows taskbar and tray icons. There is no numeric count.

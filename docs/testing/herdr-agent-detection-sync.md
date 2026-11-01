@@ -92,8 +92,10 @@ The attached JPG files are original Computer Use captures, without retouching:
 ## Verification limits
 
 The 2026-10-18 manifest follow-up passes the offline inventory check and its
-four Python regression tests. Native acceptance of the added Claude
-named-session form rule has not been performed.
+four Python regression tests. Native Windows replay acceptance of the Claude
+named-session form, including the active-task marker and terminal-row padding,
+is now recorded in
+[Claude input detection](claude-input-detection.md).
 
 A live Antigravity CLI 1.3.4 session was launched separately with a read-only
 fixture. Its Gemini request failed with HTTP 400, `User location is not

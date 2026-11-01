@@ -139,6 +139,157 @@ fn report_session(
 }
 
 #[gpui::test]
+fn returning_to_another_tab_clears_the_app_badge_but_keeps_the_result_unread(
+    cx: &mut TestAppContext,
+) {
+    use crate::core::cli_agent::CLIAgent;
+    use crate::core::session::{Session, WorkspaceId, WorkspaceStore};
+    use crate::ui::app::{Tab, Tty7App};
+    use crate::ui::pane::{Pane, PaneSlot};
+    use crate::ui::windows::WindowRegistry;
+
+    crate::core::config::pin_test_config_dir();
+    cx.executor().allow_parking();
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        let mut config = Config::default();
+        config.notify_on_command_finish = NotifyMode::Never;
+        config.agent_notification_sound = NotifyMode::Never;
+        cx.set_global(config);
+        cx.set_global(RecordingDelivery::default());
+        WorkspaceStore::init(cx);
+        WindowRegistry::init(cx);
+        crate::ui::keymap::init(cx);
+    });
+    let mut built = None;
+    let window = cx.add_window(|window, cx| {
+        let app = cx.new(|cx| {
+            Tty7App::with_session(
+                Some(WorkspaceId::new()),
+                Some(Session::default()),
+                window,
+                cx,
+            )
+        });
+        let (agent, mut daemon) = quiet_test_pane(301, window, cx);
+        let (other, _other_daemon) = quiet_test_pane(302, window, cx);
+        DaemonMsg::Agent(Some(CLIAgent::Claude))
+            .encode(&mut daemon)
+            .unwrap();
+        app.update(cx, |app, cx| {
+            app.tabs
+                .push(Tab::new(Pane::leaf(PaneSlot::Ready(agent.clone()))));
+            app.tabs
+                .push(Tab::new(Pane::leaf(PaneSlot::Ready(other.clone()))));
+            app.active = 1;
+            app.focus_active(window, cx);
+        });
+        built = Some((app.clone(), agent, daemon));
+        gpui_component::Root::new(app, window, cx)
+    });
+    let (app, agent, mut daemon) = built.unwrap();
+    app.update(cx, |app, cx| {
+        let weak = cx.entity().downgrade();
+        WindowRegistry::register(cx, app.workspace, window.into(), weak);
+    });
+    cx.run_until_parked();
+    let mut visual = gpui::VisualTestContext::from_window(window.into(), cx);
+    visual.deactivate_window();
+    report(AgentStatus::Waiting, &mut daemon, window, &agent, cx);
+    cx.update(|cx| {
+        assert!(
+            !crate::ui::tray::app_snapshot(cx).attention(),
+            "a restored waiting snapshot is not a new background event"
+        );
+    });
+    report(AgentStatus::Working, &mut daemon, window, &agent, cx);
+    report(AgentStatus::Done, &mut daemon, window, &agent, cx);
+    cx.update(|cx| {
+        assert!(agent.read(cx).agent_result_unread());
+        assert!(crate::ui::tray::app_snapshot(cx).attention());
+    });
+    window
+        .update(cx, |_, window, _| window.activate_window())
+        .unwrap();
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert!(
+            agent.read(cx).agent_result_unread(),
+            "another tab is still unread"
+        );
+        assert!(
+            !crate::ui::tray::app_snapshot(cx).attention(),
+            "returning to the app must clear its badge without visiting the result"
+        );
+    });
+
+    visual.deactivate_window();
+    cx.run_until_parked();
+    cx.update(|cx| {
+        assert!(agent.read(cx).agent_result_unread());
+        assert!(
+            !crate::ui::tray::app_snapshot(cx).attention(),
+            "an acknowledged result must not reappear when leaving again"
+        );
+    });
+
+    report(AgentStatus::Working, &mut daemon, window, &agent, cx);
+    report(AgentStatus::Waiting, &mut daemon, window, &agent, cx);
+    cx.update(|cx| assert!(crate::ui::tray::app_snapshot(cx).attention()));
+
+    let another_window = cx.add_window(|window, cx| {
+        let app = cx.new(|cx| {
+            Tty7App::with_session(
+                Some(WorkspaceId::new()),
+                Some(Session::default()),
+                window,
+                cx,
+            )
+        });
+        gpui_component::Root::new(app, window, cx)
+    });
+    another_window
+        .update(cx, |_, window, _| window.activate_window())
+        .unwrap();
+    cx.run_until_parked();
+    assert!(
+        another_window
+            .update(cx, |_, window, _| window.is_window_active())
+            .unwrap()
+    );
+    assert!(
+        !window
+            .update(cx, |_, window, _| window.is_window_active())
+            .unwrap()
+    );
+    cx.update(|cx| {
+        assert_eq!(agent.read(cx).agent_status(), Some(AgentStatus::Waiting));
+        assert!(
+            !crate::ui::tray::app_snapshot(cx).attention(),
+            "activating any ctty7 window acknowledges the background event"
+        );
+    });
+    report(AgentStatus::Working, &mut daemon, window, &agent, cx);
+    report(AgentStatus::Done, &mut daemon, window, &agent, cx);
+    cx.update(|cx| {
+        assert!(
+            !crate::ui::tray::app_snapshot(cx).attention(),
+            "another active ctty7 window prevents a background badge"
+        );
+    });
+    let mut second_visual = gpui::VisualTestContext::from_window(another_window.into(), cx);
+    second_visual.deactivate_window();
+    report(AgentStatus::Working, &mut daemon, window, &agent, cx);
+    report(AgentStatus::Done, &mut daemon, window, &agent, cx);
+    cx.update(|cx| {
+        assert!(
+            crate::ui::tray::app_snapshot(cx).attention(),
+            "a later background event creates a fresh reminder"
+        );
+    });
+}
+
+#[gpui::test]
 fn agent_lifecycle_initial_waiting_is_a_silent_baseline(cx: &mut TestAppContext) {
     let (window, view, mut daemon) = harness(cx);
     report(AgentStatus::Waiting, &mut daemon, window, &view, cx);
