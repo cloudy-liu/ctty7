@@ -27,11 +27,15 @@ pub(crate) const TITLE_ROW: f32 = crate::ui::app::SECONDARY_BAR_HEIGHT;
 pub(crate) const TITLE_ICON: f32 = 14.;
 const TITLE_PAD_X: f32 = 10.;
 const TITLE_GAP: f32 = 7.;
-/// How far in from the pane's top-right corner the tiles sit. With the tile
-/// box that keeps them inside the grip's reveal band
+/// The tiles sit on the title row's centre line, so the agent mark, its name
+/// and the actions read as one row when the title is on; with the title off
+/// the same offset keeps the tile box inside the grip's reveal band
 /// (`pane_drag::REVEAL_MIN`), so hovering a tile is still hovering the band
-/// that revealed it.
-const TOOLBAR_INSET: f32 = 2.;
+/// that revealed them.
+const TOOLBAR_TOP: f32 = (TITLE_ROW - TILE_SIZE_XS) / 2.;
+const TOOLBAR_RIGHT: f32 = 6.;
+/// The name beside the mark: the sidebar's tab-title size, not body text.
+const TITLE_TEXT: f32 = 13.;
 const TOOLBAR_GAP: f32 = 2.;
 
 /// What a pane draws beyond its terminal this frame.
@@ -77,7 +81,7 @@ pub(crate) fn title_row(pane: EntityId, agent: CLIAgent, dim: f32, cx: &App) -> 
         )
         .child(
             div()
-                .text_sm()
+                .text_size(px(TITLE_TEXT))
                 .text_color(cx.theme().foreground)
                 .overflow_hidden()
                 .whitespace_nowrap()
@@ -114,8 +118,8 @@ pub(crate) fn toolbar(
         .debug_selector(move || format!("agent-pane-toolbar-{}", pane.as_u64()))
         .occlude()
         .absolute()
-        .top(px(TOOLBAR_INSET))
-        .right(px(TOOLBAR_INSET))
+        .top(px(TOOLBAR_TOP))
+        .right(px(TOOLBAR_RIGHT))
         .flex()
         .items_center()
         .gap(px(TOOLBAR_GAP))
