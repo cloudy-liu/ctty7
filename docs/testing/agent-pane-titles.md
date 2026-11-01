@@ -8,9 +8,9 @@ are the native application.
 
 Baseline source: `1063bc9b` (fork `main`) with only the fixture overlaid by
 `scripts/agent-pane-native-visual.py prepare-before`. Final application source:
-`9026afa7` (the feature commit `0dec85b0` plus the borderless toolbar centred on the
+`b70928a0` (the feature commit `0dec85b0` plus the borderless toolbar centred on the
 title row, the 13px name, the `ctty7` head label for an unnamed workspace, the
-name-width fix and optional pane cards). Both are debug builds of the production app with
+name-width fix, and the hover toolbar on every pane). Both are debug builds of the production app with
 `--features markdown-visual-tests`, started as
 `tty7-app --config-dir <fresh dir> --agent-pane-visual <options.json>`.
 
@@ -52,8 +52,9 @@ PowerShell pane does not. The toolbar sits inside the hovered pane's row.
 ![Before: titles on, no hover](images/agent-pane-titles/before-titles-dark.png)
 ![After: titles on, no hover](images/agent-pane-titles/after-titles-dark.png)
 
-**Pointer on the PowerShell pane's top edge, titles on.** The ordinary terminal
-gets neither a row nor tiles; only the pre-existing grip answers the hover.
+**Pointer on the PowerShell pane's top edge, titles on.** After the user's review
+every pane offers the four tiles; the ordinary terminal still gets no title
+row. Before, only the pre-existing grip answers the hover.
 
 ![Before: hover on the shell](images/agent-pane-titles/before-ordinary-hover-dark.png)
 ![After: hover on the shell](images/agent-pane-titles/after-ordinary-hover-dark.png)
@@ -86,29 +87,6 @@ column; the fixture's `layout: "column"` option builds this tree.
 
 ![Before: column layout](images/agent-pane-titles/before-titles-column-dark.png)
 ![After: column layout, names in full](images/agent-pane-titles/after-titles-column-dark.png)
-
-## Pane cards
-
-Added after review: a **Pane cards** switch (default off) draws every pane as a
-rounded card with a hairline edge on a field one tone lighter than the
-terminal, with 12px gutters between cards and between the cards and the
-sidebar, the right panel and the title bar, instead of divider lines. **Pane
-corner radius** offers 0 / 8 / 12 / 16 (default 12). Resizing still happens in
-the gutter; the title row and toolbar are unchanged. Before frames show the
-baseline, which has neither setting and ignores the keys the fixture sends.
-
-**Cards on, pointer on the Claude Code card, dark.** After: four cards with
-gutters, the hovered card's tiles on its title row, no divider lines.
-
-![Before: flat panes](images/agent-pane-titles/before-cards-hover-dark.png)
-![After: pane cards](images/agent-pane-titles/after-cards-hover-dark.png)
-
-**Cards on, light theme, column layout, no pointer.** After: white cards on a
-light field; the real pointer happened to rest on the Cursor card in both
-frames, so its grip (and after, its tiles) show.
-
-![Before: flat panes, light](images/agent-pane-titles/before-cards-light.png)
-![After: pane cards, light](images/agent-pane-titles/after-cards-light.png)
 
 **Control: titles off, no pointer.** Both binaries draw the same screen (the
 fixture sets the title setting explicitly; the shipped default is on).
@@ -147,7 +125,7 @@ split icons resolving to SVG artwork, and the locale parity test over the new
 keys. The app-level GPUI tests in `src/ui/pane_title.rs` (top-edge reveal on
 the agent pane and never on the shell, the setting adding and removing the row,
 a tile acting on its own pane rather than the focused one, an exiting agent
-taking its chrome with it, pane cards opening a gutter where the divider was) are unix-only like every pane test and run on CI.
+taking its chrome with it) are unix-only like every pane test and run on CI.
 
 ## Known limitations
 
