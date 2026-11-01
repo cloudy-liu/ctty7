@@ -30,6 +30,8 @@ struct Options {
     #[serde(default)]
     agent_replay: bool,
     #[serde(default)]
+    claude_question: Option<PathBuf>,
+    #[serde(default)]
     auto_names: bool,
     #[serde(default)]
     attention_badge: bool,
@@ -65,11 +67,12 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
         .with_assets(crate::ui::assets::Assets)
         .with_quit_mode(QuitMode::Explicit)
         .run(move |cx| {
+            let screen_replay = options.agent_replay || options.claude_question.is_some();
             gpui_component::init(cx);
             crate::register_bundled_fonts(cx);
             let mut config = Config::default();
             config.theme_follow_system = false;
-            config.theme_preset = if options.agent_replay { "dark" } else { "light" }.into();
+            config.theme_preset = if screen_replay { "dark" } else { "light" }.into();
             config.install_cli_on_path = false;
             config.cursor_blink = false;
             config.sidebar_width = 260.;
@@ -98,6 +101,8 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                     ("Completed Agent", Some(CLIAgent::Claude), None),
                     ("Other terminal", None, None),
                 ]
+            } else if options.claude_question.is_some() {
+                vec![("Claude question replay", Some(CLIAgent::Claude), None)]
             } else if options.agent_replay {
                 vec![("AGY screen replay", Some(CLIAgent::Antigravity), None)]
             } else if options.auto_names {
@@ -156,14 +161,17 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                                 DaemonMsg::Agent(*agent).encode(&mut stream).unwrap();
                                 if agent.is_some() {
                                     DaemonMsg::AgentStatus(Some(AgentSessionState {
-                                        status: if options.agent_replay { AgentStatus::Idle } else { AgentStatus::Working },
-                                        rich: !options.agent_replay,
+                                        status: if screen_replay { AgentStatus::Idle } else { AgentStatus::Working },
+                                        rich: !screen_replay,
                                         ..Default::default()
                                     }))
                                     .encode(&mut stream)
                                     .unwrap();
                                 }
-                                let output = if options.agent_replay {
+                                let output = if let Some(path) = &options.claude_question {
+                                    let text = std::fs::read_to_string(path).expect("Claude question screen");
+                                    format!("\x1b]0;{name}\x07\x1b[2J\x1b[H{}", text.replace('\n', "\r\n"))
+                                } else if options.agent_replay {
                                     format!("\x1b]0;{name}\x07{}", agy_screen("⠿ The structure of the `view-grouped-container` section is being mapped out.", "Press up to edit queued messages"))
                                 } else { format!(
                                     "\x1b]0;{name}\x07\x1b[1mSSH tab visual acceptance\x1b[0m\r\n\r\n\
@@ -183,7 +191,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                                 views.push(view);
                                 streams.push(stream);
                             }
-                            app.active = if options.attention_badge { 1 } else if options.agent_replay { 0 } else { 4 };
+                            app.active = if options.attention_badge { 1 } else if screen_replay { 0 } else { 4 };
                             app.focus_active(window, cx);
                             cx.notify();
                         });
@@ -224,7 +232,7 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
                 cx.update_window(handle.into(), |_, window, cx| {
                     window.refresh();
                     let _ = window.draw(cx);
-                    window.set_window_title(if options.agent_replay { "AGY screen replay" } else { "SSH tab visual acceptance" });
+                    window.set_window_title(if options.claude_question.is_some() { "Claude question replay" } else if options.agent_replay { "AGY screen replay" } else { "SSH tab visual acceptance" });
                     #[cfg(target_os = "macos")]
                     window.render_to_image().unwrap().save(&options.output).unwrap();
                     #[cfg(not(target_os = "macos"))]

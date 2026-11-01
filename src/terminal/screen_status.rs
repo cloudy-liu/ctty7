@@ -895,6 +895,23 @@ mod tests {
     }
 
     #[test]
+    fn claude_named_session_question_survives_terminal_padding() {
+        let text = include_str!("../../docs/testing/fixtures/claude-named-question.txt");
+        let term = term_with_columns(32, 100, text.replace('\n', "\r\n").as_bytes());
+        let reading = screen(CLIAgent::Claude, &detection_text(&term));
+        assert_eq!(reading.state, ScreenState::Blocked);
+        assert!(reading.matched);
+
+        let newer = format!("{}\r\nNew activity\r\n", text.replace('\n', "\r\n"));
+        let term = term_with_columns(32, 100, newer.as_bytes());
+        assert_ne!(
+            screen(CLIAgent::Claude, &detection_text(&term)).state,
+            ScreenState::Blocked,
+            "an old question must not override newer activity"
+        );
+    }
+
+    #[test]
     fn a_rule_on_a_region_herdr_does_not_know_fails_the_manifest() {
         let source = "[[rules]]\nstate = \"idle\"\nregion = \"bottom_half\"\ncontains = [\"x\"]\n";
         assert!(compile(source).is_err());
@@ -1375,9 +1392,17 @@ mod tests {
     }
 
     fn term_with(rows: usize, bytes: &[u8]) -> Term<alacritty_terminal::event::VoidListener> {
+        term_with_columns(rows, 20, bytes)
+    }
+
+    fn term_with_columns(
+        rows: usize,
+        columns: usize,
+        bytes: &[u8],
+    ) -> Term<alacritty_terminal::event::VoidListener> {
         use alacritty_terminal::term::Config;
         use alacritty_terminal::vte::ansi::Processor;
-        struct Size(usize);
+        struct Size(usize, usize);
         impl alacritty_terminal::grid::Dimensions for Size {
             fn total_lines(&self) -> usize {
                 self.0
@@ -1386,12 +1411,12 @@ mod tests {
                 self.0
             }
             fn columns(&self) -> usize {
-                20
+                self.1
             }
         }
         let mut term = Term::new(
             Config::default(),
-            &Size(rows),
+            &Size(rows, columns),
             alacritty_terminal::event::VoidListener,
         );
         let mut parser: Processor = Processor::new();

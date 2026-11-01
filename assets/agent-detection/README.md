@@ -17,9 +17,9 @@ Keep local extensions separate when updating the upstream files.
 prompt after Herdr's `│` pane divider. The engine appends them to Cursor's
 upstream rules with the same priorities and detection regions.
 
-`extensions/claude.toml` covers a named-session question whose counted task
-panel contains Claude's U+25FE active-task marker, which the pinned upstream
-rule does not recognize. The upstream manifest remains byte-for-byte intact.
+`extensions/claude.toml` covers named-session questions with Claude's U+25FE
+active-task marker and trailing padding in terminal grid rows, both missed by
+the pinned upstream rule. The upstream manifest remains byte-for-byte intact.
 
 Check the complete set offline with Python 3.11 or newer:
 
