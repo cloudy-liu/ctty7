@@ -8,7 +8,7 @@ are the native application.
 
 Baseline source: `1063bc9b` (fork `main`) with only the fixture overlaid by
 `scripts/agent-pane-native-visual.py prepare-before`. Final application source:
-`0dec85b0`. Both are debug builds of the production app with
+`2b10418a` (the feature commit `0dec85b0` plus the borderless toolbar). Both are debug builds of the production app with
 `--features markdown-visual-tests`, started as
 `tty7-app --config-dir <fresh dir> --agent-pane-visual <options.json>`.
 
