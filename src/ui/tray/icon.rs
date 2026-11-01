@@ -52,19 +52,31 @@ fn render_glyph(size: u32) -> Option<tiny_skia::Pixmap> {
     Some(pixmap)
 }
 
+/// The attention dot's colour: Windows' own blue, the same fixed value the tab
+/// avatars' SSH corner badge paints. A constant on purpose: the dot sits on the
+/// Windows taskbar and tray, whose backgrounds the app theme does not control,
+/// and #0078D4 clears 3:1 on light and dark taskbars alike.
+#[cfg(target_os = "windows")]
+const ATTENTION_BLUE: (u8, u8, u8) = (0x00, 0x78, 0xD4);
+
+/// The window artwork: the logo with a dot a sixth of the icon in radius at the
+/// upper-right, about 8px across on a 24px taskbar icon.
 #[cfg(target_os = "windows")]
 pub(super) fn render_taskbar(size: u32) -> Option<RgbaImage> {
     let mut pixmap = render_glyph(size)?;
     let s = size as f32;
-    paint_attention(&mut pixmap, s * 0.68, s * 0.32, s * 0.30, 0.22);
+    paint_attention(&mut pixmap, s * 0.68, s * 0.32, s / 6.0);
     Some(to_rgba(&pixmap))
 }
 
+/// The standalone overlay Explorer places on a shortcut-backed taskbar button.
+/// Its 16px slot is two thirds of a 24px icon, so a quarter-of-the-slot radius
+/// renders the same 8px dot as the window artwork.
 #[cfg(target_os = "windows")]
 pub(super) fn attention_mark(size: u32) -> Option<RgbaImage> {
     let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
     let s = size as f32;
-    paint_attention(&mut pixmap, s / 2.0, s / 2.0, s * 0.46, 0.22);
+    paint_attention(&mut pixmap, s / 2.0, s / 2.0, s / 4.0);
     Some(to_rgba(&pixmap))
 }
 
@@ -246,32 +258,33 @@ fn badge(pixmap: &mut tiny_skia::Pixmap) {
     }
 }
 
+/// One solid disc: no ring and no inner dot, because the colour already sits
+/// outside the logo's palette and reads against every taskbar.
 #[cfg(target_os = "windows")]
-fn paint_attention(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, radius: f32, dot_scale: f32) {
-    for (radius, color) in [(radius, 0x34), (radius * dot_scale, 0xFF)] {
-        let mut path = tiny_skia::PathBuilder::new();
-        path.push_circle(x, y, radius);
-        let mut paint = tiny_skia::Paint {
-            anti_alias: true,
-            ..Default::default()
-        };
-        paint.set_color_rgba8(color, color, color, 0xFF);
-        if let Some(path) = path.finish() {
-            pixmap.fill_path(
-                &path,
-                &paint,
-                tiny_skia::FillRule::Winding,
-                tiny_skia::Transform::identity(),
-                None,
-            );
-        }
-    }
+fn paint_attention(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, radius: f32) {
+    let mut path = tiny_skia::PathBuilder::new();
+    path.push_circle(x, y, radius);
+    let Some(path) = path.finish() else {
+        return;
+    };
+    let mut paint = tiny_skia::Paint {
+        anti_alias: true,
+        ..Default::default()
+    };
+    paint.set_color_rgba8(ATTENTION_BLUE.0, ATTENTION_BLUE.1, ATTENTION_BLUE.2, 0xFF);
+    pixmap.fill_path(
+        &path,
+        &paint,
+        tiny_skia::FillRule::Winding,
+        tiny_skia::Transform::identity(),
+        None,
+    );
 }
 
 #[cfg(target_os = "windows")]
 fn badge(pixmap: &mut tiny_skia::Pixmap) {
     let s = pixmap.width() as f32;
-    paint_attention(pixmap, s * 0.73, s * 0.27, s * 0.24, 0.26);
+    paint_attention(pixmap, s * 0.73, s * 0.27, s / 6.0);
 }
 
 #[cfg(target_os = "linux")]
@@ -289,26 +302,61 @@ mod tests {
     use super::*;
     use crate::core::cli_agent::{AgentStatus, CLIAgent};
 
+    /// The attention dot's one colour, demultiplied: #0078D4 at full alpha.
+    #[cfg(target_os = "windows")]
+    const BLUE: [u8; 4] = [0x00, 0x78, 0xD4, 0xFF];
+
+    /// Fully opaque pixels of the dot's colour: the pixels wholly inside the
+    /// disc, which pins its radius to within a pixel at every size.
+    #[cfg(target_os = "windows")]
+    fn opaque_blue(image: &RgbaImage) -> usize {
+        image.data.chunks_exact(4).filter(|px| *px == BLUE).count()
+    }
+
+    /// The count a disc of `radius` must produce: more than a disc one pixel
+    /// smaller, no more than its own area.
+    #[cfg(target_os = "windows")]
+    fn disc_pixels(radius: f32) -> std::ops::RangeInclusive<usize> {
+        let area = |r: f32| (std::f32::consts::PI * r * r) as usize;
+        area(radius - 1.0)..=area(radius) + 1
+    }
+
     #[cfg(target_os = "windows")]
     #[test]
-    fn shortcut_taskbar_overlay_is_a_standalone_attention_mark() {
+    fn shortcut_taskbar_overlay_is_a_small_solid_blue_dot() {
         for size in [16, 32, 48] {
             let image = attention_mark(size).unwrap();
             let pixel = |x: u32, y: u32| {
                 let offset = ((y * size + x) * 4) as usize;
                 <[u8; 4]>::try_from(&image.data[offset..offset + 4]).unwrap()
             };
-            assert_eq!(pixel(size / 2, size / 2), [255, 255, 255, 255]);
-            assert_eq!(pixel(size / 4, size / 2), [52, 52, 52, 255]);
+            // One solid colour through the centre: no white dot, no grey disc.
+            assert_eq!(pixel(size / 2, size / 2), BLUE, "size {size}");
+            // A quarter-of-the-slot radius: still inside an eighth out from the centre...
+            assert_eq!(pixel(size / 2 + size / 8, size / 2), BLUE, "size {size}");
+            // ...while the old 0.46 disc's territory three eighths out is clear again.
+            assert_eq!(pixel(size / 8, size / 2), [0, 0, 0, 0], "size {size}");
             for (x, y) in [(0, 0), (0, size - 1), (size - 1, 0), (size - 1, size - 1)] {
                 assert_eq!(pixel(x, y), [0, 0, 0, 0]);
             }
+            for px in image.data.chunks_exact(4) {
+                assert!(
+                    px[3] < 255 || px == BLUE,
+                    "size {size}: opaque pixel {px:?} is not the dot"
+                );
+            }
+            // A quarter of the slot, not the 0.30 the prototype rejected.
+            let count = opaque_blue(&image);
+            assert!(
+                disc_pixels(size as f32 / 4.0).contains(&count),
+                "size {size}: {count} opaque pixels"
+            );
         }
     }
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn taskbar_attention_restores_overlay_size_and_the_tray_badge_is_enlarged() {
+    fn taskbar_and_tray_marks_are_small_blue_dots_in_the_upper_right() {
         for size in [24, 32, 48, 64, 256] {
             let taskbar = render_taskbar(size).unwrap();
             let tray = render_sized(true, size).unwrap();
@@ -319,26 +367,50 @@ mod tests {
                 let offset = ((py * size + px) * 4) as usize;
                 <[u8; 4]>::try_from(&image.data[offset..offset + 4]).unwrap()
             };
-            // This lies inside the taskbar disc, outside the tray disc.
+            // The window artwork's dot is solid blue at its centre...
+            assert_eq!(pixel(&taskbar, 0.68, 0.32), BLUE, "size {size}");
+            // ...and a sixth of the icon in radius: the old 0.30 disc reached
+            // (0.40, 0.34) and the right edge, this dot does neither.
             assert_eq!(
                 pixel(&taskbar, 0.40, 0.34),
-                [52, 52, 52, 255],
+                pixel(&normal, 0.40, 0.34),
                 "size {size}"
             );
-            assert_eq!(pixel(&tray, 0.40, 0.34), pixel(&normal, 0.40, 0.34));
-            assert_eq!(pixel(&taskbar, 0.66, 0.34), [255, 255, 255, 255]);
-            assert_eq!(pixel(&tray, 0.73, 0.27), [255, 255, 255, 255]);
-            assert_eq!(pixel(&tray, 0.52, 0.26), [52, 52, 52, 255]);
-            assert_ne!(pixel(&tray, 0.52, 0.26), pixel(&normal, 0.52, 0.26));
+            assert_eq!(
+                pixel(&taskbar, 0.99, 0.34),
+                pixel(&normal, 0.99, 0.34),
+                "size {size}"
+            );
             assert_eq!(pixel(&taskbar, 0., 0.), [0, 0, 0, 0]);
-            // The circle retains a small margin instead of being clipped at the edge.
-            assert!(pixel(&taskbar, 0.99, 0.34)[3] < 255, "size {size}");
-            for y in (size as f32 * 0.67).ceil() as u32..size {
+            // The tray wears the same dot at its own centre; the old 0.24 disc's
+            // reach at (0.50, 0.26) is artwork again.
+            assert_eq!(pixel(&tray, 0.73, 0.27), BLUE, "size {size}");
+            assert_eq!(
+                pixel(&tray, 0.50, 0.26),
+                pixel(&normal, 0.50, 0.26),
+                "size {size}"
+            );
+            // A sixth of the icon in radius, not the 1/5 the prototype rejected.
+            for (name, image) in [("taskbar", &taskbar), ("tray", &tray)] {
+                let count = opaque_blue(image);
+                assert!(
+                    disc_pixels(size as f32 / 6.0).contains(&count),
+                    "{name} at size {size}: {count} opaque pixels"
+                );
+            }
+            // Everything below the dots is untouched artwork.
+            for y in (size as f32 * 0.52).ceil() as u32..size {
                 let offset = (y * size * 4) as usize;
+                let row = offset..offset + (size * 4) as usize;
                 assert_eq!(
-                    &taskbar.data[offset..offset + (size * 4) as usize],
-                    &normal.data[offset..offset + (size * 4) as usize],
-                    "lower artwork changed at size {size}"
+                    &taskbar.data[row.clone()],
+                    &normal.data[row.clone()],
+                    "taskbar artwork changed at size {size}"
+                );
+                assert_eq!(
+                    &tray.data[row.clone()],
+                    &normal.data[row],
+                    "tray artwork changed at size {size}"
                 );
             }
         }
@@ -356,13 +428,27 @@ mod tests {
             };
             let x = (size as f32 * 0.73) as u32;
             let y = (size as f32 * 0.27) as u32;
-            assert_eq!(pixel(&image, x, y), [255, 255, 255, 255], "size {size}");
+            assert_eq!(pixel(&image, x, y), BLUE, "size {size}");
+            // Just below the centre is still inside the sixth-of-the-icon dot...
             assert_eq!(
-                pixel(&image, x, (size as f32 * 0.46).round() as u32),
-                [52, 52, 52, 255]
+                pixel(&image, x, (size as f32 * 0.33) as u32),
+                BLUE,
+                "size {size}"
+            );
+            // ...while the old 0.24 disc's reach at 0.46 is artwork again.
+            let below = (size as f32 * 0.46).round() as u32;
+            assert_eq!(
+                pixel(&image, x, below),
+                pixel(&normal, x, below),
+                "size {size}"
             );
             assert_eq!(pixel(&image, 0, 0), [0, 0, 0, 0]);
-            for y in (size as f32 * 0.55).ceil() as u32..size {
+            // Neither the grey disc nor the white dot survives anywhere.
+            for px in image.data.chunks_exact(4) {
+                assert_ne!(px, [52, 52, 52, 255], "size {size}");
+                assert_ne!(px, [255, 255, 255, 255], "size {size}");
+            }
+            for y in (size as f32 * 0.50).ceil() as u32..size {
                 for x in 0..size {
                     assert_eq!(
                         pixel(&image, x, y),

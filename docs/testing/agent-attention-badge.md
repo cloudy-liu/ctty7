@@ -6,8 +6,10 @@ current background-event behavior is specified in
 See the [follow-up regression and current acceptance limits](background-attention-on-return.md)
 for the change based on the v0.9.0 mainline.
 
-Agent results that have not been viewed leave a dark circular mark with a
-white dot on the Windows taskbar and tray icons. There is no numeric count.
+Agent results that have not been viewed leave a small solid blue dot on the
+Windows taskbar and tray icons. Until 2026-11-01 the mark was a dark circle
+with a white dot, which the captures in the earlier sections show; the last
+section records the change. There is no numeric count.
 Viewing the result clears its unread state; another unread pane keeps the
 application reminder visible. Existing waiting-for-input attention is retained.
 Sounds and desktop notification preferences are independent and unchanged.
@@ -355,3 +357,88 @@ Explorer restart, vertical/custom taskbars, small-icon mode, and native
 macOS/Linux interaction were not verified in this run. Windows controls
 overlay placement and can suppress native overlays in small-icon mode.
 See Microsoft's [SetOverlayIcon documentation](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-itaskbarlist3-setoverlayicon).
+
+## Small blue dot on 2026-11-01
+
+The mark was a `#343434` disc with a white centre, 0.30 / 0.46 / 0.24 of the
+icon in radius for the window artwork, the shell overlay and the tray. That grey
+belongs to neither the logo palette nor the Agent status palette, the disc
+covered six tenths of a 24px icon, and on a dark taskbar it sits at 1.3:1
+against the background. The logo's pink (`#FF5FA2`) was prototyped and
+rejected: the mark's centre lies inside the logo's pink pane, so a same-hue disc
+only separates with a ring, which reads as a patch at every size.
+
+The replacement is one solid `#0078D4` dot, the colour the tab avatars' SSH
+corner badge already paints (`src/ui/tab_strip.rs`). Its radius is 1/6 of the
+icon for the window artwork and the tray and 1/4 of the 16px overlay slot, so
+the window artwork and the overlay both render an 8px dot at 100% scaling and
+14px at 175%, and the 16px tray icon gets a 5px dot by the same proportion; the
+centres are unchanged. The colour is a constant on purpose: the dot sits on Windows
+surfaces the application theme does not control, theme accents drift (Dracula's
+is pink), and `#0078D4` measures at least 3.6:1 on light and dark taskbars. The
+size and colour comparisons that led here are in
+`docs/prototypes/taskbar-attention-badge.html`.
+
+### Native Before/After
+
+Full-screen GDI captures (`System.Drawing` `CopyFromScreen` after
+`SetProcessDPIAware`, physical pixels, no pointer) on Windows 11 build 22000,
+a 2560 by 1600 display at 175% scaling and the bottom horizontal taskbar.
+Each image is a lossless 90 by 84 crop, the taskbar's full height, around a
+ctty7 icon located by its `#FF5FA2` pane; the `-x4` files are
+nearest-neighbour enlargements of the same crop. Before is `37898d02` (this branch's parent on `main`), After is this
+change; both run the same `--ssh-tab-visual` fixture with
+`attention_badge: true` from an isolated `--config-dir` and were captured after
+`NATIVE_ATTENTION_BADGE_UNREAD`, with the fixture window minimized first so its
+taskbar button is inactive in every capture. Running from `target/debug` takes
+the development identity and shows the window artwork; a copy of the same
+executable outside the build directory takes the installed identity and the
+shell overlay. The installed ctty7 release stayed running in the same taskbar.
+
+The installed identity used to paint both paths, the overlay and the window
+artwork. On a button Explorer does not back with a registered shortcut it
+honors the window artwork too, so that button showed two marks, which the
+Before crop below records. The overlay now carries the mark alone and the
+window icon stays plain; Cargo builds, and installs whose overlay channel
+fails, still compose it into the window artwork.
+
+| Location | Before | After |
+| --- | --- | --- |
+| Window artwork, development identity | ![Grey disc with white dot on the window artwork](images/agent-attention-dot/before-taskbar-window.png) ![Enlarged](images/agent-attention-dot/before-taskbar-window-x4.png) | ![Small blue dot on the window artwork](images/agent-attention-dot/after-taskbar-window.png) ![Enlarged](images/agent-attention-dot/after-taskbar-window-x4.png) |
+| Shell overlay, installed identity | ![Grey overlay disc on the installed button](images/agent-attention-dot/before-taskbar-overlay.png) ![Enlarged](images/agent-attention-dot/before-taskbar-overlay-x4.png) | ![Small blue overlay dot on the installed button](images/agent-attention-dot/after-taskbar-overlay.png) ![Enlarged](images/agent-attention-dot/after-taskbar-overlay-x4.png) |
+| Tray | ![Grey disc with white dot on the tray icon](images/agent-attention-dot/before-tray.png) ![Enlarged](images/agent-attention-dot/before-tray-x4.png) | ![Small blue dot on the tray icon](images/agent-attention-dot/after-tray.png) ![Enlarged](images/agent-attention-dot/after-tray-x4.png) |
+
+### Local verification
+
+- `cargo test --locked --bin tty7-app tray::icon::`: the three Windows artwork
+  tests were rewritten first and failed against the old mark, then passed. They
+  assert the solid `#0078D4` centre, that the old discs' reach now compares
+  equal to the plain logo, that no grey or white opaque pixel survives, and that
+  the artwork below the dot is untouched, at 16 to 256 pixels.
+- `cargo test --locked --bin tty7-app tray::taskbar::`: a new regression,
+  `the_overlay_path_leaves_the_window_icon_plain`, pins that a taskbar with an
+  overlay available never touches the window icon, next to the existing
+  window-artwork tests for the development identity.
+- `cargo test --offline --locked --workspace --target-dir D:/gh-prj/ctty7/target`
+  passes 3,210 tests, with 12 ignored and no failures. `cargo fmt -p tty7 --
+  --check` and `git diff --check` pass.
+
+### Known limitations
+
+- Windows only. The Linux tray badge (amber, 0.20 radius) and the macOS
+  template tray glyph are unchanged.
+- Windows chooses the overlay's position; these captures cover the bottom
+  horizontal taskbar at 175% only.
+- Light taskbar only. The dark-taskbar figure (3.6:1 for `#0078D4` against
+  `#202124`) comes from the prototype's contrast calculation; the capture
+  machine's system theme was not switched for a native dark capture.
+- On this machine the installed-identity fixture did not join the running
+  release's taskbar group, so its own button is the one cropped: Before shows
+  both delivery paths on it, After the overlay alone. During the Before
+  capture the running release's button sat next to it with its own grey
+  overlay; that release had exited by the After capture.
+- With the overlay carrying the mark, the installed identity's window icon
+  stays plain, so Alt+Tab no longer shows the mark for installed builds; the
+  taskbar button does.
+- The tray capture shows the fixture's icon promoted into the visible
+  notification area; the overflow flyout was not captured.

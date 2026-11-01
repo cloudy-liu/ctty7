@@ -2853,6 +2853,30 @@ impl Tty7App {
         cx.notify();
     }
 
+    /// What every pane of the active tab draws this frame. The zoomed pane is
+    /// the same chrome with nothing left to rearrange, dim or drag.
+    fn pane_chrome(
+        &self,
+        several: bool,
+        zoomed: Option<gpui::EntityId>,
+        cx: &gpui::App,
+    ) -> crate::ui::pane::PaneChrome {
+        let alone = zoomed.is_some();
+        crate::ui::pane::PaneChrome {
+            dim_inactive: !alone && several && cx.global::<Config>().dim_inactive_panes,
+            rearrangeable: !alone && several,
+            hovered: self.pane_hover.clone(),
+            lifted: if alone {
+                None
+            } else {
+                crate::ui::pane_drag::lifted(&self.pane_drag)
+            },
+            drag: self.pane_drag.clone(),
+            agent_titles: cx.global::<Config>().show_agent_pane_titles,
+            zoomed,
+        }
+    }
+
     pub(crate) fn set_link_url(&mut self, on: bool, cx: &mut Context<Self>) {
         self.update_config(cx, |cfg| cfg.link_url = on);
     }
@@ -3228,6 +3252,10 @@ impl Tty7App {
 
     pub(crate) fn set_sidebar_agent_status_text(&mut self, on: bool, cx: &mut Context<Self>) {
         self.update_config(cx, |cfg| cfg.sidebar_agent_status_text = on);
+    }
+
+    pub(crate) fn set_show_agent_pane_titles(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.update_config(cx, |cfg| cfg.show_agent_pane_titles = on);
     }
 
     pub(crate) fn toggle_tab_sidebar(&mut self, cx: &mut Context<Self>) {
@@ -7687,22 +7715,23 @@ impl Render for Tty7App {
                         .iter()
                         .any(|l| l.entity_id() == leaf.entity_id())
                 });
+                let several = active_tab.pane.leaves().len() > 1;
                 match maximized {
-                    Some(leaf) => div()
-                        .size_full()
-                        .overflow_hidden()
-                        .child(leaf.clone())
-                        .into_any_element(),
+                    Some(leaf) => {
+                        // Alone in the tab, but still an agent pane: the same
+                        // title and toolbar, with restore where zoom was.
+                        let chrome = self.pane_chrome(several, Some(leaf.entity_id()), cx);
+                        let leaf = crate::ui::pane::PaneSlot::Ready(leaf.clone());
+                        div()
+                            .size_full()
+                            .overflow_hidden()
+                            .child(crate::ui::pane::Pane::leaf(leaf).render(&chrome, window, cx))
+                            .into_any_element()
+                    }
                     None => {
-                        let several = active_tab.pane.leaves().len() > 1;
-                        let chrome = crate::ui::pane::PaneChrome {
-                            dim_inactive: several && cx.global::<Config>().dim_inactive_panes,
-                            rearrangeable: several,
-                            hovered: self.pane_hover.clone(),
-                            lifted: crate::ui::pane_drag::lifted(&self.pane_drag),
-                            drag: self.pane_drag.clone(),
-                        };
-                        active_tab.pane.render(&chrome, window, cx)
+                        active_tab
+                            .pane
+                            .render(&self.pane_chrome(several, None, cx), window, cx)
                     }
                 }
             }

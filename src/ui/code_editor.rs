@@ -2710,6 +2710,13 @@ mod tests {
             cx.notify();
         });
         vcx.run_until_parked();
+        // `debug_bounds` reads the last painted frame; settling effects does
+        // not paint one, so draw before looking (as the settings tests do).
+        // Left implicit, this lookup failed on CI runners under load.
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        vcx.run_until_parked();
         let toggle = vcx
             .debug_bounds("diff-view-toggle")
             .expect("text diff has a view toggle");
