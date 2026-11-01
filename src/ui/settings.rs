@@ -8717,7 +8717,9 @@ mod gpui_tests {
                 });
             window.activate_window();
         });
-        vcx.simulate_resize(size(px(1100.), px(1500.)));
+        // Tall enough for the Window & Tabs page with the agent pane titles row;
+        // the preview button sits near the bottom of the Notifications block.
+        vcx.simulate_resize(size(px(1100.), px(1800.)));
         vcx.run_until_parked();
         vcx.update(|window, cx| {
             let _ = window.draw(cx);

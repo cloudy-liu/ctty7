@@ -457,7 +457,7 @@ mod gpui_tests {
     }
 
     #[gpui::test]
-    fn an_agent_that_exits_takes_its_chrome_with_it(cx: &mut TestAppContext) {
+    fn an_agent_that_exits_loses_its_title_but_keeps_the_toolbar(cx: &mut TestAppContext) {
         let (app, mut vcx, [agent, _shell], mut streams) = split(cx);
         app.update_in(&mut vcx, |app, _, cx| {
             app.set_show_agent_pane_titles(true, cx)
@@ -468,7 +468,13 @@ mod gpui_tests {
         DaemonMsg::Agent(None).encode(&mut streams[0]).unwrap();
         settle(&mut vcx);
         hover_top_edge(&mut vcx, agent);
-        assert!(!drawn(&mut vcx, "agent-pane-title", agent));
-        assert!(!drawn(&mut vcx, "agent-pane-toolbar", agent));
+        assert!(
+            !drawn(&mut vcx, "agent-pane-title", agent),
+            "the title was the agent's"
+        );
+        assert!(
+            drawn(&mut vcx, "agent-pane-toolbar", agent),
+            "the toolbar is every pane's"
+        );
     }
 }
