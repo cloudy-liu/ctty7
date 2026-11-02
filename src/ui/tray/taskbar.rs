@@ -1,5 +1,6 @@
 //! Compose window attention and deliver shortcut-backed taskbar reminders to Explorer.
 use super::{TraySnapshot, icon};
+use crate::core::config::AttentionBadgeSize;
 use anyhow::Context as _;
 use gpui::App;
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
@@ -23,8 +24,9 @@ const KINDS: [u32; 2] = [ICON_SMALL, ICON_BIG];
 struct Icon(HICON);
 
 impl Icon {
-    fn new(size: u32) -> anyhow::Result<Self> {
-        let image = icon::render_taskbar(size).context("could not render attention icon")?;
+    fn new(size: u32, badge_size: AttentionBadgeSize) -> anyhow::Result<Self> {
+        let image =
+            icon::render_taskbar(size, badge_size).context("could not render attention icon")?;
         Self::from_image(image)
     }
 
@@ -59,22 +61,23 @@ impl Drop for Icon {
 /// Explorer's overlay channel with the standalone mark it will place on the
 /// installed identity's taskbar button. GPUI initializes COM on its Windows
 /// UI thread; callers elsewhere must have initialized it themselves.
-fn open_overlay() -> anyhow::Result<(ITaskbarList3, Icon)> {
+fn open_overlay(badge_size: AttentionBadgeSize) -> anyhow::Result<(ITaskbarList3, Icon)> {
     let list: ITaskbarList3 =
         unsafe { CoCreateInstance(&TaskbarList, None, CLSCTX_INPROC_SERVER)? };
     unsafe { list.HrInit()? };
-    let image = icon::attention_mark(32).context("could not render taskbar overlay")?;
+    let image = icon::attention_mark(32, badge_size).context("could not render taskbar overlay")?;
     Ok((list, Icon::from_image(image)?))
 }
 
 pub(super) struct Taskbar {
+    badge_size: AttentionBadgeSize,
     icon: Icon,
     overlay: Option<(ITaskbarList3, Icon)>,
     originals: HashMap<isize, [HICON; 2]>,
 }
 
 impl Taskbar {
-    fn new() -> anyhow::Result<Self> {
+    fn new(badge_size: AttentionBadgeSize) -> anyhow::Result<Self> {
         // Explorer uses the registered shortcut's icon for the installed
         // AppUserModelID, ignoring WM_SETICON on that grouped taskbar button,
         // so the installed identity delivers the mark through the shell's
@@ -85,16 +88,17 @@ impl Taskbar {
         let overlay = if std::env::current_exe()
             .is_ok_and(|exe| crate::core::aumid::taskbar_app_id(&exe) == crate::core::aumid::AUMID)
         {
-            open_overlay()
+            open_overlay(badge_size)
                 .map_err(|error| log::debug!("taskbar overlay unavailable: {error:#}"))
                 .ok()
         } else {
             None
         };
         Ok(Self {
+            badge_size,
             // Explorer may ignore a small bitmap for ICON_SMALL at high DPI.
             // Let Windows scale the full-resolution artwork for both slots.
-            icon: Icon::new(256)?,
+            icon: Icon::new(256, badge_size)?,
             overlay,
             originals: HashMap::new(),
         })
@@ -190,8 +194,15 @@ impl Drop for Taskbar {
 }
 
 pub(super) fn update(state: &mut Option<Taskbar>, snap: &TraySnapshot, cx: &mut App) {
+    if state
+        .as_ref()
+        .is_some_and(|taskbar| taskbar.badge_size != snap.attention_badge_size)
+    {
+        // Restore borrowed window icons before retiring the old bitmap handles.
+        *state = None;
+    }
     if state.is_none() {
-        match Taskbar::new() {
+        match Taskbar::new(snap.attention_badge_size) {
             Ok(taskbar) => *state = Some(taskbar),
             Err(error) => {
                 log::debug!("taskbar attention unavailable: {error:#}");
@@ -305,7 +316,7 @@ mod tests {
             let expected = [GCLP_HICONSM, GCLP_HICON]
                 .map(|kind| unsafe { GetClassLongPtrW(window.0, kind) as isize });
             assert!(expected.iter().all(|icon| *icon != 0));
-            let mut taskbar = Taskbar::new().unwrap();
+            let mut taskbar = Taskbar::new(Default::default()).unwrap();
             for _ in 0..3 {
                 taskbar.apply(window.0, true);
                 taskbar.apply(window.0, false);
@@ -338,13 +349,14 @@ mod tests {
         // button it does not back with a registered shortcut. Painting both
         // paths put two marks on that button.
         let _ = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-        let Ok(overlay) = open_overlay() else {
+        let Ok(overlay) = open_overlay(Default::default()) else {
             return; // the shell's TaskbarList class is not available here
         };
         let window = TestWindow::new();
         let original = window.icons();
         let mut taskbar = Taskbar {
-            icon: Icon::new(256).unwrap(),
+            badge_size: Default::default(),
+            icon: Icon::new(256, Default::default()).unwrap(),
             overlay: Some(overlay),
             originals: HashMap::new(),
         };
@@ -365,7 +377,7 @@ mod tests {
         let first = TestWindow::new();
         let second = TestWindow::new();
         let original = first.icons();
-        let mut taskbar = Taskbar::new().unwrap();
+        let mut taskbar = Taskbar::new(Default::default()).unwrap();
         taskbar.apply(first.0, true);
         let marked = first.icons();
         assert!(

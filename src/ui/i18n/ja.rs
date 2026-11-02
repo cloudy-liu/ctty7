@@ -666,6 +666,13 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsNotifyThreshold => "通知閾値（秒）",
         L10nKey::SettingsNotifyThresholdDesc => "「長時間」とみなすのに必要なコマンドの実行時間",
         L10nKey::SettingsWindow => "ウィンドウ",
+        L10nKey::SettingsAttentionBadgeSize => "通知バッジのサイズ",
+        L10nKey::SettingsAttentionBadgeSizeDesc => {
+            "バックグラウンドの Agent が完了または入力待ちになったときの、Windows タスクバーとトレイの青い点の大きさ。変更はすぐに反映されます。"
+        }
+        L10nKey::AttentionBadgeSmall => "小",
+        L10nKey::AttentionBadgeMedium => "標準",
+        L10nKey::AttentionBadgeLarge => "大",
         L10nKey::NotifyModeNever => "通知しない",
         L10nKey::NotifyModeUnfocused => "非フォーカス時のみ",
         L10nKey::NotifyModeAlways => "常に通知",

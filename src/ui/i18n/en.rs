@@ -658,6 +658,13 @@ pub fn translate_en(key: L10nKey) -> &'static str {
             "How long a command must run to qualify as \"long\"."
         }
         L10nKey::SettingsWindow => "Window",
+        L10nKey::SettingsAttentionBadgeSize => "Attention badge size",
+        L10nKey::SettingsAttentionBadgeSizeDesc => {
+            "Size of the blue dot on the Windows taskbar and tray icons when a background Agent finishes or needs input. Applies immediately."
+        }
+        L10nKey::AttentionBadgeSmall => "Small",
+        L10nKey::AttentionBadgeMedium => "Standard",
+        L10nKey::AttentionBadgeLarge => "Large",
         L10nKey::NotifyModeNever => "Never",
         L10nKey::NotifyModeUnfocused => "When unfocused",
         L10nKey::NotifyModeAlways => "Always",

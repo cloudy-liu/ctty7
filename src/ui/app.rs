@@ -3305,6 +3305,15 @@ impl Tty7App {
         self.update_config(cx, |cfg| cfg.notify_threshold_secs = secs.clamp(1, 3600));
     }
 
+    #[cfg(target_os = "windows")]
+    pub(crate) fn set_attention_badge_size(
+        &mut self,
+        size: crate::core::config::AttentionBadgeSize,
+        cx: &mut Context<Self>,
+    ) {
+        self.update_config(cx, |cfg| cfg.attention_badge_size = size);
+    }
+
     pub(crate) fn set_bell_mode(
         &mut self,
         mode: crate::core::config::BellMode,

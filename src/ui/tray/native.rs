@@ -9,6 +9,8 @@ pub(super) struct Backend {
     tray: TrayIcon,
     #[cfg(not(target_os = "macos"))]
     attention: bool,
+    #[cfg(target_os = "windows")]
+    badge_size: crate::core::config::AttentionBadgeSize,
 }
 
 impl Backend {
@@ -25,7 +27,7 @@ impl Backend {
         #[cfg(target_os = "macos")]
         let img = icon::render()?;
         #[cfg(not(target_os = "macos"))]
-        let img = icon::render(false)?;
+        let img = icon::render(false, Default::default())?;
         let icon = Icon::from_rgba(img.data, img.width, img.height).ok()?;
         let tray = TrayIconBuilder::new()
             .with_icon(icon)
@@ -58,6 +60,8 @@ impl Backend {
             tray,
             #[cfg(not(target_os = "macos"))]
             attention: false,
+            #[cfg(target_os = "windows")]
+            badge_size: Default::default(),
         })
     }
 
@@ -67,12 +71,13 @@ impl Backend {
         #[cfg(not(target_os = "macos"))]
         {
             let attention = snap.attention();
-            if attention != self.attention {
+            if attention != self.attention || snap.attention_badge_size != self.badge_size {
                 self.attention = attention;
-                if let Some(img) = icon::render(attention)
+                if let Some(img) = icon::render(attention, snap.attention_badge_size)
                     && let Ok(icon) = Icon::from_rgba(img.data, img.width, img.height)
                 {
                     let _ = self.tray.set_icon(Some(icon));
+                    self.badge_size = snap.attention_badge_size;
                 }
             }
         }

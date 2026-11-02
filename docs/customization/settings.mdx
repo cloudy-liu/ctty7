@@ -73,6 +73,17 @@ The file is written atomically, and read forgivingly:
   it in a Windows editor.
 </Note>
 
+## Attention badges
+
+On Windows, **Settings → Window & Tabs → Notifications → Attention badge size**
+offers **Small**, **Standard**, and **Large** for the blue dot shown when a
+background Agent finishes or needs input. Standard is the default; Small keeps
+the previous size. The taskbar and tray update together without restarting.
+
+```json
+{ "attention_badge_size": "large" }
+```
+
 ## Language
 
 **Settings → Appearance → Language** switches the interface between English,

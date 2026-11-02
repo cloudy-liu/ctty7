@@ -734,6 +734,12 @@ fn settings_search_entries() -> &'static [SearchEntry] {
             title: SettingsNotifyThreshold,
             keywords: SettingsSearchNotifyThresholdKeywords,
         },
+        #[cfg(target_os = "windows")]
+        SearchEntry {
+            section: WindowTabs,
+            title: SettingsAttentionBadgeSize,
+            keywords: SettingsAttentionBadgeSizeDesc,
+        },
         SearchEntry {
             section: Keybindings,
             title: SettingsSearchKeybindingsTitle,
@@ -5953,6 +5959,43 @@ impl Tty7App {
                 this.set_notify_mode(mode, cx);
             },
         );
+        #[cfg(target_os = "windows")]
+        let badge_size_row = {
+            use crate::core::config::AttentionBadgeSize;
+            let selected = match cx.global::<Config>().attention_badge_size {
+                AttentionBadgeSize::Small => 0,
+                AttentionBadgeSize::Medium => 1,
+                AttentionBadgeSize::Large => 2,
+            };
+            let control = self.segmented(
+                "wt-attention-badge-size",
+                &[
+                    t(L10nKey::AttentionBadgeSmall),
+                    t(L10nKey::AttentionBadgeMedium),
+                    t(L10nKey::AttentionBadgeLarge),
+                ],
+                selected,
+                cx,
+                |this, ix, _, cx| {
+                    this.set_attention_badge_size(
+                        match ix {
+                            0 => AttentionBadgeSize::Small,
+                            1 => AttentionBadgeSize::Medium,
+                            _ => AttentionBadgeSize::Large,
+                        },
+                        cx,
+                    );
+                },
+            );
+            Some(self.settings_row(
+                t(L10nKey::SettingsAttentionBadgeSize),
+                t(L10nKey::SettingsAttentionBadgeSizeDesc),
+                control,
+                cx,
+            ))
+        };
+        #[cfg(not(target_os = "windows"))]
+        let badge_size_row: Option<Stateful<Div>> = None;
         let agent_sound_row = {
             let sound_idx = match cx.global::<Config>().agent_notification_sound {
                 NotifyMode::Never => 0,
@@ -6203,6 +6246,7 @@ impl Tty7App {
             ))
             .child(self.section_rule(cx))
             .child(self.section_header(t(L10nKey::SettingsNotifications), cx))
+            .children(badge_size_row)
             .child(self.settings_row(
                 t(L10nKey::SettingsBinaryFileNotice),
                 t(L10nKey::SettingsBinaryFileNoticeDesc),
@@ -8651,6 +8695,47 @@ mod gpui_tests {
             .unwrap();
         let vcx = VisualTestContext::from_window(window.into(), cx);
         (app, vcx)
+    }
+
+    #[gpui::test]
+    #[cfg(target_os = "windows")]
+    fn attention_badge_settings_persist_and_reach_the_tray_snapshot(cx: &mut TestAppContext) {
+        use crate::core::config::AttentionBadgeSize;
+        const CHILD: &str = "TTY7_TEST_ATTENTION_BADGE_CONFIG_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let name = concat!(
+                module_path!(),
+                "::attention_badge_settings_persist_and_reach_the_tray_snapshot"
+            );
+            let output = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", name.split_once("::").unwrap().1, "--nocapture"])
+                .env(CHILD, "1")
+                .output()
+                .expect("run isolated badge persistence check");
+            assert!(
+                output.status.success(),
+                "{}\n{}",
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            );
+            return;
+        }
+        crate::core::config::pin_test_config_dir();
+        let (app, mut vcx) = harness(cx);
+        vcx.update(|_, cx| crate::ui::windows::WindowRegistry::init(cx));
+        for size in [
+            AttentionBadgeSize::Large,
+            AttentionBadgeSize::Small,
+            AttentionBadgeSize::Medium,
+        ] {
+            app.update_in(&mut vcx, |app, _, cx| {
+                app.set_attention_badge_size(size, cx)
+            });
+            assert_eq!(Config::load().attention_badge_size, size);
+            vcx.update(|_, cx| {
+                assert_eq!(crate::ui::tray::app_snapshot(cx).attention_badge_size, size)
+            });
+        }
     }
 
     #[gpui::test]
