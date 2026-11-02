@@ -84,6 +84,7 @@ pub(crate) struct TraySnapshot {
     pub agents: Vec<AgentRow>,
     pub notify_mode: NotifyMode,
     pub attention: bool,
+    pub attention_badge_size: crate::core::config::AttentionBadgeSize,
 }
 
 impl TraySnapshot {
@@ -258,6 +259,7 @@ mod tests {
             }],
             notify_mode: NotifyMode::Unfocused,
             attention: false,
+            attention_badge_size: Default::default(),
         }
     }
 
@@ -350,6 +352,7 @@ pub(crate) fn app_snapshot(cx: &mut App) -> TraySnapshot {
         agents,
         notify_mode: cx.global::<Config>().notify_on_command_finish,
         attention: cx.default_global::<BackgroundAttention>().pending,
+        attention_badge_size: cx.global::<Config>().attention_badge_size,
     }
 }
 

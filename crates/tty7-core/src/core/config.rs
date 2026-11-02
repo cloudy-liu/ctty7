@@ -278,6 +278,9 @@ pub struct Config {
     /// Audio for Agent completion/input, independent of desktop notifications.
     #[serde(default, deserialize_with = "de_lenient")]
     pub agent_notification_sound: NotifyMode,
+    /// Size of the Windows taskbar and tray attention dots.
+    #[serde(default, deserialize_with = "de_lenient")]
+    pub attention_badge_size: AttentionBadgeSize,
     pub check_for_updates: bool,
     /// Whether a found update is fetched and verified before the user asks for
     /// it. On by default: it turns "spend five minutes downloading" into "press
@@ -522,6 +525,15 @@ pub enum NotifyMode {
     Always,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum AttentionBadgeSize {
+    Small,
+    #[default]
+    Medium,
+    Large,
+}
+
 /// The modifier that makes the mouse wheel resize the font.
 ///
 /// `Platform` keeps the historical binding — ⌘ on macOS, Ctrl elsewhere — and
@@ -670,6 +682,7 @@ impl Default for Config {
             sidebar_pinned_groups: Vec::new(),
             notify_on_command_finish: NotifyMode::Unfocused,
             agent_notification_sound: NotifyMode::Unfocused,
+            attention_badge_size: AttentionBadgeSize::Medium,
             check_for_updates: true,
             auto_download_updates: true,
             install_cli_on_path: true,
@@ -1969,6 +1982,31 @@ mod tests {
             .filter(|e| e.file_name().to_string_lossy().contains(".tmp."))
             .collect();
         assert!(leftover.is_empty(), "temp file should be renamed away");
+    }
+
+    #[test]
+    fn attention_badge_sizes_round_trip_and_default_leniently() {
+        for (value, expected) in [
+            ("small", AttentionBadgeSize::Small),
+            ("medium", AttentionBadgeSize::Medium),
+            ("large", AttentionBadgeSize::Large),
+        ] {
+            let json = format!(r#"{{"attention_badge_size":"{value}"}}"#);
+            let cfg: Config = serde_json::from_str(&json).unwrap();
+            assert_eq!(cfg.attention_badge_size, expected);
+            assert_eq!(
+                serde_json::to_value(&cfg).unwrap()["attention_badge_size"],
+                value
+            );
+        }
+        for json in [
+            "{}",
+            r#"{"attention_badge_size":"invalid"}"#,
+            r#"{"attention_badge_size":null}"#,
+        ] {
+            let cfg: Config = serde_json::from_str(json).unwrap();
+            assert_eq!(cfg.attention_badge_size, AttentionBadgeSize::Medium);
+        }
     }
 
     #[test]

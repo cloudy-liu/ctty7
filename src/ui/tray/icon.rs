@@ -1,3 +1,5 @@
+#[cfg(not(target_os = "macos"))]
+use crate::core::config::AttentionBadgeSize;
 use resvg::tiny_skia;
 use resvg::usvg;
 
@@ -29,16 +31,20 @@ pub(super) fn render() -> Option<RgbaImage> {
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) fn render(attention: bool) -> Option<RgbaImage> {
-    render_sized(attention, SIZE)
+pub(super) fn render(attention: bool, badge_size: AttentionBadgeSize) -> Option<RgbaImage> {
+    render_sized(attention, SIZE, badge_size)
 }
 
 #[cfg(not(target_os = "macos"))]
-pub(super) fn render_sized(attention: bool, size: u32) -> Option<RgbaImage> {
+pub(super) fn render_sized(
+    attention: bool,
+    size: u32,
+    badge_size: AttentionBadgeSize,
+) -> Option<RgbaImage> {
     let mut pixmap = render_glyph(size)?;
 
     if attention {
-        badge(&mut pixmap);
+        badge(&mut pixmap, badge_size);
     }
 
     Some(to_rgba(&pixmap))
@@ -59,24 +65,44 @@ fn render_glyph(size: u32) -> Option<tiny_skia::Pixmap> {
 #[cfg(target_os = "windows")]
 const ATTENTION_BLUE: (u8, u8, u8) = (0x00, 0x78, 0xD4);
 
-/// The window artwork: the logo with a dot a sixth of the icon in radius at the
-/// upper-right, about 8px across on a 24px taskbar icon.
+/// Radius relative to the logo. Small preserves the original blue dot;
+/// Medium matches the larger option in the approved design comparison.
 #[cfg(target_os = "windows")]
-pub(super) fn render_taskbar(size: u32) -> Option<RgbaImage> {
+fn attention_radius(size: AttentionBadgeSize) -> f32 {
+    match size {
+        AttentionBadgeSize::Small => 1.0 / 6.0,
+        AttentionBadgeSize::Medium => 0.20,
+        AttentionBadgeSize::Large => 0.25,
+    }
+}
+
+/// The window artwork: the logo with a dot at the upper-right.
+#[cfg(target_os = "windows")]
+pub(super) fn render_taskbar(size: u32, badge_size: AttentionBadgeSize) -> Option<RgbaImage> {
     let mut pixmap = render_glyph(size)?;
     let s = size as f32;
-    paint_attention(&mut pixmap, s * 0.68, s * 0.32, s / 6.0);
+    paint_attention(
+        &mut pixmap,
+        s * 0.68,
+        s * 0.32,
+        s * attention_radius(badge_size),
+    );
     Some(to_rgba(&pixmap))
 }
 
 /// The standalone overlay Explorer places on a shortcut-backed taskbar button.
-/// Its 16px slot is two thirds of a 24px icon, so a quarter-of-the-slot radius
-/// renders the same 8px dot as the window artwork.
+/// Its 16px slot is two thirds of a 24px icon, so scale the radius by 1.5
+/// to match the window artwork's visible diameter.
 #[cfg(target_os = "windows")]
-pub(super) fn attention_mark(size: u32) -> Option<RgbaImage> {
+pub(super) fn attention_mark(size: u32, badge_size: AttentionBadgeSize) -> Option<RgbaImage> {
     let mut pixmap = tiny_skia::Pixmap::new(size, size)?;
     let s = size as f32;
-    paint_attention(&mut pixmap, s / 2.0, s / 2.0, s / 4.0);
+    paint_attention(
+        &mut pixmap,
+        s / 2.0,
+        s / 2.0,
+        s * attention_radius(badge_size) * 1.5,
+    );
     Some(to_rgba(&pixmap))
 }
 
@@ -221,7 +247,7 @@ fn recolor(pixmap: &mut tiny_skia::Pixmap, rgb: (u8, u8, u8)) {
 }
 
 #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-fn badge(pixmap: &mut tiny_skia::Pixmap) {
+fn badge(pixmap: &mut tiny_skia::Pixmap, _badge_size: AttentionBadgeSize) {
     let s = pixmap.width() as f32;
     let (cx, cy) = (s * 0.78, s * 0.22);
     let r = s * 0.20;
@@ -282,14 +308,14 @@ fn paint_attention(pixmap: &mut tiny_skia::Pixmap, x: f32, y: f32, radius: f32) 
 }
 
 #[cfg(target_os = "windows")]
-fn badge(pixmap: &mut tiny_skia::Pixmap) {
+fn badge(pixmap: &mut tiny_skia::Pixmap, badge_size: AttentionBadgeSize) {
     let s = pixmap.width() as f32;
-    paint_attention(pixmap, s * 0.73, s * 0.27, s / 6.0);
+    paint_attention(pixmap, s * 0.73, s * 0.27, s * attention_radius(badge_size));
 }
 
 #[cfg(target_os = "linux")]
 pub(super) fn render_argb(attention: bool) -> Option<(Vec<u8>, u32)> {
-    let img = render(attention)?;
+    let img = render(attention, AttentionBadgeSize::default())?;
     let mut argb = Vec::with_capacity(img.data.len());
     for px in img.data.chunks_exact(4) {
         argb.extend_from_slice(&[px[3], px[0], px[1], px[2]]);
@@ -323,9 +349,45 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
+    fn attention_badge_sizes_grow_on_all_three_surfaces_without_clipping() {
+        for pixels in [16, 32, 48, 256] {
+            let mut previous = [0; 3];
+            for (badge_size, radius) in [
+                (AttentionBadgeSize::Small, 1.0 / 6.0),
+                (AttentionBadgeSize::Medium, 0.20),
+                (AttentionBadgeSize::Large, 0.25),
+            ] {
+                let images = [
+                    render_taskbar(pixels, badge_size).unwrap(),
+                    attention_mark(pixels, badge_size).unwrap(),
+                    render_sized(true, pixels, badge_size).unwrap(),
+                ];
+                for (surface, image) in images.iter().enumerate() {
+                    let count = opaque_blue(image);
+                    let radius = pixels as f32 * radius * if surface == 1 { 1.5 } else { 1.0 };
+                    assert!(
+                        disc_pixels(radius).contains(&count),
+                        "{badge_size:?} surface {surface} at {pixels}px: {count}"
+                    );
+                    assert!(count > previous[surface]);
+                    previous[surface] = count;
+                    // Each circle fits inside its bitmap, including the largest tray dot.
+                    for p in 0..pixels {
+                        for (x, y) in [(p, 0), (p, pixels - 1), (0, p), (pixels - 1, p)] {
+                            let offset = ((y * pixels + x) * 4) as usize;
+                            assert_ne!(&image.data[offset..offset + 4], BLUE);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
     fn shortcut_taskbar_overlay_is_a_small_solid_blue_dot() {
         for size in [16, 32, 48] {
-            let image = attention_mark(size).unwrap();
+            let image = attention_mark(size, AttentionBadgeSize::Small).unwrap();
             let pixel = |x: u32, y: u32| {
                 let offset = ((y * size + x) * 4) as usize;
                 <[u8; 4]>::try_from(&image.data[offset..offset + 4]).unwrap()
@@ -358,9 +420,9 @@ mod tests {
     #[test]
     fn taskbar_and_tray_marks_are_small_blue_dots_in_the_upper_right() {
         for size in [24, 32, 48, 64, 256] {
-            let taskbar = render_taskbar(size).unwrap();
-            let tray = render_sized(true, size).unwrap();
-            let normal = render_sized(false, size).unwrap();
+            let taskbar = render_taskbar(size, AttentionBadgeSize::Small).unwrap();
+            let tray = render_sized(true, size, AttentionBadgeSize::Small).unwrap();
+            let normal = render_sized(false, size, AttentionBadgeSize::Small).unwrap();
             let pixel = |image: &RgbaImage, x: f32, y: f32| {
                 let px = ((size as f32 * x).round() as u32).min(size - 1);
                 let py = ((size as f32 * y).round() as u32).min(size - 1);
@@ -420,8 +482,8 @@ mod tests {
     #[test]
     fn windows_attention_artwork_keeps_the_mark_upper_right_at_every_size() {
         for size in [16, 32, 48, 64, 256] {
-            let normal = render_sized(false, size).unwrap();
-            let image = render_sized(true, size).unwrap();
+            let normal = render_sized(false, size, AttentionBadgeSize::Small).unwrap();
+            let image = render_sized(true, size, AttentionBadgeSize::Small).unwrap();
             let pixel = |image: &RgbaImage, x: u32, y: u32| {
                 let offset = ((y * size + x) * 4) as usize;
                 <[u8; 4]>::try_from(&image.data[offset..offset + 4]).unwrap()
@@ -513,8 +575,8 @@ mod tests {
     #[cfg(not(target_os = "macos"))]
     #[test]
     fn render_produces_both_states() {
-        let normal = render(false).unwrap();
-        let attention = render(true).unwrap();
+        let normal = render(false, AttentionBadgeSize::Small).unwrap();
+        let attention = render(true, AttentionBadgeSize::Small).unwrap();
         for img in [&normal, &attention] {
             assert_eq!((img.width, img.height), (SIZE, SIZE));
             assert_eq!(img.data.len(), (SIZE * SIZE * 4) as usize);
@@ -550,7 +612,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test]
     fn render_argb_reorders_bytes() {
-        let rgba = render(false).unwrap();
+        let rgba = render(false, AttentionBadgeSize::Small).unwrap();
         let (argb, size) = render_argb(false).unwrap();
         assert_eq!(size, rgba.width);
         assert_eq!(argb.len(), rgba.data.len());

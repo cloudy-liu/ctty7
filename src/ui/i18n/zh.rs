@@ -591,6 +591,13 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsNotifyThreshold => "通知阈值",
         L10nKey::SettingsNotifyThresholdDesc => "命令需运行多久才能算作“较长”。",
         L10nKey::SettingsWindow => "窗口",
+        L10nKey::SettingsAttentionBadgeSize => "通知角标大小",
+        L10nKey::SettingsAttentionBadgeSizeDesc => {
+            "后台 Agent 完成或需要输入时，Windows 任务栏和托盘图标上蓝点的大小。修改后立即生效。"
+        }
+        L10nKey::AttentionBadgeSmall => "小",
+        L10nKey::AttentionBadgeMedium => "标准",
+        L10nKey::AttentionBadgeLarge => "大",
         L10nKey::NotifyModeNever => "从不",
         L10nKey::NotifyModeUnfocused => "窗口未聚焦时",
         L10nKey::NotifyModeAlways => "总是",
