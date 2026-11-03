@@ -97,6 +97,14 @@ impl SftpRoute {
     }
 
     pub(crate) fn op(&self, op: SftpOp) -> SftpOpResult {
+        if matches!(&op, SftpOp::Trash { .. })
+            && self
+                .workspace
+                .as_ref()
+                .is_some_and(|workspace| workspace.spec.is_none())
+        {
+            return SftpOpResult::Error("remote trash route is unavailable".into());
+        }
         let Some(req) =
             self.workspace_op(crate::daemon::protocol::WorkspaceOp::SftpOp { op: op.clone() })
         else {
@@ -856,8 +864,13 @@ impl Tty7App {
             return;
         }
         let feature = crate::daemon::protocol::FEATURE_NATIVE_SSH_TRASH;
-        let supported = if self.sftp_panel.open_workspace.is_some() {
-            crate::ui::remote_connect::HostLinks::peer_supports(cx, self.spawn_host(cx), feature)
+        let supported = if let Some(workspace) = &self.sftp_panel.open_workspace {
+            workspace.spec.is_some()
+                && crate::ui::remote_connect::HostLinks::peer_supports(
+                    cx,
+                    self.spawn_host(cx),
+                    feature,
+                )
         } else {
             crate::daemon::spawn::local_daemon_supports(feature)
         };
@@ -893,73 +906,90 @@ impl Tty7App {
         let connection = route.connection_key();
         let cwd = self.sftp_panel.cwd.clone();
         let generation = self.sftp_panel.nav_gen;
-        self.sftp_panel
-            .deleting
-            .extend(targets.iter().map(|entry| entry.name.clone()));
-        cx.spawn_in(window, async move |app, cx| {
-            let listed = cwd.clone();
-            let result = cx
-                .background_spawn(async move {
-                    let paths = targets
-                        .iter()
-                        .map(|target| remote_join(&listed, &target.name))
-                        .collect();
-                    let result = route.op(SftpOp::Trash { paths });
-                    let results = match result {
-                        SftpOpResult::Trashed(outcomes) if outcomes.len() == targets.len() => {
-                            outcomes
-                        }
-                        SftpOpResult::Error(error) => {
-                            vec![
-                                Err(format!("remote trash outcome unknown: {error}"));
-                                targets.len()
-                            ]
-                        }
-                        _ => vec![
-                            Err("remote trash outcome unknown: invalid batch reply".into());
-                            targets.len()
-                        ],
-                    };
-                    let outcomes: Vec<_> = targets
-                        .into_iter()
-                        .map(|target| target.name)
-                        .zip(results)
-                        .collect();
-                    let entries = route.list(&listed);
-                    (outcomes, entries)
-                })
-                .await;
-            let _ = app.update_in(cx, |app, window, cx| {
-                let same = app.sftp_route().connection_key() == connection
-                    && app.sftp_panel.cwd == cwd
-                    && app.sftp_panel.nav_gen == generation;
-                for (name, outcome) in result.0 {
-                    let unknown =
-                        matches!(&outcome, Err(error) if error.contains("outcome unknown"));
-                    match outcome {
-                        Ok(()) => {
-                            if same {
-                                app.sftp_panel.selected.remove(&name);
+        let host = self.remote_files_host(window, cx).unwrap_or_default();
+        let labels = targets
+            .iter()
+            .map(|entry| format!("{host}:{}", remote_join(&cwd, &entry.name)))
+            .collect();
+        self.confirm_file_delete(labels, window, cx, move |app, window, cx| {
+            let route = route.clone();
+            let cwd = cwd.clone();
+            let connection = connection.clone();
+            let mut targets = targets.clone();
+            if app.sftp_scope_matches(&(connection.clone(), cwd.clone(), generation)) {
+                targets.retain(|entry| !app.sftp_panel.deleting.contains(&entry.name));
+                app.sftp_panel
+                    .deleting
+                    .extend(targets.iter().map(|entry| entry.name.clone()));
+            }
+            if targets.is_empty() {
+                return;
+            }
+            cx.spawn_in(window, async move |app, cx| {
+                let listed = cwd.clone();
+                let result = cx
+                    .background_spawn(async move {
+                        let paths = targets
+                            .iter()
+                            .map(|target| remote_join(&listed, &target.name))
+                            .collect();
+                        let result = route.op(SftpOp::Trash { paths });
+                        let results = match result {
+                            SftpOpResult::Trashed(outcomes) if outcomes.len() == targets.len() => {
+                                outcomes
                             }
+                            SftpOpResult::Error(error) => {
+                                vec![
+                                    Err(format!("remote trash outcome unknown: {error}"));
+                                    targets.len()
+                                ]
+                            }
+                            _ => vec![
+                                Err("remote trash outcome unknown: invalid batch reply".into());
+                                targets.len()
+                            ],
+                        };
+                        let outcomes: Vec<_> = targets
+                            .into_iter()
+                            .map(|target| target.name)
+                            .zip(results)
+                            .collect();
+                        let entries = route.list(&listed);
+                        (outcomes, entries)
+                    })
+                    .await;
+                let _ = app.update_in(cx, |app, window, cx| {
+                    let same = app.sftp_route().connection_key() == connection
+                        && app.sftp_panel.cwd == cwd
+                        && app.sftp_panel.nav_gen == generation;
+                    for (name, outcome) in result.0 {
+                        let unknown =
+                            matches!(&outcome, Err(error) if error.contains("outcome unknown"));
+                        match outcome {
+                            Ok(()) => {
+                                if same {
+                                    app.sftp_panel.selected.remove(&name);
+                                }
+                            }
+                            Err(error) => window.push_notification(format!("{name}: {error}"), cx),
                         }
-                        Err(error) => window.push_notification(format!("{name}: {error}"), cx),
+                        if same && !unknown {
+                            app.sftp_panel.deleting.remove(&name);
+                        }
                     }
-                    if same && !unknown {
-                        app.sftp_panel.deleting.remove(&name);
+                    if same {
+                        if let Ok(entries) = result.1 {
+                            app.sftp_panel
+                                .selected
+                                .retain(|name| entries.iter().any(|entry| &entry.name == name));
+                            app.sftp_panel.entries = entries;
+                        }
+                        cx.notify();
                     }
-                }
-                if same {
-                    if let Ok(entries) = result.1 {
-                        app.sftp_panel
-                            .selected
-                            .retain(|name| entries.iter().any(|entry| &entry.name == name));
-                        app.sftp_panel.entries = entries;
-                    }
-                    cx.notify();
-                }
-            });
-        })
-        .detach();
+                });
+            })
+            .detach();
+        });
     }
 
     fn sftp_scope_matches(&self, scope: &(String, String, u64)) -> bool {
