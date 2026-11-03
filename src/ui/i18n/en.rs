@@ -1041,6 +1041,11 @@ pub fn translate_en(key: L10nKey) -> &'static str {
             "The file will be deleted on {host}. There is no trash on the far side."
         }
         L10nKey::FileTreeDeleteFailed => "Could not delete {name}",
+        L10nKey::FileDeleteConfirmTitle => "Move {count} items to trash?",
+        L10nKey::FileDeleteConfirmBody => {
+            "The selected items and the contents of selected folders will be moved to trash."
+        }
+        L10nKey::FileDeleteDontAskAgain => "Do not ask again",
         L10nKey::FileTreeTrashUnavailable => {
             "Could not move {name} to the trash: recoverable deletion is unavailable here."
         }
