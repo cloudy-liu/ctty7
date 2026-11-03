@@ -8,6 +8,7 @@ pub mod diff_selection;
 pub mod document_column;
 pub mod editor_theme;
 pub mod file_copy;
+mod file_delete;
 pub mod file_icons;
 pub mod file_tree;
 pub mod forwards;
