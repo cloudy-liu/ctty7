@@ -26,7 +26,7 @@ preserve it and explain the failure; never fall back to permanent deletion.
 3. As a user, I want Ctrl-click on Windows and Linux or Command-click on macOS to toggle individual items, so that I can select nonadjacent entries.
 4. As a keyboard user, I want Shift plus Up or Down to extend the selection, so that I can select a range without a mouse.
 5. As a keyboard user, I want Delete to act on the selection while the list has focus, so that I can delete it without opening a menu.
-6. As a user, I want an unmodified click to retain the current file-opening and folder-navigation behavior, so that normal browsing continues to work.
+6. As a user, I want an unmodified click in the ordinary tree to retain its existing file-opening and folder-expansion behavior, so that normal browsing continues to work.
 7. As a user, I want modified selection clicks to avoid opening files or changing folder expansion, so that selecting does not disturb the list.
 8. As a user, I want every selected item to be visibly highlighted, so that I can check the selection before deleting.
 9. As a user, I want repeated Shift selections to use a stable anchor, so that I can expand or shrink a range predictably.
@@ -51,12 +51,13 @@ preserve it and explain the failure; never fall back to permanent deletion.
 28. As an editor user, I want unsaved buffers and existing external-change safeguards preserved, so that moving an open file to trash does not silently discard edits.
 29. As a user switching sessions or browsing another host, I want selection and operations scoped to their owning context, so that a batch does not leak into another workspace.
 30. As a user of any supported interface language, I want the new selection and failure text localized, so that the action and its consequences are clear.
+31. As a Native SSH user, I want one click to select a folder and a double click to enter it, so that I can use a folder as the start of a Windows-style selection range.
 
 ## Implementation Decisions
 
 - Cover explicit user-facing file/folder deletion from the right-side ordinary file tree and Native SSH SFTP list, including context-menu and keyboard entry points. This is not a global change to every internal filesystem removal.
 - Track selected row identities, an anchor, and a keyboard focus/current row per owning session and host. Use the current rendered ordering for a Shift range, including search results, and retain the anchor through repeated range changes. Ignore loading/empty/error notes. Keep selected paths that merely scroll out of the viewport; prune entries that leave the actual listing through folding, filtering, navigation, or refresh. Reset an invalid anchor safely.
-- Use ordinary click for the existing activate/open/fold behavior; modifier-click only changes selection. Ctrl/Command toggles an individual row and Shift-click or Shift-arrow extends the range. Keep focus and input editing isolated so Delete cannot fire while the user types in a search or rename field.
+- In the ordinary tree, use ordinary click for the existing activate/open/fold behavior. In the Native SSH list, a plain click selects a folder and a double click enters it; file activation remains unchanged. This resolves the conflict between immediate folder navigation and choosing a folder as the first item of a range. Modifier-click only changes selection. Ctrl/Command toggles an individual row and Shift-click or Shift-arrow extends the range. Keep focus and input editing isolated so Delete cannot fire while the user types in a search or rename field.
 - Right-click on a selected row operates on the selected set; right-click on an unselected row selects and targets only it. Present only meaningful group actions for multiple selections. Preserve root protection and do not allow a range, duplicate root occurrence, keyboard shortcut, or context menu to bypass it.
 - Snapshot the exact eligible targets and owning host/session when delete is invoked. Deduplicate repeated occurrences and suppress descendants of a selected directory when that directory is itself a target. Do not follow a symlink in order to delete its target. Handle stale, missing, or changed targets safely and report them.
 - Start the trash operation directly for both single and multiple selections, with no app or platform confirmation dialog and no blocking success dialog. Selected directories enter trash with their contents. If an OS/provider cannot guarantee recoverable deletion without prompting to permanently delete, abort that item's operation and report the failure; never automatically accept such a prompt or offer a permanent-delete fallback.
@@ -88,8 +89,11 @@ The user requested range selection like a normal file manager and specifically
 changed the deletion requirement to moving deleted items to trash without a
 confirmation dialog. The user confirmed the existing GPUI window-test seam and
 separate platform/remote checks. Restore uses the owning system's normal tools;
-remote items are restored on the remote host. This specification describes the
-desired behavior; it does not claim that the capability is already implemented
-or that every remote server has recoverable trash.
+remote items are restored on the remote host. At ticket creation, the Native SSH
+folder gesture above was chosen as the working assumption to match the user's
+request for Windows-like selection; the user may still adjust it. This
+specification describes the desired behavior; it does not claim that the
+capability is already implemented or that every remote server has recoverable
+trash.
 
 Reference behavior: [Windows IFileOperation recycle flag](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-ifileoperation-setoperationflags), [macOS FileManager trash operation](https://developer.apple.com/documentation/foundation/filemanager/trashitem%28at%3Aresultingitemurl%3A%29?language=objc), and the [SSH file-transfer protocol draft](https://datatracker.ietf.org/doc/html/draft-spaghetti-sshm-filexfer).
