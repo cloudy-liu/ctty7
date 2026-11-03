@@ -1650,6 +1650,12 @@ mod tests {
             },
             ClientMsg::SftpOp {
                 pane_id: 4,
+                op: SftpOp::Trash {
+                    paths: vec!["/tmp/a file".into(), "/tmp/folder".into()],
+                },
+            },
+            ClientMsg::SftpOp {
+                pane_id: 4,
                 op: SftpOp::Mkdir {
                     path: "/tmp/new dir".into(),
                 },
@@ -1850,6 +1856,10 @@ mod tests {
                 stderr: b"no HEAD".to_vec(),
             }),
             DaemonMsg::SftpOpResult(SftpOpResult::Done),
+            DaemonMsg::SftpOpResult(SftpOpResult::Trashed(vec![
+                Ok(()),
+                Err("trash unavailable".into()),
+            ])),
             DaemonMsg::SftpOpResult(SftpOpResult::Link("/target/path".into())),
             DaemonMsg::SftpOpResult(SftpOpResult::Error("permission denied".into())),
             DaemonMsg::SftpOpResult(SftpOpResult::Stat(SftpEntry {

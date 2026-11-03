@@ -13,7 +13,12 @@ pub fn run(conn: &SshConnection, path: &str) -> Result<(), String> {
 }
 
 pub async fn query(conn: &SshConnection, path: &str) -> Result<(), String> {
-    if !path.starts_with('/') || path == "/" || path.contains('\0') || path.len() > 32 * 1024 {
+    if !path.starts_with('/')
+        || path.trim_matches('/').is_empty()
+        || path.split('/').any(|part| part == "." || part == "..")
+        || path.contains('\0')
+        || path.len() > 32 * 1024
+    {
         return Err("invalid remote trash target".into());
     }
     if !conn.is_alive() {

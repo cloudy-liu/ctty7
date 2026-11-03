@@ -832,6 +832,10 @@ impl Tty7App {
                     false,
                     cx,
                 );
+                let go_up = self.sftp_panel.cwd != "/" && filter.trim().is_empty();
+                self.sftp_panel
+                    .scroll
+                    .scroll_to_item(next + usize::from(go_up));
             }
             "delete" | "backspace" => self.sftp_delete_selected(window, cx),
             "enter" => {
@@ -842,8 +846,9 @@ impl Tty7App {
                     self.sftp_open_entry(entry, window, cx);
                 }
             }
-            _ => {}
+            _ => return,
         }
+        cx.stop_propagation();
     }
 
     fn sftp_delete_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
@@ -1817,10 +1822,11 @@ impl Tty7App {
                     .child(name_label),
             )
             .child(div().flex_none().text_xs().text_color(muted).child(size))
-            .context_menu(move |menu, _window, cx| {
+            .context_menu(move |menu, window, cx| {
                 let danger = cx.theme().danger;
                 let multiple = app
                     .update(cx, |this, cx| {
+                        this.sftp_panel.focus.focus(window, cx);
                         if !this.sftp_panel.selected.contains(&menu_entry.name) {
                             this.sftp_select(&menu_entry.name, false, false, cx);
                         }
@@ -2587,18 +2593,25 @@ mod gpui_tests {
         let (app, mut vcx) = harness(cx);
         app.update_in(&mut vcx, |app, window, cx| {
             app.sftp_panel.open_pane_id = Some(42);
-            app.sftp_delete_entry(
-                SftpEntry {
-                    name: "keep.txt".into(),
-                    kind: SftpEntryKind::File,
-                    size: 0,
-                    mtime: 0,
-                    permissions: 0,
-                    target_is_dir: false,
+            app.sftp_panel.open_workspace = Some(crate::terminal::PaneWorkspace {
+                workspace: crate::core::session::WorkspaceId::new(),
+                target: crate::core::session::RemoteTarget::Wsl {
+                    distro: "fixture".into(),
                 },
-                window,
-                cx,
-            );
+                spec: None,
+                label: None,
+                resize_echo: false,
+            });
+            let entry = SftpEntry {
+                name: "keep.txt".into(),
+                kind: SftpEntryKind::File,
+                size: 0,
+                mtime: 0,
+                permissions: 0,
+                target_is_dir: false,
+            };
+            app.sftp_panel.entries.push(entry.clone());
+            app.sftp_delete_entry(entry, window, cx);
             assert_eq!(
                 gpui_component::Root::read(window, cx)
                     .notification
