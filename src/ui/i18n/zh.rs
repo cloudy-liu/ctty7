@@ -1006,6 +1006,7 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         }
         L10nKey::SftpDeleteFileBody => "该文件将在 {host} 上被删除。远端没有回收站。",
         L10nKey::FileTreeDeleteFailed => "无法删除 {name}",
+        L10nKey::FileTreeTrashUnavailable => "无法将 {name} 移入回收站：此位置不支持可恢复删除。",
         L10nKey::FileTreeCreateFailed => "无法创建 {name}",
         L10nKey::FileTreeRenameFailed => "无法重命名 {name}",
         L10nKey::FileTreeContextOpen => "打开",

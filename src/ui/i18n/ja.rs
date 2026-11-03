@@ -1103,6 +1103,9 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
             "{host} 上でファイルが削除されます。リモート側にゴミ箱はありません。"
         }
         L10nKey::FileTreeDeleteFailed => "{name} を削除できませんでした",
+        L10nKey::FileTreeTrashUnavailable => {
+            "{name} をゴミ箱に移動できませんでした：この場所では復元可能な削除を利用できません。"
+        }
         L10nKey::FileTreeCreateFailed => "{name} を作成できませんでした",
         L10nKey::FileTreeRenameFailed => "{name} の名前を変更できませんでした",
         L10nKey::FileTreeContextOpen => "開く",

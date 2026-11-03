@@ -755,6 +755,7 @@ l10n_keys! {
     SftpDeleteFolderBody,
     SftpDeleteFileBody,
     FileTreeDeleteFailed,
+    FileTreeTrashUnavailable,
     FileTreeCreateFailed,
     FileTreeRenameFailed,
     FileTreeContextOpen,

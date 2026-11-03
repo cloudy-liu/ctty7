@@ -2,6 +2,7 @@ pub mod conformance;
 pub mod local;
 pub mod remote;
 pub mod server;
+mod trash;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -211,6 +212,15 @@ pub trait Host: Send + Sync + 'static {
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()>;
 
     fn remove(&self, p: &Path, recursive: bool) -> io::Result<()>;
+
+    /// Move a user-selected item to recoverable trash. Hosts must opt in:
+    /// silently falling back to `remove` would permanently destroy the item.
+    fn trash(&self, _p: &Path) -> io::Result<()> {
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "recoverable trash is not available on this host",
+        ))
+    }
 
     fn repo_root(&self, p: &Path) -> io::Result<Option<PathBuf>>;
 
