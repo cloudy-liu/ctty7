@@ -146,6 +146,10 @@ libgssapi = { version = "0.11", optional = true }
 # foreground process name through it on macOS.
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10"
+objc2 = "0.6"
+objc2-foundation = { version = "0.3", default-features = false, features = [
+    "std", "NSError", "NSFileManager", "NSString", "NSURL",
+] }
 # Read the system proxy out of SCDynamicStore for tty7's own downloads
 # (`daemon::install::proxy`). It pins core-foundation 0.9, so that module goes
 # through this crate's `core_foundation` re-export rather than the 0.10 above —
@@ -159,6 +163,9 @@ system-configuration-sys = { version = "0.6", optional = true }
 # is the OS CSPRNG that mints that token.
 [target.'cfg(windows)'.dependencies]
 getrandom = "0.3"
+windows = { version = "0.58", features = [
+    "Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell",
+] }
 
 # Toolhelp process enumeration + `TerminateProcess`, used by `daemon::winproc` to
 # title a pane by its foreground command and to tear down a shell's descendant

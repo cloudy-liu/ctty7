@@ -52,6 +52,9 @@ while there is something in it.
 - **Click a file** to open it in the built-in editor.
 - **Rename** from a folder's context menu opens an inline input. Drag across
   its name to select and copy text while keeping the folder expanded.
+- **Delete** from a file or folder's context menu moves it to the system trash
+  without a confirmation. On Linux this uses `gio`; if recoverable trash is not
+  available, the item stays in place and the panel reports the failure.
 - **Drag a file out** to Finder or Explorer to copy it there.
 - **Drag files in** from the desktop to copy them into the folder under the
   cursor. A folder row takes them itself, a file row stands in for the folder

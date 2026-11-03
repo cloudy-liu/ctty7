@@ -1041,6 +1041,9 @@ pub fn translate_en(key: L10nKey) -> &'static str {
             "The file will be deleted on {host}. There is no trash on the far side."
         }
         L10nKey::FileTreeDeleteFailed => "Could not delete {name}",
+        L10nKey::FileTreeTrashUnavailable => {
+            "Could not move {name} to the trash: recoverable deletion is unavailable here."
+        }
         L10nKey::FileTreeCreateFailed => "Could not create {name}",
         L10nKey::FileTreeRenameFailed => "Could not rename {name}",
         L10nKey::FileTreeContextOpen => "Open",

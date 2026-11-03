@@ -11,7 +11,7 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, InteractiveElementExt as _, Sizable as _,
-    h_flex, v_flex,
+    WindowExt as _, h_flex, v_flex,
 };
 
 use crate::daemon::protocol::{
@@ -710,45 +710,13 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pane_id) = self.sftp_panel.open_pane_id else {
+        if self.sftp_panel.open_pane_id.is_none() {
             return;
-        };
-        let path = remote_join(&self.sftp_panel.cwd, &entry.name);
-        let is_dir = matches!(entry.kind, SftpEntryKind::Dir);
-        // The local file tree asks before it deletes. This is the same red
-        // Delete in the same shape of menu, on a machine the user cannot walk
-        // over to, and it used to go straight through.
-        let host = self
-            .remote_files_host(window, cx)
-            .unwrap_or_else(|| t(L10nKey::AppLocalServerName).to_string());
-        let body = t_fmt(
-            match is_dir {
-                true => L10nKey::SftpDeleteFolderBody,
-                false => L10nKey::SftpDeleteFileBody,
-            },
-            &[("host", &host)],
-        );
-        let answer = window.prompt(
-            gpui::PromptLevel::Warning,
-            &t_fmt(L10nKey::FileTreeDeleteTitle, &[("name", &entry.name)]),
-            Some(&body),
-            &crate::ui::confirm_answers(t(L10nKey::Delete), t(L10nKey::Cancel)),
+        }
+        window.push_notification(
+            t_fmt(L10nKey::FileTreeTrashUnavailable, &[("name", &entry.name)]),
             cx,
         );
-        cx.spawn_in(window, async move |this, cx| {
-            let Ok(0) = answer.await else { return };
-            let _ = this.update(cx, |this, cx| {
-                if this.sftp_panel.open_pane_id != Some(pane_id) {
-                    return;
-                }
-                let op = match is_dir {
-                    true => SftpOp::RemoveDir { path },
-                    false => SftpOp::RemoveFile { path },
-                };
-                this.sftp_run_op(pane_id, op, cx);
-            });
-        })
-        .detach();
     }
 
     pub(crate) fn sftp_follow_symlink(&mut self, entry: SftpEntry, cx: &mut Context<Self>) {
@@ -2259,6 +2227,37 @@ mod gpui_tests {
             let app = app.read(cx);
             (app.right_panel_visible, app.right_panel_tab)
         })
+    }
+
+    #[gpui::test]
+    fn remote_delete_without_trash_reports_the_failure(cx: &mut TestAppContext) {
+        use crate::daemon::protocol::{SftpEntry, SftpEntryKind};
+
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.sftp_panel.open_pane_id = Some(42);
+            app.sftp_delete_entry(
+                SftpEntry {
+                    name: "keep.txt".into(),
+                    kind: SftpEntryKind::File,
+                    size: 0,
+                    mtime: 0,
+                    permissions: 0,
+                    target_is_dir: false,
+                },
+                window,
+                cx,
+            );
+            assert_eq!(
+                gpui_component::Root::read(window, cx)
+                    .notification
+                    .read(cx)
+                    .notifications()
+                    .len(),
+                1,
+                "unavailable remote trash must report a failure without deleting"
+            );
+        });
     }
 
     #[gpui::test]

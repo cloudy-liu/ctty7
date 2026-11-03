@@ -1380,7 +1380,7 @@ impl Tty7App {
     fn file_tree_delete(
         &mut self,
         path: PathBuf,
-        is_dir: bool,
+        _is_dir: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -1388,77 +1388,51 @@ impl Tty7App {
             .file_name()
             .map(|n| n.to_string_lossy().to_string())
             .unwrap_or_else(|| path.display().to_string());
-        let detail = if is_dir {
-            t(L10nKey::FileTreeDeleteFolderBody)
-        } else {
-            t(L10nKey::FileTreeDeleteFileBody)
+        let Some(host) = self.active_host(cx) else {
+            return;
         };
-        let answer = window.prompt(
-            PromptLevel::Warning,
-            &t_fmt(L10nKey::FileTreeDeleteTitle, &[("name", &name)]),
-            Some(detail),
-            &crate::ui::confirm_answers(t(L10nKey::Delete), t(L10nKey::Cancel)),
+        let Some(parent) = path.parent().map(Path::to_path_buf) else {
+            return;
+        };
+        let id = host.id();
+        let tab_id = self.tabs.get(self.active).map(|tab| tab.tree_id.get());
+        let target = path.clone();
+        HostOps::run_in(
+            host,
+            window,
             cx,
-        );
-        cx.spawn_in(window, async move |app, cx| {
-            let Ok(0) = answer.await else { return };
-            let _ = app.update_in(cx, |app, window, cx| {
-                let Some(host) = app.active_host(cx) else {
-                    return;
-                };
-                let id = host.id();
-                let Some(parent) = path.parent().map(Path::to_path_buf) else {
-                    return;
-                };
-                let row = TreeEntry {
-                    name: name.clone(),
-                    path: path.clone(),
-                    is_dir,
-                    ignored: false,
-                };
-                let rollback = app
-                    .file_tree
-                    .optimistic(id, &parent, &TreeWrite::Delete, &row);
-                if let Some(code) = app.tab_code_mut()
-                    && code.selected.as_ref().is_some_and(|s| s.path == path)
-                {
-                    code.selected = None;
-                }
-                let target = path.clone();
-                // "Delete failed: Permission denied" leaves out the one thing
-                // you need in a tree of files, the same way "Save failed" used
-                // to in the editor.
-                let failed_name = name.clone();
-                HostOps::run_in(
-                    host,
-                    window,
-                    cx,
-                    move |h| h.remove(&target, is_dir),
-                    move |app, result: std::io::Result<()>, window, cx| {
-                        match result {
-                            Ok(()) => {
-                                app.file_tree.invalidate_dir(id, &parent);
-                            }
-                            Err(e) => {
-                                app.file_tree.rollback(id, &parent, rollback);
-                                HostOps::notify_err(
-                                    window,
-                                    cx,
-                                    &t_fmt(
-                                        L10nKey::FileTreeDeleteFailed,
-                                        &[("name", &failed_name)],
-                                    ),
-                                    &e,
-                                );
-                            }
+            move |h| h.trash(&target),
+            move |app, result: std::io::Result<()>, window, cx| {
+                app.file_tree.invalidate_dir(id, &parent);
+                match result {
+                    Ok(()) => {
+                        if let Some(tab_id) = tab_id
+                            && let Some(code) = app
+                                .tabs
+                                .iter_mut()
+                                .find(|tab| tab.tree_id.get() == tab_id)
+                                .and_then(|tab| tab.code.as_deref_mut())
+                            && code.selected.as_ref().is_some_and(|s| s.path == path)
+                        {
+                            code.selected = None;
                         }
-                        cx.notify();
-                    },
-                );
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::Unsupported => {
+                        window.push_notification(
+                            t_fmt(L10nKey::FileTreeTrashUnavailable, &[("name", &name)]),
+                            cx,
+                        );
+                    }
+                    Err(e) => HostOps::notify_err(
+                        window,
+                        cx,
+                        &t_fmt(L10nKey::FileTreeDeleteFailed, &[("name", &name)]),
+                        &e,
+                    ),
+                }
                 cx.notify();
-            });
-        })
-        .detach();
+            },
+        );
     }
 
     /// Copy what was dropped on the tree into `dir`.
@@ -2527,6 +2501,36 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         (app, vcx, pane)
+    }
+
+    #[gpui::test]
+    fn a_missing_delete_target_reports_failure_without_confirmation(cx: &mut gpui::TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let (app, mut vcx, _pane) = files_panel(cx, root.path());
+        let missing = root.path().join("missing.txt");
+
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.file_tree_delete(missing, false, window, cx);
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            vcx.background_executor.run_until_parked();
+            let notified = vcx.update(|window, cx| {
+                !gpui_component::Root::read(window, cx)
+                    .notification
+                    .read(cx)
+                    .notifications()
+                    .is_empty()
+            });
+            if notified {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "a missing target should report failure without waiting for a prompt"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 
     #[gpui::test]
