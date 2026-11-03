@@ -13,6 +13,11 @@ second login, no second password.
 
 ## Browsing
 
+Click a folder once to select it, or double-click to enter it. Shift-click or
+Shift plus Up/Down selects a range in the displayed order. Ctrl-click
+(Command-click on macOS) toggles individual entries. Right-clicking a selected
+entry retains the group; right-clicking another entry targets that one alone.
+
 The panel opens on the remote home directory. **Go to Shell Directory** in the
 overflow menu jumps it to wherever the pane's shell currently is, which is
 usually where you actually want to be.
@@ -20,6 +25,17 @@ usually where you actually want to be.
 Right-click a row for **Edit** (**Open** on a directory), **Download**,
 **Follow Symlink**, **Rename**, **chmod…**, and delete. The overflow menu adds
 **New Folder**, **New File**, **Upload…**, and **Refresh**.
+
+Delete and the context menu move selected items to the remote host's trash.
+The standard deletion confirmation preference applies. A supported Linux host
+must provide Python 3, `gio`, and SSH command execution. Its own HOME/XDG
+configuration determines the trash location; files never enter the client's
+local recycle bin. Unsupported servers preserve the originals and report the
+failure. Restore items with the remote system's normal trash tools.
+
+If a connection drops before the result is known, refresh the listing before
+retrying. A batch can partially succeed; failures remain selected when they
+are still present in the displayed directory.
 
 ## Editing
 

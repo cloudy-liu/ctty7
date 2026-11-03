@@ -30,6 +30,8 @@ pub const FEATURE_AGENT_RESUME: &str = "agent-resume";
 
 /// Bounded read-only Git queries on an established Native SSH pane connection.
 pub const FEATURE_NATIVE_SSH_GIT: &str = "native-ssh-git";
+/// Recoverable trash over a Native SSH pane, with no permanent-delete fallback.
+pub const FEATURE_NATIVE_SSH_TRASH: &str = "native-ssh-trash";
 
 /// The daemon can replace its own binary without stopping, keeping every pty
 /// and everything running on one — `ClientMsg::Handoff`. Advertised only where
@@ -57,6 +59,7 @@ impl DaemonVersion {
             FEATURE_RESTORE_SCROLLBACK.to_string(),
             FEATURE_AGENT_RESUME.to_string(),
             FEATURE_NATIVE_SSH_GIT.to_string(),
+            FEATURE_NATIVE_SSH_TRASH.to_string(),
         ];
         if cfg!(unix) {
             features.push(FEATURE_HANDOFF.to_string());
@@ -292,6 +295,9 @@ pub struct SftpEntry {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SftpOp {
+    Trash {
+        paths: Vec<String>,
+    },
     Stat {
         path: String,
     },
@@ -341,6 +347,7 @@ pub enum SftpOp {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum SftpOpResult {
+    Trashed(Vec<Result<(), String>>),
     Done,
     Stat(SftpEntry),
     Link(String),
@@ -1643,6 +1650,12 @@ mod tests {
             },
             ClientMsg::SftpOp {
                 pane_id: 4,
+                op: SftpOp::Trash {
+                    paths: vec!["/tmp/a file".into(), "/tmp/folder".into()],
+                },
+            },
+            ClientMsg::SftpOp {
+                pane_id: 4,
                 op: SftpOp::Mkdir {
                     path: "/tmp/new dir".into(),
                 },
@@ -1843,6 +1856,10 @@ mod tests {
                 stderr: b"no HEAD".to_vec(),
             }),
             DaemonMsg::SftpOpResult(SftpOpResult::Done),
+            DaemonMsg::SftpOpResult(SftpOpResult::Trashed(vec![
+                Ok(()),
+                Err("trash unavailable".into()),
+            ])),
             DaemonMsg::SftpOpResult(SftpOpResult::Link("/target/path".into())),
             DaemonMsg::SftpOpResult(SftpOpResult::Error("permission denied".into())),
             DaemonMsg::SftpOpResult(SftpOpResult::Stat(SftpEntry {
