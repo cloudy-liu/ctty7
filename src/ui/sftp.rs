@@ -962,6 +962,13 @@ impl Tty7App {
         .detach();
     }
 
+    fn sftp_scope_matches(&self, scope: &(String, String, u64)) -> bool {
+        self.sftp_panel.open_pane_id.is_some()
+            && self.sftp_route().connection_key() == scope.0
+            && self.sftp_panel.cwd == scope.1
+            && self.sftp_panel.nav_gen == scope.2
+    }
+
     pub(crate) fn sftp_follow_symlink(&mut self, entry: SftpEntry, cx: &mut Context<Self>) {
         let Some(pane_id) = self.sftp_panel.open_pane_id else {
             return;
@@ -1772,6 +1779,11 @@ impl Tty7App {
         let open_entry = entry.clone();
         let menu_entry = entry.clone();
         let app = cx.entity().downgrade();
+        let menu_scope = (
+            self.sftp_route().connection_key(),
+            self.sftp_panel.cwd.clone(),
+            self.sftp_panel.nav_gen,
+        );
 
         h_flex()
             .id(row_id)
@@ -1835,14 +1847,26 @@ impl Tty7App {
                     .unwrap_or(false);
                 if multiple {
                     let app = app.clone();
+                    let scope = menu_scope.clone();
                     return menu.item(PopupMenuItem::new(t(L10nKey::Delete)).on_click(
                         move |_, window, cx| {
-                            let _ =
-                                app.update(cx, |this, cx| this.sftp_delete_selected(window, cx));
+                            let _ = app.update(cx, |this, cx| {
+                                if this.sftp_scope_matches(&scope) {
+                                    this.sftp_delete_selected(window, cx);
+                                }
+                            });
                         },
                     ));
                 }
-                Self::sftp_row_context_menu(menu, &menu_entry, dir_like, is_symlink, danger, &app)
+                Self::sftp_row_context_menu(
+                    menu,
+                    &menu_entry,
+                    dir_like,
+                    is_symlink,
+                    danger,
+                    &app,
+                    &menu_scope,
+                )
             })
             .into_any_element()
     }
@@ -1854,6 +1878,7 @@ impl Tty7App {
         is_symlink: bool,
         danger: gpui::Hsla,
         app: &gpui::WeakEntity<Self>,
+        scope: &(String, String, u64),
     ) -> gpui_component::menu::PopupMenu {
         let mut menu = menu.min_w(px(180.));
 
@@ -1923,9 +1948,14 @@ impl Tty7App {
             .on_click({
                 let app = app.clone();
                 let entry = entry.clone();
+                let scope = scope.clone();
                 move |_, window, cx| {
                     let entry = entry.clone();
-                    let _ = app.update(cx, |this, cx| this.sftp_delete_entry(entry, window, cx));
+                    let _ = app.update(cx, |this, cx| {
+                        if this.sftp_scope_matches(&scope) {
+                            this.sftp_delete_entry(entry, window, cx);
+                        }
+                    });
                 }
             }),
         )
