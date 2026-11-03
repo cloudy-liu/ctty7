@@ -14,9 +14,11 @@ operations must act on the machine that owns the selected items.
 ## Solution
 
 Provide familiar range and additive selection for files and folders in the
-Files panel. A user-initiated delete immediately moves the selected items to
-the owning system's recoverable trash, without a confirmation dialog for
-single items or batches. If a target cannot be moved to an appropriate trash,
+Files panel. A user-initiated delete shows a confirmation dialog with a
+"Don't ask again" checkbox for single items or batches. Confirming with the
+checkbox selected persists the preference and skips future confirmations.
+Cancelling does not delete or save the checkbox choice. Items move to the
+owning system's recoverable trash. If a target cannot be moved to appropriate trash,
 preserve it and explain the failure; never fall back to permanent deletion.
 
 ## User Stories
@@ -37,7 +39,7 @@ preserve it and explain the failure; never fall back to permanent deletion.
 14. As a user, I want right-clicking an unselected item to target that item alone, so that an old selection cannot cause an unexpected batch operation.
 15. As a user, I want actions that make sense only for one item to be unavailable for a multi-selection, so that their target is unambiguous.
 16. As a user, I want the existing project-root protection preserved, so that selecting a range cannot bypass it.
-17. As a user, I want a delete action to move selected items to trash immediately, so that I am not interrupted by a confirmation dialog.
+17. As a user, I want deletion to ask for confirmation by default and offer a Don't ask again checkbox, so that I can choose the interruption level I prefer.
 18. As a user, I want deleting a selected folder to move the folder and its contents to trash, so that I can recover the complete folder later.
 19. As a user, I want the deletion targets fixed when I invoke delete, so that changing tabs, hosts, or selection cannot redirect the operation.
 20. As a user, I want each underlying target processed only once, even if a tree shows it more than once or a selected folder contains another selected item.
@@ -52,6 +54,8 @@ preserve it and explain the failure; never fall back to permanent deletion.
 29. As a user switching sessions or browsing another host, I want selection and operations scoped to their owning context, so that a batch does not leak into another workspace.
 30. As a user of any supported interface language, I want the new selection and failure text localized, so that the action and its consequences are clear.
 31. As a Native SSH user, I want one click to select a folder and a double click to enter it, so that I can use a folder as the start of a Windows-style selection range.
+32. As a user, I want Don't ask again saved only when I confirm, so that cancelling does not change my future deletion behavior.
+33. As a user, I want this preference remembered across application restarts and shared by both Files panel surfaces, so that my choice is consistent.
 
 ## Implementation Decisions
 
@@ -60,7 +64,7 @@ preserve it and explain the failure; never fall back to permanent deletion.
 - In the ordinary tree, use ordinary click for the existing activate/open/fold behavior. In the Native SSH list, a plain click selects a folder and a double click enters it; file activation remains unchanged. This resolves the conflict between immediate folder navigation and choosing a folder as the first item of a range. Modifier-click only changes selection. Ctrl/Command toggles an individual row and Shift-click or Shift-arrow extends the range. Keep focus and input editing isolated so Delete cannot fire while the user types in a search or rename field.
 - Right-click on a selected row operates on the selected set; right-click on an unselected row selects and targets only it. Present only meaningful group actions for multiple selections. Preserve root protection and do not allow a range, duplicate root occurrence, keyboard shortcut, or context menu to bypass it.
 - Snapshot the exact eligible targets and owning host/session when delete is invoked. Deduplicate repeated occurrences and suppress descendants of a selected directory when that directory is itself a target. Do not follow a symlink in order to delete its target. Handle stale, missing, or changed targets safely and report them.
-- Start the trash operation directly for both single and multiple selections, with no app or platform confirmation dialog and no blocking success dialog. Selected directories enter trash with their contents. If an OS/provider cannot guarantee recoverable deletion without prompting to permanently delete, abort that item's operation and report the failure; never automatically accept such a prompt or offer a permanent-delete fallback.
+- Use one shared confirmation flow for single and multiple selections in both Files panel surfaces. Default to asking, including when older configurations omit the preference. Show target identities/count and the owning host, plus a Don't ask again checkbox initially unchecked. Confirming with it checked persistently disables later file-delete confirmations; cancelling, Escape, or dismissing the dialog performs no operation and does not save the choice. Snapshot targets before opening the dialog. After confirmation, or when the preference skips it, request recoverable trash without a second platform confirmation or blocking success dialog. Selected directories enter trash with their contents. If an OS/provider would require permanent deletion, abort and report the failure; never automatically accept such a prompt or offer a permanent-delete fallback.
 - Add a recoverable-trash capability separate from the existing permanent removal primitive, because the latter is also used for temporary staging and internal cleanup. Route single and batch user delete actions through this capability; do not redefine existing internal removal semantics globally.
 - Use the owning platform's real trash mechanism where supported. Windows and macOS should use their native recycle/trash facilities; Linux should use an implementation compatible with the [freedesktop.org Trash Specification](https://specifications.freedesktop.org/trash/latest/). A successful result must be recoverable using the owning system's normal tools, including original-location metadata. Deal safely with collisions, permissions, links, full/unsupported volumes, and provider cancellation; a request to recycle must never authorize permanent destruction if the platform cannot recycle an item.
 - For remote hosts and WSL, execute the trash operation on the owning host, never on the client by interpreting a remote path locally. Support a known-good Linux remote workspace and a Native SSH/SFTP Linux home directory with a usable freedesktop-compatible trash, including recoverable files and nonempty folders. Detect unsupported hosts, old peers, or inaccessible trash before deleting and preserve the affected original. The SFTP protocol alone does not guarantee a trash facility: do not claim every server supports one or silently substitute unlink/recursive remove. Preserve compatible behavior with older peers by failing safely rather than downgrading deletion. Do not interpolate file names into remote shell commands.
@@ -69,9 +73,9 @@ preserve it and explain the failure; never fall back to permanent deletion.
 
 ## Testing Decisions
 
-- User-confirmed seam: reuse the existing GPUI application-window harness and exercise real list clicks, keyboard input, context-menu targeting, immediate deletion, and observable results with temporary fixtures. Favor behavior visible to users over tests of private selection helpers. Reuse existing file-tree keyboard, nested-root, editing, watcher, and SFTP test patterns.
+- User-confirmed seam: reuse the existing GPUI application-window harness and exercise real list clicks, keyboard input, context-menu targeting, confirmation and observable results with temporary fixtures. Favor behavior visible to users over tests of private selection helpers. Reuse existing file-tree keyboard, nested-root, editing, watcher, and SFTP test patterns.
 - Cover forward/backward ranges, repeated Shift selection, Ctrl/Command toggles, Shift-arrow, single-click behavior, active search, folds, hidden rows, root protection, duplicate rows, mixed folders/files, focus and input fields, and tab/host changes. Check right-click both inside and outside the selection.
-- Verify single and batch deletion begin without a confirmation dialog, including the platform integration. Exercise duplicate and ancestor/descendant targets, special characters, symlinks, missing items, mixed success/failure, and a disconnected or unsupported host. Verify unchanged originals whenever trash is unavailable and verify that permanent removal is never called as a fallback.
+- Verify default single/batch confirmation, confirming with or without Don't ask again, cancellation/dismissal without preference changes, persisted skip behavior after restart, and sharing across tree/SFTP. Ensure snapshots cannot retarget while the dialog is open. Exercise duplicate and ancestor/descendant targets, special characters, symlinks, missing items, mixed success/failure, and a disconnected or unsupported host. Verify unchanged originals whenever trash is unavailable and verify that permanent removal is never called as a fallback.
 - At the platform/host boundary, use isolated disposable files and an isolated trash test environment where supported to move and then actually restore a file and nonempty directory, verifying their original locations and contents. Cover metadata and name collisions as well. Exercise a known-good Linux remote workspace and Native SSH/SFTP fixture as well as unsupported servers. Independently verify Windows, macOS, Linux, remote workspace/WSL, and Native SSH capabilities where environments are available; record unverified environments instead of claiming parity.
 - Verify open dirty documents retain their edits and existing external-change safeguards after a target or its parent folder is moved to trash. Exercise older remote peers and interrupted requests without acting on unrelated user files.
 - For the implementation PR, follow the repository's native Before/After screenshot gate with the same fixture, viewport, scale, and relevant settings. Show the selection and resulting listing after deletion; use actual running-application captures rather than mockups.
@@ -86,8 +90,9 @@ preserve it and explain the failure; never fall back to permanent deletion.
 ## Further Notes
 
 The user requested range selection like a normal file manager and specifically
-changed the deletion requirement to moving deleted items to trash without a
-confirmation dialog. The user confirmed the existing GPUI window-test seam and
+requires recoverable trash, with a default confirmation dialog and a persistent
+Don't ask again checkbox as the latest instruction. This supersedes the earlier
+no-confirmation requirement. The user confirmed the existing GPUI window-test seam and
 separate platform/remote checks. Restore uses the owning system's normal tools;
 remote items are restored on the remote host. At ticket creation, the Native SSH
 folder gesture above was chosen as the working assumption to match the user's
