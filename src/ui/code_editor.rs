@@ -30,6 +30,16 @@ const MAX_FILE_BYTES: u64 = 4 * 1024 * 1024;
 /// File-tab labels follow the UI scale: 13px at the default 16px rem.
 const FILE_TAB_TEXT: f32 = 13. / 16.;
 
+/// Windows Terminal geometry for the file-tab rail, in fixed px because the
+/// rail height is fixed: the strip keeps a band above the tabs and a lead
+/// before the first one, the selected tab is a rounded "sheet" in the
+/// document color that meets the content below, and separators are short
+/// hairlines inset from the sheet's edges.
+const FILE_TAB_INSET: f32 = 6.;
+const FILE_TAB_LEAD: f32 = 7.;
+const FILE_TAB_RADIUS: f32 = 5.;
+const FILE_TAB_SEP_INSET: f32 = 6.;
+
 #[cfg(all(feature = "markdown-visual-tests", any(windows, target_os = "macos")))]
 pub(crate) mod native_html;
 
@@ -2013,6 +2023,7 @@ impl Tty7App {
         });
         let font = gpui::font(cx.theme().font_family.clone());
         let rem = window.rem_size().as_f32();
+        let file_count = self.tab_code().map_or(0, |code| code.files.len());
         row.flex_none()
             .when_some(header_focus, |row, handle| row.track_focus(&handle))
             .min_w_0()
@@ -2029,8 +2040,18 @@ impl Tty7App {
                         + crate::ui::tab_strip::trailing_chrome_w()))
                 },
             )
-            .border_b_1()
-            .border_color(cx.theme().border)
+            // The rail's bottom hairline lives under the tabs: the selected
+            // tab's sheet covers it and joins the content below, while the
+            // empty rail keeps the edge Windows Terminal draws.
+            .child(
+                div()
+                    .absolute()
+                    .bottom_0()
+                    .left_0()
+                    .right_0()
+                    .h(px(1.))
+                    .bg(cx.theme().border),
+            )
             .child(
                 h_flex()
                     .id("editor-file-tabs")
@@ -2039,6 +2060,7 @@ impl Tty7App {
                     .min_w_0()
                     .h_full()
                     .bg(gpui::rgb(inactive_tab))
+                    .pt(px(FILE_TAB_INSET))
                     .overflow_x_scroll()
                     .when_some(self.tab_code(), |strip, code| {
                         strip.track_scroll(&code.tab_scroll).children(
@@ -2051,13 +2073,21 @@ impl Tty7App {
                                     rem * FILE_TAB_TEXT,
                                     &name,
                                 );
-                                // Match the row's padding, gaps, icon, close target and border.
+                                // Match the row's padding, gaps, icon, close target and
+                                // separator column.
                                 let chrome_width = rem * 1.75
                                     + crate::ui::file_icons::ROW_ICON
                                     + crate::ui::tab_strip::MIN_TARGET
                                     + 1.
                                     + if file.dirty { 6. + rem * 0.375 } else { 0. };
                                 let tab_width = (text_width + chrome_width).ceil().min(260.);
+                                // The separator beside the selected tab is
+                                // hidden, Windows Terminal style.
+                                let front_ix = if commit_front {
+                                    code.files.len()
+                                } else {
+                                    code.active
+                                };
                                 let full_path = crate::ui::path_display::readable_path(
                                     &file.path,
                                     file.host.id(),
@@ -2072,10 +2102,11 @@ impl Tty7App {
                                     .h_full()
                                     .w(px(tab_width))
                                     .max_w_full()
+                                    .when(ix == 0, |tab| tab.ml(px(FILE_TAB_LEAD)))
                                     .px_2()
                                     .gap_1p5()
-                                    .border_r_1()
-                                    .border_color(cx.theme().border)
+                                    .rounded_tl(px(FILE_TAB_RADIUS))
+                                    .rounded_tr(px(FILE_TAB_RADIUS))
                                     .text_size(rems(FILE_TAB_TEXT))
                                     .cursor_pointer()
                                     .when(ix == code.active && !commit_front, |tab| {
@@ -2083,9 +2114,22 @@ impl Tty7App {
                                             .text_color(gpui::rgb(surface.text_selected))
                                     })
                                     .when(ix != code.active || commit_front, |tab| {
-                                        tab.bg(gpui::rgb(inactive_tab))
-                                            .text_color(gpui::rgb(surface.text_resting))
+                                        tab.text_color(gpui::rgb(surface.text_resting))
                                             .hover(|tab| tab.bg(gpui::rgb(surface.selected)))
+                                    })
+                                    .when(!(ix == front_ix || ix + 1 == front_ix), |tab| {
+                                        // A short hairline, like Windows
+                                        // Terminal's, that disappears beside
+                                        // the selected tab.
+                                        tab.child(
+                                            div()
+                                                .absolute()
+                                                .top(px(FILE_TAB_SEP_INSET))
+                                                .bottom(px(FILE_TAB_SEP_INSET))
+                                                .right_0()
+                                                .w(px(1.))
+                                                .bg(cx.theme().border),
+                                        )
                                     })
                                     .tooltip(move |window, cx| {
                                         gpui_component::tooltip::Tooltip::new(full_path.clone())
@@ -2177,19 +2221,30 @@ impl Tty7App {
                                 .h_full()
                                 .w(px(168.))
                                 .max_w_full()
+                                .when(file_count == 0, |tab| tab.ml(px(FILE_TAB_LEAD)))
                                 .px_2()
                                 .gap_1p5()
-                                .border_r_1()
-                                .border_color(cx.theme().border)
+                                .rounded_tl(px(FILE_TAB_RADIUS))
+                                .rounded_tr(px(FILE_TAB_RADIUS))
                                 .text_size(rems(FILE_TAB_TEXT))
                                 .cursor_pointer()
-                                .bg(gpui::rgb(if commit_front {
-                                    content_background
-                                } else {
-                                    inactive_tab
-                                }))
+                                .when(commit_front, |tab| tab.bg(gpui::rgb(content_background)))
                                 .when(!commit_front, |tab| {
                                     tab.hover(|tab| tab.bg(gpui::rgb(surface.selected)))
+                                })
+                                .when(!commit_front, |tab| {
+                                    // The commit tab keeps its rail-end
+                                    // hairline until it becomes the selected
+                                    // sheet.
+                                    tab.child(
+                                        div()
+                                            .absolute()
+                                            .top(px(FILE_TAB_SEP_INSET))
+                                            .bottom(px(FILE_TAB_SEP_INSET))
+                                            .right_0()
+                                            .w(px(1.))
+                                            .bg(cx.theme().border),
+                                    )
                                 })
                                 .on_mouse_down(gpui::MouseButton::Left, |_, _, cx| {
                                     cx.stop_propagation()
@@ -2232,7 +2287,12 @@ impl Tty7App {
                                         })),
                                 ),
                         )
-                    }),
+                    })
+                    // gpui measures the rail's scroll range from the children's
+                    // bounds, which miss the leading margin on the first tab; a
+                    // trailing lead of the same width restores it, so revealing
+                    // a right-edge tab never clips its right side.
+                    .child(div().flex_none().w(px(FILE_TAB_LEAD))),
             )
             .when(
                 commit_front
@@ -3364,6 +3424,92 @@ mod tests {
             assert!(name.left() > tab.left() && name.right() <= close.left());
             assert!(close.right() <= tab.right());
         }
+    }
+
+    #[gpui::test]
+    fn document_tabs_sit_inset_in_the_rail_and_reveal_on_scroll(cx: &mut TestAppContext) {
+        let (app, mut vcx) = markdown_window(cx);
+        vcx.simulate_resize(gpui::size(px(1200.), px(760.)));
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.set_document_layout(crate::core::config::DocumentLayout::Fill, cx);
+            for name in ["migration.md", "release.md", "settings.rs"] {
+                app.editor_install_file(
+                    tty7_core::host::local::LocalHost::new(),
+                    Path::new("/work").join(name),
+                    String::new(),
+                    None,
+                    window,
+                    cx,
+                );
+            }
+        });
+        vcx.run_until_parked();
+        vcx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let strip = vcx.debug_bounds("editor-file-tabs").unwrap();
+        let first = vcx.debug_bounds("editor-file-tab-0").unwrap();
+        assert!(
+            (first.left() - (strip.left() + px(FILE_TAB_LEAD))).abs() <= px(1.),
+            "the first tab keeps the rail's lead: tab={first:?}, strip={strip:?}"
+        );
+        for selector in [
+            "editor-file-tab-0",
+            "editor-file-tab-2",
+            "editor-file-tab-1",
+        ] {
+            let tab = vcx.debug_bounds(selector).unwrap();
+            vcx.simulate_click(tab.center(), gpui::Modifiers::none());
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            let strip = vcx.debug_bounds("editor-file-tabs").unwrap();
+            let tab = vcx.debug_bounds(selector).unwrap();
+            assert!(
+                (tab.top() - (strip.top() + px(FILE_TAB_INSET))).abs() <= px(1.),
+                "the tab hangs below the rail's top band: tab={tab:?}, strip={strip:?}"
+            );
+            assert!((tab.bottom() - strip.bottom()).abs() <= px(1.));
+        }
+
+        // The inset holds when the rail scrolls: overflow the strip, reveal
+        // the last document, and re-check the same geometry.
+        app.update_in(&mut vcx, |app, window, cx| {
+            for ix in 3..10 {
+                app.editor_install_file(
+                    tty7_core::host::local::LocalHost::new(),
+                    format!("/work/document-number-{ix}.rs").into(),
+                    String::new(),
+                    None,
+                    window,
+                    cx,
+                );
+            }
+        });
+        vcx.run_until_parked();
+        for _ in 0..2 {
+            app.update_in(&mut vcx, |app, window, cx| {
+                app.editor_activate_open(
+                    HostId::LOCAL,
+                    Path::new("/work/document-number-9.rs"),
+                    window,
+                    cx,
+                );
+            });
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+        }
+        let strip = vcx.debug_bounds("editor-file-tabs").unwrap();
+        let tab = vcx.debug_bounds("editor-file-tab-9").unwrap();
+        assert!(
+            tab.left() >= strip.left() && tab.right() <= strip.right(),
+            "the reveal must hold: tab={tab:?}, strip={strip:?}"
+        );
+        assert!((tab.top() - (strip.top() + px(FILE_TAB_INSET))).abs() <= px(1.));
+        assert!((tab.bottom() - strip.bottom()).abs() <= px(1.));
     }
 
     #[gpui::test]
