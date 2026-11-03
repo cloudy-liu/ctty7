@@ -34,7 +34,10 @@ use super::protocol::{MAX_FRAME, read_frame, write_frame};
 /// refusing to kill a server it has nothing to replace with — can be exercised
 /// against the v6 servers already deployed. A number is the only way to reach
 /// that path, and a mismatch nobody can reproduce is a mismatch nobody can fix.
-pub const CONTROL_VERSION: u32 = 7;
+///
+/// v8 adds the recoverable `Trash` request and preserves `Unsupported` errors.
+/// A client must never substitute the older permanent `Remove` operation.
+pub const CONTROL_VERSION: u32 = 8;
 
 const DIALECT_MARKER: &str = "speaks control v";
 
@@ -115,6 +118,7 @@ pub const MAX_CONCURRENT_GIT_STREAMS: usize = 8;
 pub mod feature {
     pub const CONTROL: &str = "control";
     pub const HOST_RPC: &str = "host-rpc";
+    pub const HOST_TRASH: &str = "host-trash";
     pub const MACHINE_TREE: &str = "machine-tree";
     pub const STDIO_BRIDGE: &str = "stdio-bridge";
 }
@@ -173,6 +177,9 @@ pub enum ControlRequest {
     Remove {
         path: String,
         recursive: bool,
+    },
+    Trash {
+        path: String,
     },
 
     RepoRoot {
@@ -351,9 +358,11 @@ impl ControlRequest {
             | WatchSet { .. }
             | WatchClose { .. } => Duration::from_secs(5),
             ReadFile { .. } | WriteFile { .. } => Duration::from_secs(30),
-            CreateFileNew { .. } | CreateDir { .. } | Rename { .. } | Remove { .. } => {
-                Duration::from_secs(10)
-            }
+            CreateFileNew { .. }
+            | CreateDir { .. }
+            | Rename { .. }
+            | Remove { .. }
+            | Trash { .. } => Duration::from_secs(10),
             Git { .. } | GitStream { .. } | Search { .. } => Duration::from_secs(20),
             Shells => Duration::from_secs(20),
             WorkspaceAttach { .. } | WorkspaceDetach { .. } => Duration::from_secs(10),
@@ -451,6 +460,7 @@ pub enum WireErrorKind {
     GitUnavailable,
     TimedOut,
     ConnectionReset,
+    Unsupported,
     Other,
 }
 
@@ -474,6 +484,7 @@ impl WireError {
             K::DirectoryNotEmpty => WireErrorKind::DirectoryNotEmpty,
             K::FileTooLarge => WireErrorKind::FileTooLarge,
             K::TimedOut => WireErrorKind::TimedOut,
+            K::Unsupported => WireErrorKind::Unsupported,
             K::ConnectionReset | K::BrokenPipe | K::UnexpectedEof => WireErrorKind::ConnectionReset,
             _ => WireErrorKind::Other,
         };
@@ -502,6 +513,7 @@ impl WireErrorKind {
             WireErrorKind::FileTooLarge => K::FileTooLarge,
             WireErrorKind::TimedOut => K::TimedOut,
             WireErrorKind::ConnectionReset => K::ConnectionReset,
+            WireErrorKind::Unsupported => K::Unsupported,
             WireErrorKind::Other => K::Other,
         }
     }
@@ -1473,6 +1485,9 @@ mod tests {
                 path: "/home/me/tmp".into(),
                 recursive: true,
             },
+            ControlRequest::Trash {
+                path: "/home/me/trash-me".into(),
+            },
             ControlRequest::RepoRoot {
                 path: "/home/me/proj/src/deep".into(),
             },
@@ -1591,6 +1606,10 @@ mod tests {
             ControlReply::Err(WireError::new(WireErrorKind::TimedOut, "timed out")),
             ControlReply::Err(WireError::new(WireErrorKind::ConnectionReset, "reset")),
             ControlReply::Err(WireError::new(WireErrorKind::Other, "something else")),
+            ControlReply::Err(WireError::new(
+                WireErrorKind::Unsupported,
+                "trash unavailable",
+            )),
         ]
     }
 
@@ -2054,6 +2073,7 @@ mod tests {
             (K::FileTooLarge, WireErrorKind::FileTooLarge),
             (K::TimedOut, WireErrorKind::TimedOut),
             (K::ConnectionReset, WireErrorKind::ConnectionReset),
+            (K::Unsupported, WireErrorKind::Unsupported),
         ];
         for (io_kind, wire_kind) in pairs {
             let wire = WireError::from_io(&io::Error::new(io_kind, "boom"));
@@ -2178,6 +2198,7 @@ mod tests {
             ),
             (R::WriteFile { path: "/".into() }, s(30)),
             (R::CreateFileNew { path: "/".into() }, s(10)),
+            (R::Trash { path: "/".into() }, s(10)),
             (
                 R::CreateDir {
                     path: "/".into(),
