@@ -4,6 +4,7 @@ pub mod git;
 pub mod known_hosts;
 pub mod session;
 pub mod sftp;
+pub mod trash;
 pub mod workspace;
 
 mod auth;

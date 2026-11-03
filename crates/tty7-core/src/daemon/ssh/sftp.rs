@@ -307,6 +307,19 @@ impl SftpManager {
     }
 
     pub fn op(&self, conn: &Arc<SshConnection>, op: &SftpOp) -> SftpOpResult {
+        if let SftpOp::Trash { paths } = op {
+            if paths.len() > 1000 {
+                return SftpOpResult::Error("too many remote trash targets".into());
+            }
+            // Hold this exact connection for the whole batch: a later pane
+            // reconnect cannot redirect the remaining items to a new route.
+            return SftpOpResult::Trashed(
+                paths
+                    .iter()
+                    .map(|path| super::trash::run(conn, path))
+                    .collect(),
+            );
+        }
         let result = SshManager::global().handle().block_on(async {
             self.with_session(conn, |sftp| async move { run_op(&sftp, op).await })
                 .await
@@ -470,6 +483,7 @@ async fn list_dir(sftp: &SftpSession, path: &str) -> Result<Vec<SftpEntry>, Stri
 
 async fn run_op(sftp: &SftpSession, op: &SftpOp) -> Result<SftpOpResult, String> {
     Ok(match op {
+        SftpOp::Trash { .. } => return Err("trash requires the owning SSH connection".into()),
         SftpOp::Stat { path } => {
             let attrs = sftp
                 .metadata(path.clone())
