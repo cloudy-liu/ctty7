@@ -103,11 +103,17 @@ fn manifest_source(agent: CLIAgent) -> Option<&'static str> {
         CLIAgent::Grok => include_str!("../../assets/agent-detection/grok.toml"),
         CLIAgent::Qwen => include_str!("../../assets/agent-detection/qwen.toml"),
         CLIAgent::Kimi => include_str!("../../assets/agent-detection/kimi.toml"),
+        // Herdr reads the China build with the same manifest: its aliases list
+        // `qoderclicn` and `qodercn` beside the global names.
+        CLIAgent::QoderCLI | CLIAgent::QoderCLICn => {
+            include_str!("../../assets/agent-detection/qodercli.toml")
+        }
         CLIAgent::Aider
         | CLIAgent::Goose
         | CLIAgent::Auggie
         | CLIAgent::Vibe
-        | CLIAgent::OhMyPi => return None,
+        | CLIAgent::OhMyPi
+        | CLIAgent::CodeBuddy => return None,
     })
 }
 
@@ -970,6 +976,54 @@ mod tests {
         );
     }
 
+    /// Qoder CLI 1.1.83 at rest: the shortcuts hint, the mode row and the
+    /// composer. A turn adds a status line above them in Qoder's own wording
+    /// (`status.model.thinking`, `status.loading.cancelAndTimer`).
+    const QODER_COMPOSER: &str = "                                      ? for shortcuts\n\
+        ──────────────────────────────────────────────────\n \
+        YOLO Shift+Tab to Auto Mode          1 AGENTS.md file · 2 MCP servers\n\
+        ──────────────────────────────────────────────────\n \
+        *   Type your message or @path/to/file\n\
+        ──────────────────────────────────────────────────\n";
+
+    #[test]
+    fn qoder_reads_its_turn_and_its_confirmation_prompt() {
+        for agent in [CLIAgent::QoderCLI, CLIAgent::QoderCLICn] {
+            let idle = screen(agent, QODER_COMPOSER);
+            assert_eq!(idle.state, ScreenState::Idle, "{agent:?}");
+            assert!(!idle.matched, "an idle Qoder is the fallback, not a rule");
+
+            let working = screen(
+                agent,
+                &format!("⠙ Thinking... (esc to cancel, 4s)\n{QODER_COMPOSER}"),
+            );
+            assert_eq!(working.state, ScreenState::Working, "{agent:?}");
+
+            let blocked = screen(
+                agent,
+                &format!(
+                    " Allow this command to run?\n ❯ Allow once\n   Reject and type something\n\
+                     ⠏ Waiting for user confirmation... (esc to cancel, 9s)\n{QODER_COMPOSER}"
+                ),
+            );
+            assert_eq!(blocked.state, ScreenState::Blocked, "{agent:?}");
+        }
+    }
+
+    #[test]
+    fn a_qoder_turn_is_done_once_its_status_line_goes() {
+        let working = format!("⠹ Generating... (esc to cancel, 2s)\n{QODER_COMPOSER}");
+        let mut tracker = Tracker::default();
+        tracker.observe(Some(CLIAgent::QoderCLI), 1, "", "", || working.clone());
+        assert_eq!(tracker.status().unwrap().status, Some(AgentStatus::Working));
+        for _ in 0..=IDLE_CONFIRMATIONS {
+            tracker.observe(Some(CLIAgent::QoderCLI), 2, "", "", || {
+                QODER_COMPOSER.into()
+            });
+        }
+        assert_eq!(tracker.status().unwrap().status, Some(AgentStatus::Done));
+    }
+
     #[test]
     fn upstream_rules_handle_current_prompts_and_background_work() {
         for (agent, text, expected) in [
@@ -1373,6 +1427,21 @@ mod tests {
             merge(CLIAgent::Aider, Some(&notified), None),
             Some(AgentStatus::Waiting),
             "a bare notification still counts where there is no screen reading"
+        );
+    }
+
+    /// Herdr has no CodeBuddy manifest, so its status is what its hooks report.
+    #[test]
+    fn codebuddy_status_comes_from_its_hooks() {
+        let mut tracker = Tracker::default();
+        tracker.observe(Some(CLIAgent::CodeBuddy), 1, "", "", || {
+            unreachable!("there is no manifest to read the screen with")
+        });
+        assert_eq!(tracker.status(), None);
+        let hook = session(AgentStatus::Waiting, true);
+        assert_eq!(
+            merge(CLIAgent::CodeBuddy, Some(&hook), tracker.status()),
+            Some(AgentStatus::Waiting)
         );
     }
 

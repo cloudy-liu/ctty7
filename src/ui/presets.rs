@@ -333,7 +333,12 @@ impl Theme {
         let mut inks = [0; CLIAgent::ALL.len()];
         for agent in CLIAgent::ALL {
             let seed = match agent {
-                CLIAgent::Codex | CLIAgent::Cursor | CLIAgent::Grok => m.foreground,
+                CLIAgent::Codex
+                | CLIAgent::Cursor
+                | CLIAgent::Grok
+                | CLIAgent::QoderCLI
+                | CLIAgent::QoderCLICn
+                | CLIAgent::CodeBuddy => m.foreground,
                 _ => agent.accent_rgb(),
             };
             inks[agent as usize] = agent_icon_ink(seed, &backgrounds);
@@ -1483,7 +1488,14 @@ mod tests {
             theme.background = Fill::Solid(background);
             theme.foreground = foreground;
             let icons = theme.agent_icons();
-            for agent in [CLIAgent::Codex, CLIAgent::Cursor, CLIAgent::Grok] {
+            for agent in [
+                CLIAgent::Codex,
+                CLIAgent::Cursor,
+                CLIAgent::Grok,
+                CLIAgent::QoderCLI,
+                CLIAgent::QoderCLICn,
+                CLIAgent::CodeBuddy,
+            ] {
                 assert_eq!(icons.ink(agent), foreground, "{}", agent.display_name());
             }
             if background == 0 {

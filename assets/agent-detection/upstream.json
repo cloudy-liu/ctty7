@@ -67,6 +67,11 @@
       "version": "2026.10.01.1",
       "sha256": "949f5f3bcfeb6db1261432697dd94a9ed625a733d70c00e6fc0910372fad7c66"
     },
+    "qodercli.toml": {
+      "path": "src/detect/manifests/qodercli.toml",
+      "version": "2026.06.10.1",
+      "sha256": "2089f70fc78c6576fd7128a00f4e7eedb85be81bde9ed73301b3b88000048961"
+    },
     "qwen.toml": {
       "path": "src/detect/manifests/qwen.toml",
       "version": "2026.08.14.1",

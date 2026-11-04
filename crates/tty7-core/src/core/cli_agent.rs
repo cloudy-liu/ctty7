@@ -93,8 +93,11 @@ impl CLIAgent {
             // Detecting only `qodercli` would miss every session started the
             // documented way, since the dispatcher is what the pty sees. An IDE
             // launch is the cost: it wears the CLI's avatar for as long as the
-            // launcher takes to exit.
-            CLIAgent::QoderCLI => &["qoder", "qodercli"],
+            // launcher takes to exit. `qodercli` leads because an unstarted pane
+            // relaunches the first alias: every install channel ships it, and
+            // the curl installer's Windows `qoder` is a PowerShell dispatcher
+            // that only finds it in turn.
+            CLIAgent::QoderCLI => &["qodercli", "qoder"],
             // The mainland-China build of Qoder: the same vendor as the global
             // one, a separate install that keeps its state in `~/.qoder-cn`.
             // It ships the same dispatcher-plus-CLI pair under `-cn` names, so
@@ -761,9 +764,12 @@ impl CLIAgent {
             // The blue of the flame in Kimi's brand mark; the glyph itself is
             // black, which Codex and Grok already have covered.
             CLIAgent::Kimi => 0x027AFF,
-            CLIAgent::QoderCLI => 0xFFFFFF,
+            // The near-black field of Qoder's own dark app icon. The tray draws
+            // every mark in white on its accent, so a white field would erase
+            // the glyph.
+            CLIAgent::QoderCLI => 0x0F0D0C,
             // qoder-cn ships the same mark on the same black field.
-            CLIAgent::QoderCLICn => 0xFFFFFF,
+            CLIAgent::QoderCLICn => 0x0F0D0C,
             // The near-black field CodeBuddy's own app icon sits on.
             CLIAgent::CodeBuddy => 0x1F1F1F,
         }
@@ -1545,6 +1551,9 @@ mod tests {
     fn black_branded_avatars_keep_their_brand_field() {
         assert_eq!(CLIAgent::Codex.accent_rgb(), 0x000000);
         assert_eq!(CLIAgent::Grok.accent_rgb(), 0x000000);
+        assert_eq!(CLIAgent::QoderCLI.accent_rgb(), 0x0F0D0C);
+        assert_eq!(CLIAgent::QoderCLICn.accent_rgb(), 0x0F0D0C);
+        assert_eq!(CLIAgent::CodeBuddy.accent_rgb(), 0x1F1F1F);
     }
 
     #[test]
