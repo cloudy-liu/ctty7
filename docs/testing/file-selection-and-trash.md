@@ -54,5 +54,9 @@ repository:
   acceptance of the repository's Before/After gate is unverified.
 - The SFTP side reuses this confirmation, but has no dedicated test: its
   capability check reads a process-global with no test hook.
+- Moving a target, or the parent folder of an open document, to trash was not
+  exercised end to end: the editors' unsaved-buffer and external-change
+  safeguards have their own tests, but the trash-then-edit interaction is
+  unverified.
 - macOS native restore, Windows Recycle Bin metadata cleanup, directory symlink
   behaviour, WSL/Linux crate tests and real remote hosts remain unverified.

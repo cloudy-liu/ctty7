@@ -597,7 +597,17 @@ mod tests {
         fs::write(&file, "file contents").unwrap();
         fs::write(folder.join("child.txt"), "folder contents").unwrap();
 
-        host.trash(&file).unwrap();
+        // A CI runner's /tmp is often a system-internal mount, which gio
+        // refuses to trash. That is an environment limit rather than a ctty7
+        // failure, so the fixture reports the skip instead of failing.
+        if let Err(error) = host.trash(&file) {
+            let refused = error
+                .to_string()
+                .contains("Trashing on system internal mounts");
+            assert!(refused, "the fixture could not be trashed: {error}");
+            eprintln!("skipping: this filesystem has no usable trash ({error})");
+            return;
+        }
         host.trash(&folder).unwrap();
         assert!(!file.exists());
         assert!(!folder.exists());

@@ -1165,7 +1165,13 @@ impl Tty7App {
         additive: bool,
         cx: &mut Context<Self>,
     ) {
-        let rows = self.file_tree_selection_rows(cx);
+        // Only a Shift range needs the flattened listing; a plain click or an
+        // additive toggle must not pay for a full walk of the tree.
+        let rows = if shift {
+            self.file_tree_selection_rows(cx)
+        } else {
+            Vec::new()
+        };
         let host = self.spawn_host(cx);
         let Some(code) = self.tab_code_mut() else {
             return;
@@ -1280,7 +1286,7 @@ impl Tty7App {
                     .first()
                     .map(|selection| selection.path.clone())
                 {
-                    self.file_tree_delete(path, false, window, cx);
+                    self.file_tree_delete(path, window, cx);
                 }
             }
             "enter" => {
@@ -1454,13 +1460,7 @@ impl Tty7App {
         cx.notify();
     }
 
-    fn file_tree_delete(
-        &mut self,
-        path: PathBuf,
-        _is_dir: bool,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) {
+    fn file_tree_delete(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
         let Some(host) = self.active_host(cx) else {
             return;
         };
@@ -1488,7 +1488,6 @@ impl Tty7App {
         let tab_id = self.tabs.get(self.active).map(|tab| tab.tree_id.get());
         let host_label = self.remote_machine_label(cx);
         let prepared_host = host.clone();
-        let prepared_roots = roots.clone();
         HostOps::run_in(
             host,
             window,
@@ -1503,10 +1502,11 @@ impl Tty7App {
                     .map(|path| format!("{}: {}", host_label, path.display()))
                     .collect();
                 app.confirm_file_delete(labels, window, cx, move |app, window, cx| {
+                    // The targets were snapshotted before the dialog opened;
+                    // trashing must not re-derive them.
                     app.file_tree_trash_snapshot(
                         prepared_host.clone(),
                         targets.clone(),
-                        prepared_roots.clone(),
                         tab_id,
                         window,
                         cx,
@@ -1519,8 +1519,7 @@ impl Tty7App {
     fn file_tree_trash_snapshot(
         &mut self,
         host: SharedHost,
-        paths: Vec<PathBuf>,
-        roots: Vec<PathBuf>,
+        targets: Vec<PathBuf>,
         tab_id: Option<tty7_core::core::machine::TabId>,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -1531,23 +1530,15 @@ impl Tty7App {
             window,
             cx,
             move |h| {
-                let (targets, failures) = prepare_tree_trash(h, paths, &roots);
-                let mut outcomes = failures
+                targets
                     .into_iter()
-                    .map(|(path, error)| (path, Err(error)))
-                    .collect::<Vec<_>>();
-                outcomes.extend(
-                    targets
-                        .into_iter()
-                        .map(|path| {
-                            let result = h.stat(&path).and_then(|meta| {
-                                h.trash(&path).map(|_| meta.is_dir && !meta.is_symlink)
-                            });
-                            (path, result)
-                        })
-                        .collect::<Vec<_>>(),
-                );
-                outcomes
+                    .map(|path| {
+                        let result = h.stat(&path).and_then(|meta| {
+                            h.trash(&path).map(|_| meta.is_dir && !meta.is_symlink)
+                        });
+                        (path, result)
+                    })
+                    .collect::<Vec<_>>()
             },
             move |app, results, window, cx| {
                 for (path, result) in &results {
@@ -2091,10 +2082,11 @@ impl Tty7App {
                 .into_any_element()
         };
 
+        let row_id = row.selection().element_id();
         let row_el = h_flex()
-            .id(row.selection().element_id())
+            .id(row_id.clone())
             .debug_selector({
-                let id = row.selection().element_id();
+                let id = row_id.clone();
                 move || id.to_string()
             })
             .items_center()
@@ -2195,7 +2187,7 @@ impl Tty7App {
                         return menu.item(PopupMenuItem::new(t(L10nKey::Delete)).on_click(
                             move |_, window, cx| {
                                 let _ = app.update(cx, |this, cx| {
-                                    this.file_tree_delete(path.clone(), false, window, cx)
+                                    this.file_tree_delete(path.clone(), window, cx)
                                 });
                             },
                         ));
@@ -2430,8 +2422,7 @@ impl Tty7App {
                     let app = app.clone();
                     move |_, window, cx| {
                         let p = p.clone();
-                        let _ =
-                            app.update(cx, |this, cx| this.file_tree_delete(p, is_dir, window, cx));
+                        let _ = app.update(cx, |this, cx| this.file_tree_delete(p, window, cx));
                     }
                 }),
             );
@@ -2719,6 +2710,7 @@ mod tests {
         use crate::ui::pane::{Pane, PaneSlot};
         use crate::ui::pending_pane::{PendingPane, PendingSpawn};
 
+        crate::core::config::pin_test_config_dir();
         let (app, mut vcx) = test_window::harness(cx);
         app.update_in(&mut vcx, |app, _, cx| {
             // A connecting pane gives the tree a tab without spawning a shell.
@@ -2759,6 +2751,7 @@ mod tests {
         use crate::ui::app::{Tab, test_window};
         use crate::ui::pane::{Pane, PaneSlot};
 
+        crate::core::config::pin_test_config_dir();
         let (app, mut vcx) = test_window::harness(cx);
         let mut pane = app.update_in(&mut vcx, |app, window, cx| {
             let (view, pane) = crate::terminal::view::quiet_test_pane(1, window, cx);
@@ -3054,7 +3047,7 @@ mod tests {
         app.update_in(&mut vcx, |app, window, cx| {
             cx.global_mut::<crate::core::config::Config>()
                 .confirm_file_delete = false;
-            app.file_tree_delete(missing, false, window, cx);
+            app.file_tree_delete(missing, window, cx);
         });
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
         loop {

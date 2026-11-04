@@ -2380,7 +2380,16 @@ mod tests {
             })
             .unwrap_err();
         assert_eq!(relative_error.kind(), io::ErrorKind::InvalidInput);
-        remote.host.trash(&file).unwrap();
+        // Same environment limit as the local fixture: a runner's /tmp is
+        // often a system-internal mount that gio refuses to trash.
+        if let Err(error) = remote.host.trash(&file) {
+            let refused = error
+                .to_string()
+                .contains("Trashing on system internal mounts");
+            assert!(refused, "the fixture could not be trashed: {error}");
+            eprintln!("skipping: this filesystem has no usable trash ({error})");
+            return;
+        }
         remote.host.trash(&folder).unwrap();
         assert!(!remote.host.exists(&file));
         assert!(!remote.host.exists(&folder));

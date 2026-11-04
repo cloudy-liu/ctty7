@@ -959,9 +959,10 @@ impl Tty7App {
                     })
                     .await;
                 let _ = app.update_in(cx, |app, window, cx| {
-                    let same = app.sftp_route().connection_key() == connection
-                        && app.sftp_panel.cwd == cwd
-                        && app.sftp_panel.nav_gen == generation;
+                    // One definition of "same scope": the guard also requires
+                    // the panel to still be open.
+                    let same =
+                        app.sftp_scope_matches(&(connection.clone(), cwd.clone(), generation));
                     for (name, outcome) in result.0 {
                         let unknown =
                             matches!(&outcome, Err(error) if error.contains("outcome unknown"));
@@ -2615,6 +2616,7 @@ mod gpui_tests {
     }
 
     fn harness(cx: &mut TestAppContext) -> (Entity<Tty7App>, VisualTestContext) {
+        crate::core::config::pin_test_config_dir();
         cx.executor().allow_parking();
         cx.update(|cx| {
             gpui_component::init(cx);

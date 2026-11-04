@@ -8,7 +8,7 @@ use gpui_component::{
 
 use crate::core::config::Config;
 use crate::ui::app::Tty7App;
-use crate::ui::i18n::{L10nKey, t, t_fmt};
+use crate::ui::i18n::{L10nKey, t, t_plural};
 
 impl Tty7App {
     /// The caller must capture the owning host and exact targets before calling.
@@ -55,10 +55,7 @@ impl Tty7App {
                     accept(window, cx);
                     false
                 })
-                .title(t_fmt(
-                    L10nKey::FileDeleteConfirmTitle,
-                    &[("count", &labels.len().to_string())],
-                ))
+                .title(t_plural(L10nKey::FileDeleteConfirmTitle, labels.len(), &[]))
                 .child(
                     v_flex()
                         .gap_2()
