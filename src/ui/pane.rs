@@ -943,20 +943,36 @@ impl Pane<PaneSlot> {
                 let id = v.entity_id();
                 let focused = v.contains_focused(window, cx);
                 let lifted = chrome.lifted == Some(id);
-                let grip = chrome.rearrangeable && chrome.lifted.is_none();
-                let agent = match v {
-                    PaneSlot::Ready(t) => t.read(cx).agent(),
-                    PaneSlot::Connecting(_) => None,
+                let (agent, herdr) = match v {
+                    PaneSlot::Ready(t) => {
+                        let terminal = t.read(cx);
+                        (
+                            terminal.agent(),
+                            matches!(
+                                terminal.foreground_app(),
+                                Some(crate::core::foreground_app::ForegroundApp::Herdr)
+                            ),
+                        )
+                    }
+                    PaneSlot::Connecting(_) => (None, false),
                 };
-                let agent_chrome = crate::ui::pane_title::chrome_for(
+                // Herdr manages its own tabs and panes. Keep tty7's controls
+                // off its screen so the nested workspace stays unobstructed.
+                let rearrangeable = chrome.rearrangeable && !herdr;
+                let grip = rearrangeable && chrome.lifted.is_none();
+                let mut agent_chrome = crate::ui::pane_title::chrome_for(
                     matches!(v, PaneSlot::Ready(_)),
                     agent,
                     chrome.agent_titles,
                 );
+                if herdr {
+                    agent_chrome.title = false;
+                    agent_chrome.toolbar = false;
+                }
                 // The toolbar is revealed by the same band as the grip, so a
                 // pane with either needs the band.
                 let band = grip || agent_chrome.toolbar;
-                let reserved_top = if chrome.rearrangeable {
+                let reserved_top = if rearrangeable {
                     crate::ui::pane_drag::HANDLE_STRIP
                 } else {
                     0.
@@ -983,7 +999,7 @@ impl Pane<PaneSlot> {
                     .size_full()
                     .relative()
                     .overflow_hidden()
-                    .when(chrome.rearrangeable, |d| {
+                    .when(rearrangeable, |d| {
                         d.pt(px(crate::ui::pane_drag::HANDLE_STRIP))
                     })
                     .map(|d| match v {
