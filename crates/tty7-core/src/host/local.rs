@@ -273,6 +273,18 @@ impl Host for LocalHost {
         }
     }
 
+    fn trash(&self, p: &Path) -> io::Result<()> {
+        guard_off_ui();
+        if p.file_name().is_none() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "cannot move a root directory to trash",
+            ));
+        }
+        fs::symlink_metadata(p)?;
+        super::trash::move_to_trash(p)
+    }
+
     fn repo_root(&self, p: &Path) -> io::Result<Option<PathBuf>> {
         guard_off_ui();
         Ok(p.ancestors()
@@ -499,6 +511,120 @@ mod tests {
     }
 
     crate::host_conformance_suite!(local, sandbox);
+
+    #[test]
+    fn trashing_a_missing_file_leaves_its_siblings_alone() {
+        let (host, sandbox) = sandbox();
+        let sibling = sandbox.path().join("keep.txt");
+        fs::write(&sibling, "keep").unwrap();
+
+        let error = host.trash(&sandbox.path().join("missing.txt")).unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(fs::read_to_string(&sibling).unwrap(), "keep");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn trashing_a_locked_file_does_not_remove_it() {
+        use std::os::windows::fs::OpenOptionsExt;
+
+        let (host, sandbox) = sandbox();
+        let file = sandbox.path().join("locked.txt");
+        fs::write(&file, "keep").unwrap();
+        let locked = fs::OpenOptions::new()
+            .read(true)
+            .share_mode(0)
+            .open(&file)
+            .unwrap();
+
+        assert!(host.trash(&file).is_err());
+        drop(locked);
+        assert_eq!(fs::read_to_string(file).unwrap(), "keep");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unavailable_trash_preserves_the_original_file() {
+        const TEST_ROOT: &str = "TTY7_UNAVAILABLE_TRASH_TEST_ROOT";
+        let Some(root) = std::env::var_os(TEST_ROOT) else {
+            let root = tempfile::tempdir().unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "host::local::tests::unavailable_trash_preserves_the_original_file",
+                    "--nocapture",
+                ])
+                .env(TEST_ROOT, root.path())
+                .env("PATH", root.path())
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        };
+        let file = PathBuf::from(root).join("keep.txt");
+        fs::write(&file, "keep").unwrap();
+        let error = LocalHost::new().trash(&file).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::Unsupported);
+        assert_eq!(fs::read_to_string(file).unwrap(), "keep");
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn local_trash_keeps_file_and_folder_recoverable() {
+        const TEST_ROOT: &str = "TTY7_LOCAL_TRASH_TEST_ROOT";
+        let Some(root) = std::env::var_os(TEST_ROOT) else {
+            let root = tempfile::tempdir().unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    "host::local::tests::local_trash_keeps_file_and_folder_recoverable",
+                    "--nocapture",
+                ])
+                .env(TEST_ROOT, root.path())
+                .env("XDG_DATA_HOME", root.path().join("xdg"))
+                .status()
+                .unwrap();
+            assert!(status.success());
+            return;
+        };
+
+        let root = PathBuf::from(root);
+        let host = LocalHost::new();
+        let file = root.join("file.txt");
+        let folder = root.join("folder");
+        fs::create_dir(&folder).unwrap();
+        fs::write(&file, "file contents").unwrap();
+        fs::write(folder.join("child.txt"), "folder contents").unwrap();
+
+        // A CI runner's /tmp is often a system-internal mount, which gio
+        // refuses to trash. That is an environment limit rather than a ctty7
+        // failure, so the fixture reports the skip instead of failing.
+        if let Err(error) = host.trash(&file) {
+            let refused = error
+                .to_string()
+                .contains("Trashing on system internal mounts");
+            assert!(refused, "the fixture could not be trashed: {error}");
+            eprintln!("skipping: this filesystem has no usable trash ({error})");
+            return;
+        }
+        host.trash(&folder).unwrap();
+        assert!(!file.exists());
+        assert!(!folder.exists());
+
+        let trash = root.join("xdg/Trash");
+        let file_info = fs::read_to_string(trash.join("info/file.txt.trashinfo")).unwrap();
+        let folder_info = fs::read_to_string(trash.join("info/folder.trashinfo")).unwrap();
+        assert!(file_info.contains(&format!("Path={}", file.display())));
+        assert!(folder_info.contains(&format!("Path={}", folder.display())));
+        fs::rename(trash.join("files/file.txt"), &file).unwrap();
+        fs::rename(trash.join("files/folder"), &folder).unwrap();
+        assert_eq!(fs::read_to_string(file).unwrap(), "file contents");
+        assert_eq!(
+            fs::read_to_string(folder.join("child.txt")).unwrap(),
+            "folder contents"
+        );
+    }
 
     #[test]
     fn watch_reports_new_files_in_an_expanded_subdirectory() {

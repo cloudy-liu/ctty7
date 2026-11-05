@@ -1016,7 +1016,7 @@ impl Tty7App {
     ) {
         let row_path = &selection.path;
         if let Some(code) = self.tab_code_mut() {
-            code.selected = Some(selection.clone());
+            code.select_tree(selection.clone());
         }
         let searching = !self.file_search.read(cx).value().trim().is_empty();
         if is_dir && searching {
@@ -1083,7 +1083,7 @@ impl Tty7App {
         // dropped the selection on the floor there — the first reveal in a
         // session landed on a row that was expanded but not highlighted.
         if let Some(code) = self.tab_code_mut_or_init() {
-            code.selected = Some(TreeSelection::for_path(path, &code.roots));
+            code.select_tree(TreeSelection::for_path(path, &code.roots));
         }
         self.right_panel.tree_reveal = Some((
             path.to_path_buf(),
@@ -1141,24 +1141,91 @@ impl Tty7App {
         self.set_right_panel_tab(RightPanelTab::Files, cx);
     }
 
+    fn file_tree_selection_rows(&self, cx: &App) -> Vec<TreeRow> {
+        let Some(code) = self.tab_code() else {
+            return Vec::new();
+        };
+        let rows = if self.file_tree_searching(cx) {
+            self.file_tree.search_rows()
+        } else {
+            self.file_tree.visible_rows(
+                self.spawn_host(cx),
+                &code.roots,
+                &code.expanded,
+                &code.collapsed_roots,
+            )
+        };
+        rows.into_iter().filter(|row| row.note.is_none()).collect()
+    }
+
+    fn file_tree_select(
+        &mut self,
+        target: &TreeSelection,
+        shift: bool,
+        additive: bool,
+        cx: &mut Context<Self>,
+    ) {
+        // Only a Shift range needs the flattened listing; a plain click or an
+        // additive toggle must not pay for a full walk of the tree.
+        let rows = if shift {
+            self.file_tree_selection_rows(cx)
+        } else {
+            Vec::new()
+        };
+        let host = self.spawn_host(cx);
+        let Some(code) = self.tab_code_mut() else {
+            return;
+        };
+        if code.selection_host != Some(host) {
+            code.selection.clear();
+            code.selection_anchor = None;
+        }
+        code.selection_host = Some(host);
+        if shift {
+            let anchor = code
+                .selection_anchor
+                .clone()
+                .or_else(|| code.selected.clone())
+                .unwrap_or_else(|| target.clone());
+            let from = rows.iter().position(|row| anchor.matches(row));
+            let to = rows.iter().position(|row| target.matches(row));
+            if let (Some(from), Some(to)) = (from, to) {
+                code.selection = rows[from.min(to)..=from.max(to)]
+                    .iter()
+                    .map(TreeRow::selection)
+                    .collect();
+                code.selection_anchor = Some(anchor);
+            } else {
+                code.select_tree(target.clone());
+            }
+            code.selected = Some(target.clone());
+        } else if additive {
+            if let Some(index) = code
+                .selection
+                .iter()
+                .position(|selection| selection == target)
+            {
+                code.selection.remove(index);
+            } else {
+                code.selection.push(target.clone());
+            }
+            code.selected = Some(target.clone());
+            code.selection_anchor = Some(target.clone());
+        } else {
+            code.select_tree(target.clone());
+        }
+        self.right_panel.tree_reveal = None;
+        cx.notify();
+    }
+
     fn file_tree_key_down(
         &mut self,
         ev: &KeyDownEvent,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let host = self.spawn_host(cx);
-        let Some(code) = self.tab_code() else {
-            return;
-        };
-        // Placeholder rows explain an absence; they are not files, so the
-        // cursor must not be able to land on one.
-        let rows: Vec<TreeRow> = self
-            .file_tree
-            .visible_rows(host, &code.roots, &code.expanded, &code.collapsed_roots)
-            .into_iter()
-            .filter(|r| r.note.is_none())
-            .collect();
+        let rows = self.file_tree_selection_rows(cx);
+        let Some(code) = self.tab_code() else { return };
         if rows.is_empty() {
             return;
         }
@@ -1174,9 +1241,12 @@ impl Tty7App {
                     (Some(i), "up") => i.saturating_sub(1),
                     (Some(i), _) => (i + 1).min(rows.len() - 1),
                 };
-                if let Some(code) = self.tab_code_mut() {
-                    code.selected = Some(rows[next].selection());
-                }
+                self.file_tree_select(
+                    &rows[next].selection(),
+                    ev.keystroke.modifiers.shift,
+                    false,
+                    cx,
+                );
                 self.right_panel.tree_reveal = None;
                 cx.notify();
             }
@@ -1194,7 +1264,7 @@ impl Tty7App {
                     && let Some(parent) = parent
                     && let Some(code) = self.tab_code_mut()
                 {
-                    code.selected = Some(parent.selection());
+                    code.select_tree(parent.selection());
                     self.right_panel.tree_reveal = None;
                 }
                 cx.notify();
@@ -1204,6 +1274,19 @@ impl Tty7App {
                 let row = &rows[i];
                 if row.entry.is_dir && !row.expanded {
                     self.file_tree_toggle_expand(&row.entry.path, row.is_root, cx);
+                }
+            }
+            "delete"
+                if !ev.is_held
+                    && self.file_tree.focus_handle.is_focused(window)
+                    && self.file_tree.editing.is_none() =>
+            {
+                if let Some(path) = code
+                    .selection
+                    .first()
+                    .map(|selection| selection.path.clone())
+                {
+                    self.file_tree_delete(path, window, cx);
                 }
             }
             "enter" => {
@@ -1320,7 +1403,7 @@ impl Tty7App {
         };
         let rollback = self.file_tree.optimistic(id, &dir, &op, &row);
         if let Some(code) = self.tab_code_mut() {
-            code.selected = Some(TreeSelection::for_path(&new_path, &code.roots));
+            code.select_tree(TreeSelection::for_path(&new_path, &code.roots));
         }
 
         let target = new_path.clone();
@@ -1377,88 +1460,128 @@ impl Tty7App {
         cx.notify();
     }
 
-    fn file_tree_delete(
+    fn file_tree_delete(&mut self, path: PathBuf, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(host) = self.active_host(cx) else {
+            return;
+        };
+        let roots = self
+            .tab_code()
+            .map(|code| code.roots.clone())
+            .unwrap_or_default();
+        let mut paths = self
+            .tab_code()
+            .filter(|code| code.selection.iter().any(|s| s.path == path))
+            .map(|code| {
+                code.selection
+                    .iter()
+                    .map(|s| s.path.clone())
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_else(|| vec![path]);
+        let mut unique = HashSet::new();
+        paths.retain(|path| {
+            !roots.contains(path) && path.parent().is_some() && unique.insert(path.clone())
+        });
+        if paths.is_empty() {
+            return;
+        }
+        let tab_id = self.tabs.get(self.active).map(|tab| tab.tree_id.get());
+        let host_label = self.remote_machine_label(cx);
+        let prepared_host = host.clone();
+        HostOps::run_in(
+            host,
+            window,
+            cx,
+            move |h| prepare_tree_trash(h, paths, &roots),
+            move |app, (targets, failures), window, cx| {
+                for (path, error) in failures {
+                    notify_tree_trash_failure(&path, &error, window, cx);
+                }
+                let labels = targets
+                    .iter()
+                    .map(|path| format!("{}: {}", host_label, path.display()))
+                    .collect();
+                app.confirm_file_delete(labels, window, cx, move |app, window, cx| {
+                    // The targets were snapshotted before the dialog opened;
+                    // trashing must not re-derive them.
+                    app.file_tree_trash_snapshot(
+                        prepared_host.clone(),
+                        targets.clone(),
+                        tab_id,
+                        window,
+                        cx,
+                    );
+                });
+            },
+        );
+    }
+
+    fn file_tree_trash_snapshot(
         &mut self,
-        path: PathBuf,
-        is_dir: bool,
+        host: SharedHost,
+        targets: Vec<PathBuf>,
+        tab_id: Option<tty7_core::core::machine::TabId>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let name = path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| path.display().to_string());
-        let detail = if is_dir {
-            t(L10nKey::FileTreeDeleteFolderBody)
-        } else {
-            t(L10nKey::FileTreeDeleteFileBody)
-        };
-        let answer = window.prompt(
-            PromptLevel::Warning,
-            &t_fmt(L10nKey::FileTreeDeleteTitle, &[("name", &name)]),
-            Some(detail),
-            &crate::ui::confirm_answers(t(L10nKey::Delete), t(L10nKey::Cancel)),
+        let id = host.id();
+        HostOps::run_in(
+            host,
+            window,
             cx,
-        );
-        cx.spawn_in(window, async move |app, cx| {
-            let Ok(0) = answer.await else { return };
-            let _ = app.update_in(cx, |app, window, cx| {
-                let Some(host) = app.active_host(cx) else {
-                    return;
-                };
-                let id = host.id();
-                let Some(parent) = path.parent().map(Path::to_path_buf) else {
-                    return;
-                };
-                let row = TreeEntry {
-                    name: name.clone(),
-                    path: path.clone(),
-                    is_dir,
-                    ignored: false,
-                };
-                let rollback = app
-                    .file_tree
-                    .optimistic(id, &parent, &TreeWrite::Delete, &row);
-                if let Some(code) = app.tab_code_mut()
-                    && code.selected.as_ref().is_some_and(|s| s.path == path)
-                {
-                    code.selected = None;
+            move |h| {
+                targets
+                    .into_iter()
+                    .map(|path| {
+                        let result = h.stat(&path).and_then(|meta| {
+                            h.trash(&path).map(|_| meta.is_dir && !meta.is_symlink)
+                        });
+                        (path, result)
+                    })
+                    .collect::<Vec<_>>()
+            },
+            move |app, results, window, cx| {
+                for (path, result) in &results {
+                    if let Some(parent) = path.parent() {
+                        app.file_tree.invalidate_dir(id, parent);
+                    }
+                    if let Err(error) = result {
+                        notify_tree_trash_failure(path, error, window, cx);
+                    }
                 }
-                let target = path.clone();
-                // "Delete failed: Permission denied" leaves out the one thing
-                // you need in a tree of files, the same way "Save failed" used
-                // to in the editor.
-                let failed_name = name.clone();
-                HostOps::run_in(
-                    host,
-                    window,
-                    cx,
-                    move |h| h.remove(&target, is_dir),
-                    move |app, result: std::io::Result<()>, window, cx| {
-                        match result {
-                            Ok(()) => {
-                                app.file_tree.invalidate_dir(id, &parent);
-                            }
-                            Err(e) => {
-                                app.file_tree.rollback(id, &parent, rollback);
-                                HostOps::notify_err(
-                                    window,
-                                    cx,
-                                    &t_fmt(
-                                        L10nKey::FileTreeDeleteFailed,
-                                        &[("name", &failed_name)],
-                                    ),
-                                    &e,
-                                );
-                            }
-                        }
-                        cx.notify();
-                    },
-                );
+                if let Some(tab_id) = tab_id
+                    && let Some(code) = app
+                        .tabs
+                        .iter_mut()
+                        .find(|tab| tab.tree_id.get() == tab_id)
+                        .and_then(|tab| tab.code.as_deref_mut())
+                {
+                    code.selection.retain(|selection| {
+                        !results.iter().any(|(path, result)| {
+                            result.as_ref().is_ok_and(|is_dir| {
+                                selection.path == *path
+                                    || *is_dir && selection.path.starts_with(path)
+                            })
+                        })
+                    });
+                    if code
+                        .selected
+                        .as_ref()
+                        .is_some_and(|selected| !code.selection.contains(selected))
+                    {
+                        code.selected = code.selection.last().cloned();
+                    }
+                    if code
+                        .selection_anchor
+                        .as_ref()
+                        .is_some_and(|anchor| !code.selection.contains(anchor))
+                    {
+                        code.selection_anchor = code.selected.clone();
+                    }
+                }
                 cx.notify();
-            });
-        })
-        .detach();
+            },
+        );
     }
 
     /// Copy what was dropped on the tree into `dir`.
@@ -1615,7 +1738,7 @@ impl Tty7App {
                 cx.notify();
             }
             if let Some(code) = self.tab_code_mut() {
-                code.selected = Some(TreeSelection::for_path(&path, &code.roots));
+                code.select_tree(TreeSelection::for_path(&path, &code.roots));
             }
         }
         let (roots, expanded, collapsed_roots) = match self.tab_code() {
@@ -1643,6 +1766,35 @@ impl Tty7App {
             self.file_tree
                 .visible_rows(host_id, &roots, &expanded, &collapsed_roots)
         };
+        if let Some(code) = self.tab_code_mut() {
+            if code.selection_host.is_some_and(|host| host != host_id)
+                || code.selection_query != query
+            {
+                code.selection.clear();
+                code.selected = None;
+                code.selection_anchor = None;
+            }
+            code.selection_host = Some(host_id);
+            code.selection_query = query.clone();
+            code.selection.retain(|selection| {
+                rows.iter()
+                    .any(|row| row.note.is_none() && selection.matches(row))
+            });
+            if code.selected.as_ref().is_some_and(|selection| {
+                !rows
+                    .iter()
+                    .any(|row| row.note.is_none() && selection.matches(row))
+            }) {
+                code.selected = code.selection.last().cloned();
+            }
+            if code.selection_anchor.as_ref().is_some_and(|selection| {
+                !rows
+                    .iter()
+                    .any(|row| row.note.is_none() && selection.matches(row))
+            }) {
+                code.selection_anchor = code.selected.clone();
+            }
+        }
         // A search that found nothing, and a tab with no directory behind it,
         // both used to render as an empty column that looks identical to a
         // tree still loading.
@@ -1788,8 +1940,8 @@ impl Tty7App {
         let is_dir = row.entry.is_dir;
         let selected = self
             .tab_code()
-            .and_then(|c| c.selected.as_ref())
-            .is_some_and(|selected| selected.matches(row));
+            .is_some_and(|c| c.selection.iter().any(|selected| selected.matches(row)));
+
         let muted = cx.theme().muted_foreground;
 
         // A placeholder standing in for children that are not there. Not a
@@ -1930,8 +2082,13 @@ impl Tty7App {
                 .into_any_element()
         };
 
+        let row_id = row.selection().element_id();
         let row_el = h_flex()
-            .id(row.selection().element_id())
+            .id(row_id.clone())
+            .debug_selector({
+                let id = row_id.clone();
+                move || id.to_string()
+            })
             .items_center()
             .gap_1()
             .pl(px(6.0 + row.depth as f32 * INDENT))
@@ -1977,9 +2134,17 @@ impl Tty7App {
                 MouseButton::Left,
                 cx.listener({
                     let selection = row.selection();
-                    move |this, _, window, cx| {
+                    move |this, event: &gpui::MouseDownEvent, window, cx| {
                         this.file_tree.focus_handle.focus(window, cx);
-                        this.file_tree_activate(&selection, is_dir, window, cx);
+                        this.file_tree_select(
+                            &selection,
+                            event.modifiers.shift,
+                            event.modifiers.secondary(),
+                            cx,
+                        );
+                        if !event.modifiers.shift && !event.modifiers.secondary() {
+                            this.file_tree_activate(&selection, is_dir, window, cx);
+                        }
                     }
                 }),
             )
@@ -2010,8 +2175,23 @@ impl Tty7App {
                 let is_root = row.is_root;
                 let show_hidden = self.file_tree.show_hidden;
                 let paths_are_local = self.spawn_host(cx).is_local();
+                let selection = row.selection();
                 move |menu, _window, cx| {
+                    let multiple = app
+                        .update(cx, |this, cx| this.file_tree_context_target(&selection, cx))
+                        .unwrap_or(false);
                     let danger = cx.theme().danger;
+                    if multiple {
+                        let app = app.clone();
+                        let path = path.clone();
+                        return menu.item(PopupMenuItem::new(t(L10nKey::Delete)).on_click(
+                            move |_, window, cx| {
+                                let _ = app.update(cx, |this, cx| {
+                                    this.file_tree_delete(path.clone(), window, cx)
+                                });
+                            },
+                        ));
+                    }
                     Self::tree_row_context_menu(
                         menu,
                         &path,
@@ -2049,6 +2229,23 @@ impl Tty7App {
             }
         }
         out
+    }
+
+    /// Right-click targeting: an already-selected row keeps the whole group, any
+    /// other row becomes the only target. Returns whether the group still holds
+    /// more than one item, which is what narrows the context menu.
+    fn file_tree_context_target(
+        &mut self,
+        selection: &TreeSelection,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self
+            .tab_code()
+            .is_some_and(|code| code.selection.contains(selection))
+        {
+            self.file_tree_select(selection, false, false, cx);
+        }
+        self.tab_code().is_some_and(|code| code.selection.len() > 1)
     }
 
     fn tree_row_context_menu(
@@ -2225,13 +2422,87 @@ impl Tty7App {
                     let app = app.clone();
                     move |_, window, cx| {
                         let p = p.clone();
-                        let _ =
-                            app.update(cx, |this, cx| this.file_tree_delete(p, is_dir, window, cx));
+                        let _ = app.update(cx, |this, cx| this.file_tree_delete(p, window, cx));
                     }
                 }),
             );
         }
         menu
+    }
+}
+
+fn prepare_tree_trash(
+    host: &dyn crate::ui::host_ops::Host,
+    paths: Vec<PathBuf>,
+    roots: &[PathBuf],
+) -> (Vec<PathBuf>, Vec<(PathBuf, std::io::Error)>) {
+    let mut entries = Vec::new();
+    let mut failures = Vec::new();
+    for path in paths {
+        match host.stat(&path) {
+            Ok(meta) => entries.push((path, meta)),
+            Err(error) => failures.push((path, error)),
+        }
+    }
+    let mut targets = Vec::new();
+    for (path, _) in &entries {
+        if entries.iter().any(|(parent, meta)| {
+            parent != path && meta.is_dir && !meta.is_symlink && path.starts_with(parent)
+        }) {
+            continue;
+        }
+        let mut blocked = None;
+        for ancestor in path
+            .ancestors()
+            .skip(1)
+            .take_while(|ancestor| roots.iter().any(|root| ancestor.starts_with(root)))
+        {
+            match host.stat(ancestor) {
+                Ok(meta) if meta.is_symlink => {
+                    blocked = Some(std::io::Error::new(
+                        std::io::ErrorKind::InvalidInput,
+                        "cannot trash an item through a symbolic-link directory",
+                    ));
+                    break;
+                }
+                Err(error) => {
+                    blocked = Some(error);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        if let Some(error) = blocked {
+            failures.push((path.clone(), error));
+        } else {
+            targets.push(path.clone());
+        }
+    }
+    (targets, failures)
+}
+
+fn notify_tree_trash_failure(
+    path: &Path,
+    error: &std::io::Error,
+    window: &mut Window,
+    cx: &mut gpui::App,
+) {
+    let name = path
+        .file_name()
+        .unwrap_or(path.as_os_str())
+        .to_string_lossy();
+    if error.kind() == std::io::ErrorKind::Unsupported {
+        window.push_notification(
+            t_fmt(L10nKey::FileTreeTrashUnavailable, &[("name", &name)]),
+            cx,
+        );
+    } else {
+        HostOps::notify_err(
+            window,
+            cx,
+            &t_fmt(L10nKey::FileTreeDeleteFailed, &[("name", &name)]),
+            error,
+        );
     }
 }
 
@@ -2439,6 +2710,7 @@ mod tests {
         use crate::ui::pane::{Pane, PaneSlot};
         use crate::ui::pending_pane::{PendingPane, PendingSpawn};
 
+        crate::core::config::pin_test_config_dir();
         let (app, mut vcx) = test_window::harness(cx);
         app.update_in(&mut vcx, |app, _, cx| {
             // A connecting pane gives the tree a tab without spawning a shell.
@@ -2479,6 +2751,7 @@ mod tests {
         use crate::ui::app::{Tab, test_window};
         use crate::ui::pane::{Pane, PaneSlot};
 
+        crate::core::config::pin_test_config_dir();
         let (app, mut vcx) = test_window::harness(cx);
         let mut pane = app.update_in(&mut vcx, |app, window, cx| {
             let (view, pane) = crate::terminal::view::quiet_test_pane(1, window, cx);
@@ -2527,6 +2800,274 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
         (app, vcx, pane)
+    }
+
+    #[gpui::test]
+    fn keyboard_shift_range_keeps_its_anchor(cx: &mut gpui::TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(root.path().join(name), name).unwrap();
+        }
+        let (app, mut vcx, _pane) = files_panel(cx, root.path());
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.file_tree.focus_handle.focus(window, cx);
+        });
+        vcx.simulate_keystrokes("down down shift-down shift-down");
+        assert_eq!(
+            app.read_with(&vcx, |app, _| app.tab_code().unwrap().selection.len()),
+            3
+        );
+        vcx.simulate_keystrokes("shift-up");
+        assert_eq!(
+            app.read_with(&vcx, |app, _| app.tab_code().unwrap().selection.len()),
+            2
+        );
+    }
+
+    #[gpui::test]
+    fn mouse_ranges_and_context_menu_preserve_the_group(cx: &mut gpui::TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(root.path().join(name), name).unwrap();
+        }
+        let (app, mut vcx, _pane) = files_panel(cx, root.path());
+        vcx.run_until_parked();
+        let positions = ["a.txt", "b.txt", "c.txt"].map(|name| {
+            let id = TreeSelection::for_path(&root.path().join(name), &[root.path().to_path_buf()])
+                .element_id();
+            let selector: &'static str = Box::leak(id.to_string().into_boxed_str());
+            vcx.debug_bounds(selector).unwrap().center()
+        });
+        let additive = gpui::Modifiers {
+            control: !cfg!(target_os = "macos"),
+            platform: cfg!(target_os = "macos"),
+            ..gpui::Modifiers::none()
+        };
+        vcx.simulate_click(positions[0], additive);
+        vcx.run_until_parked();
+        vcx.simulate_click(
+            positions[2],
+            gpui::Modifiers {
+                shift: true,
+                ..gpui::Modifiers::none()
+            },
+        );
+        vcx.run_until_parked();
+        assert_eq!(
+            app.read_with(&vcx, |app, _| app.tab_code().unwrap().selection.len()),
+            3
+        );
+        vcx.simulate_click(positions[1], additive);
+        vcx.run_until_parked();
+        assert_eq!(
+            app.read_with(&vcx, |app, _| app.tab_code().unwrap().selection.len()),
+            2
+        );
+        // The context-menu target rule: right-clicking a selected row keeps the
+        // group, right-clicking another row makes it the only target. The rule is
+        // called directly because opening the overlay menu leaves a PopupMenu
+        // entity that gpui's test harness reports as leaked at teardown.
+        let selected_row =
+            TreeSelection::for_path(&root.path().join("a.txt"), &[root.path().to_path_buf()]);
+        let other_row =
+            TreeSelection::for_path(&root.path().join("b.txt"), &[root.path().to_path_buf()]);
+        assert!(
+            app.update_in(&mut vcx, |app, _, cx| {
+                app.file_tree_context_target(&selected_row, cx)
+            }),
+            "right-clicking a selected row keeps the group"
+        );
+        assert_eq!(
+            app.read_with(&vcx, |app, _| app.tab_code().unwrap().selection.len()),
+            2
+        );
+        assert!(
+            !app.update_in(&mut vcx, |app, _, cx| {
+                app.file_tree_context_target(&other_row, cx)
+            }),
+            "right-clicking another row makes it the only target"
+        );
+        assert_eq!(
+            app.read_with(&vcx, |app, _| app.tab_code().unwrap().selection.len()),
+            1
+        );
+    }
+
+    #[gpui::test]
+    fn filtering_drops_hidden_selection(cx: &mut gpui::TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            std::fs::write(root.path().join(name), name).unwrap();
+        }
+        let (app, mut vcx, _pane) = files_panel(cx, root.path());
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.file_tree.focus_handle.focus(window, cx)
+        });
+        vcx.simulate_keystrokes("down down shift-down shift-down");
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.file_search
+                .update(cx, |input, cx| input.set_value("no-such-file", window, cx));
+        });
+        vcx.run_until_parked();
+        assert!(app.read_with(&vcx, |app, _| app.tab_code().unwrap().selection.is_empty()));
+    }
+
+    #[gpui::test]
+    fn delete_confirmation_saves_opt_out_only_after_accepting(cx: &mut gpui::TestAppContext) {
+        use crate::core::config::Config;
+        use std::cell::Cell;
+        use std::rc::Rc;
+        let (app, mut vcx) = tree_app(cx);
+        let calls = Rc::new(Cell::new(0));
+        app.update_in(&mut vcx, |app, window, cx| {
+            cx.global_mut::<Config>().confirm_file_delete = true;
+            let calls = calls.clone();
+            app.confirm_file_delete(
+                vec!["Local: fixture.txt".into()],
+                window,
+                cx,
+                move |_, _, _| calls.set(calls.get() + 1),
+            );
+        });
+        vcx.run_until_parked();
+        let check = vcx.debug_bounds("file-delete-opt-out").unwrap();
+        vcx.simulate_click(check.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        assert!(vcx.read(|cx| cx.global::<Config>().confirm_file_delete));
+        let cancel = vcx.debug_bounds("file-delete-cancel").unwrap();
+        vcx.simulate_click(cancel.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        assert!(vcx.read(|cx| cx.global::<Config>().confirm_file_delete));
+        assert_eq!(calls.get(), 0);
+        app.update_in(&mut vcx, |app, window, cx| {
+            let calls = calls.clone();
+            app.confirm_file_delete(
+                vec!["Local: fixture.txt".into()],
+                window,
+                cx,
+                move |_, _, _| calls.set(calls.get() + 1),
+            );
+        });
+        vcx.run_until_parked();
+        let check = vcx.debug_bounds("file-delete-opt-out").unwrap();
+        vcx.simulate_click(check.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        let confirm = vcx.debug_bounds("file-delete-confirm").unwrap();
+        vcx.simulate_click(confirm.center(), gpui::Modifiers::none());
+        vcx.run_until_parked();
+        assert!(!vcx.read(|cx| cx.global::<Config>().confirm_file_delete));
+        assert_eq!(calls.get(), 1);
+        app.update_in(&mut vcx, |app, window, cx| {
+            let calls = calls.clone();
+            app.confirm_file_delete(
+                vec!["Local: fixture.txt".into()],
+                window,
+                cx,
+                move |_, _, _| calls.set(calls.get() + 1),
+            );
+        });
+        assert_eq!(calls.get(), 2);
+        assert!(!crate::core::config::Config::load().confirm_file_delete);
+        app.update_in(&mut vcx, |app, window, cx| {
+            cx.global_mut::<Config>().confirm_file_delete = true;
+            let calls = calls.clone();
+            app.confirm_file_delete(
+                vec!["Local: fixture.txt".into()],
+                window,
+                cx,
+                move |_, _, _| calls.set(calls.get() + 1),
+            );
+        });
+        vcx.run_until_parked();
+        vcx.simulate_keystrokes("enter");
+        vcx.run_until_parked();
+        assert_eq!(calls.get(), 3);
+        assert!(vcx.read(|cx| cx.global::<Config>().confirm_file_delete));
+    }
+
+    #[cfg(windows)]
+    #[gpui::test]
+    fn delete_key_reports_each_failed_item_without_losing_selection(cx: &mut gpui::TestAppContext) {
+        use std::os::windows::fs::OpenOptionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let paths = [root.path().join("a.txt"), root.path().join("b.txt")];
+        let mut locks = Vec::new();
+        for path in &paths {
+            std::fs::write(path, "keep").unwrap();
+            locks.push(
+                std::fs::OpenOptions::new()
+                    .read(true)
+                    .share_mode(0)
+                    .open(path)
+                    .unwrap(),
+            );
+        }
+        let (app, mut vcx, _pane) = files_panel(cx, root.path());
+        app.update_in(&mut vcx, |app, window, cx| {
+            cx.global_mut::<crate::core::config::Config>()
+                .confirm_file_delete = false;
+            app.file_tree.focus_handle.focus(window, cx);
+        });
+        vcx.simulate_keystrokes("down down shift-down delete");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        loop {
+            vcx.background_executor.run_until_parked();
+            let count = vcx.update(|window, cx| {
+                gpui_component::Root::read(window, cx)
+                    .notification
+                    .read(cx)
+                    .notifications()
+                    .len()
+            });
+            if count >= 2 {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "batch failures should identify both targets"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(
+            app.read_with(&vcx, |app, _| app.tab_code().unwrap().selection.len()),
+            2
+        );
+        drop(locks);
+        for path in paths {
+            assert_eq!(std::fs::read_to_string(path).unwrap(), "keep");
+        }
+    }
+
+    #[gpui::test]
+    fn a_missing_delete_target_reports_failure_without_confirmation(cx: &mut gpui::TestAppContext) {
+        let root = tempfile::tempdir().unwrap();
+        let (app, mut vcx, _pane) = files_panel(cx, root.path());
+        let missing = root.path().join("missing.txt");
+
+        app.update_in(&mut vcx, |app, window, cx| {
+            cx.global_mut::<crate::core::config::Config>()
+                .confirm_file_delete = false;
+            app.file_tree_delete(missing, window, cx);
+        });
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(3);
+        loop {
+            vcx.background_executor.run_until_parked();
+            let notified = vcx.update(|window, cx| {
+                !gpui_component::Root::read(window, cx)
+                    .notification
+                    .read(cx)
+                    .notifications()
+                    .is_empty()
+            });
+            if notified {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "a missing target should report failure without waiting for a prompt"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
     }
 
     #[gpui::test]

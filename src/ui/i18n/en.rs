@@ -1032,15 +1032,15 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::FileTreePlaceholderFolderName => "folder name",
         L10nKey::FileTreePlaceholderNewName => "new name",
         L10nKey::FileTreeDeleteTitle => "Delete \"{name}\"?",
-        L10nKey::FileTreeDeleteFolderBody => "The folder and everything inside it will be deleted.",
-        L10nKey::FileTreeDeleteFileBody => "The file will be deleted.",
-        L10nKey::SftpDeleteFolderBody => {
-            "The folder and everything inside it will be deleted on {host}. There is no trash on the far side."
-        }
-        L10nKey::SftpDeleteFileBody => {
-            "The file will be deleted on {host}. There is no trash on the far side."
-        }
         L10nKey::FileTreeDeleteFailed => "Could not delete {name}",
+        L10nKey::FileDeleteConfirmTitle => "Move {count} items to trash?",
+        L10nKey::FileDeleteConfirmBody => {
+            "The selected items and the contents of selected folders will be moved to trash."
+        }
+        L10nKey::FileDeleteDontAskAgain => "Do not ask again",
+        L10nKey::FileTreeTrashUnavailable => {
+            "Could not move {name} to the trash: recoverable deletion is unavailable here."
+        }
         L10nKey::FileTreeCreateFailed => "Could not create {name}",
         L10nKey::FileTreeRenameFailed => "Could not rename {name}",
         L10nKey::FileTreeContextOpen => "Open",
@@ -1968,6 +1968,8 @@ pub fn translate_variant_en(key: L10nKey, branch: &'static str) -> Option<&'stat
         (L10nKey::AppTabsNotRestored, "other") => {
             "{count} tabs from last time could not be reopened"
         }
+        (L10nKey::FileDeleteConfirmTitle, "one") => "Move 1 item to trash?",
+        (L10nKey::FileDeleteConfirmTitle, "other") => "Move {count} items to trash?",
         (L10nKey::LaunchWorkspacesLeftRunning, "one") => {
             "Only this window was restored — 1 workspace is still running in the background. Reopen it from the sidebar."
         }

@@ -50,8 +50,17 @@ top. The search box carries a clear button
 while there is something in it.
 
 - **Click a file** to open it in the built-in editor.
+- **Shift-click** or **Shift+Up/Down** selects a range in the displayed order.
+  **Ctrl-click** (Command-click on macOS) toggles individual entries. Filtering
+  or folding removes hidden entries from the selection.
 - **Rename** from a folder's context menu opens an inline input. Drag across
   its name to select and copy text while keeping the folder expanded.
+- **Delete** from a selected row's context menu, or the Delete key while the
+  tree has focus, moves the selected files and folders to the system trash.
+  The confirmation lists their owning machine and paths. Check **Do not ask
+  again** and confirm to save that choice; cancelling keeps the confirmation
+  enabled. On Linux this uses `gio`; if recoverable trash is not
+  available, the item stays in place and the panel reports the failure.
 - **Drag a file out** to Finder or Explorer to copy it there.
 - **Drag files in** from the desktop to copy them into the folder under the
   cursor. A folder row takes them itself, a file row stands in for the folder

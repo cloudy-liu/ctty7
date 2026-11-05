@@ -103,6 +103,10 @@ pub(crate) struct TabCode {
     /// Roots start open. Their folds belong to this tab and last for the session.
     pub(crate) collapsed_roots: HashSet<PathBuf>,
     pub(crate) selected: Option<crate::ui::file_tree::TreeSelection>,
+    pub(crate) selection: Vec<crate::ui::file_tree::TreeSelection>,
+    pub(crate) selection_anchor: Option<crate::ui::file_tree::TreeSelection>,
+    pub(crate) selection_host: Option<HostId>,
+    pub(crate) selection_query: String,
 }
 
 impl TabCode {
@@ -116,7 +120,17 @@ impl TabCode {
             expanded: std::collections::HashSet::new(),
             collapsed_roots: HashSet::new(),
             selected: None,
+            selection: Vec::new(),
+            selection_anchor: None,
+            selection_host: None,
+            selection_query: String::new(),
         }
+    }
+
+    pub(crate) fn select_tree(&mut self, selection: crate::ui::file_tree::TreeSelection) {
+        self.selected = Some(selection.clone());
+        self.selection_anchor = Some(selection.clone());
+        self.selection = vec![selection];
     }
 
     pub(crate) fn active_file(&self) -> Option<&OpenFile> {

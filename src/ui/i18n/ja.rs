@@ -1094,15 +1094,13 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::FileTreePlaceholderFolderName => "フォルダ名",
         L10nKey::FileTreePlaceholderNewName => "新しい名前",
         L10nKey::FileTreeDeleteTitle => "「{name}」を削除しますか？",
-        L10nKey::FileTreeDeleteFolderBody => "フォルダとその中のすべての項目が削除されます",
-        L10nKey::FileTreeDeleteFileBody => "ファイルが削除されます",
-        L10nKey::SftpDeleteFolderBody => {
-            "{host} 上でフォルダとその中身がすべて削除されます。リモート側にゴミ箱はありません。"
-        }
-        L10nKey::SftpDeleteFileBody => {
-            "{host} 上でファイルが削除されます。リモート側にゴミ箱はありません。"
-        }
         L10nKey::FileTreeDeleteFailed => "{name} を削除できませんでした",
+        L10nKey::FileDeleteConfirmTitle => "{count} 項目をゴミ箱に移動しますか？",
+        L10nKey::FileDeleteConfirmBody => "選択した項目とフォルダ内の内容をゴミ箱に移動します。",
+        L10nKey::FileDeleteDontAskAgain => "今後確認しない",
+        L10nKey::FileTreeTrashUnavailable => {
+            "{name} をゴミ箱に移動できませんでした：この場所では復元可能な削除を利用できません。"
+        }
         L10nKey::FileTreeCreateFailed => "{name} を作成できませんでした",
         L10nKey::FileTreeRenameFailed => "{name} の名前を変更できませんでした",
         L10nKey::FileTreeContextOpen => "開く",
@@ -2041,6 +2039,8 @@ pub fn translate_variant_ja(key: L10nKey, branch: &'static str) -> Option<&'stat
         }
         (L10nKey::AppTabsNotRestored, "one") => "前回のタブ 1 個を開き直せませんでした",
         (L10nKey::AppTabsNotRestored, "other") => "前回のタブ {count} 個を開き直せませんでした",
+        (L10nKey::FileDeleteConfirmTitle, "one") => "1 項目をゴミ箱に移動しますか？",
+        (L10nKey::FileDeleteConfirmTitle, "other") => "{count} 項目をゴミ箱に移動しますか？",
         (L10nKey::LaunchWorkspacesLeftRunning, "one") => {
             "このウィンドウだけを復元しました — あと 1 個のワークスペースがバックグラウンドで実行中です。サイドバーから開き直せます。"
         }

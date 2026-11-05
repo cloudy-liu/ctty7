@@ -260,6 +260,37 @@ impl Host for RemoteHost {
         })
     }
 
+    fn trash(&self, p: &Path) -> io::Result<()> {
+        if !self
+            .peer()
+            .has_feature(crate::daemon::control::feature::HOST_TRASH)
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::Unsupported,
+                "this remote host does not support recoverable trash",
+            ));
+        }
+        let path = p.to_str().ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "remote trash requires a UTF-8 path",
+            )
+        })?;
+        if !self.is_absolute(p) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "remote trash requires an absolute path",
+            ));
+        }
+        self.expect_unit(ControlRequest::Trash { path: path.into() }).map_err(|error| {
+            if matches!(error.kind(), io::ErrorKind::TimedOut | io::ErrorKind::ConnectionReset | io::ErrorKind::BrokenPipe | io::ErrorKind::UnexpectedEof | io::ErrorKind::InvalidData) {
+                io::Error::new(error.kind(), format!("trash outcome unknown; refresh and check the remote trash before another delete: {error}"))
+            } else {
+                error
+            }
+        })
+    }
+
     fn repo_root(&self, p: &Path) -> io::Result<Option<PathBuf>> {
         match self.call(ControlRequest::RepoRoot { path: wire_path(p) })? {
             ReplyOk::OptPath(s) => Ok(s.map(PathBuf::from)),
@@ -684,6 +715,16 @@ mod tests {
     where
         F: Fn(&ControlRequest) -> Option<(ControlReply, Vec<u8>)> + Send + 'static,
     {
+        host_with_hello(hello_ok(separator), answer)
+    }
+
+    fn host_with_hello<F>(
+        hello: ControlHelloOk,
+        answer: F,
+    ) -> (Arc<RemoteHost>, mpsc::Receiver<ControlRequest>)
+    where
+        F: Fn(&ControlRequest) -> Option<(ControlReply, Vec<u8>)> + Send + 'static,
+    {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let (seen_tx, seen_rx) = mpsc::channel();
@@ -693,9 +734,7 @@ mod tests {
                 ControlClientMsg::Hello(_) => {}
                 other => panic!("expected Hello, got {other:?}"),
             }
-            ControlServerMsg::HelloOk(hello_ok(separator))
-                .encode(&mut sock)
-                .unwrap();
+            ControlServerMsg::HelloOk(hello).encode(&mut sock).unwrap();
             sock.flush().unwrap();
             loop {
                 let (req_id, req) = match ControlClientMsg::read(&mut sock) {
@@ -737,6 +776,91 @@ mod tests {
         )
         .unwrap();
         (host, seen_rx)
+    }
+
+    #[test]
+    fn remote_trash_uses_the_owning_hosts_recoverable_operation() {
+        let mut hello = hello_ok('/');
+        hello.features.push("host-trash".into());
+        let (host, seen) =
+            host_with_hello(hello, |_| Some((ControlReply::Ok(ReplyOk::Unit), vec![])));
+        let path = Path::new("/home/me/a file; 'quoted'.txt");
+        host.trash(path).unwrap();
+        assert_eq!(
+            seen.recv_timeout(Duration::from_secs(1)).unwrap(),
+            ControlRequest::Trash {
+                path: path.to_str().unwrap().into()
+            }
+        );
+    }
+
+    #[test]
+    fn unavailable_remote_trash_never_sends_a_delete_request() {
+        let (host, seen) = host_with_peer('/', |_| {
+            Some((ControlReply::Ok(ReplyOk::Bool(true)), vec![]))
+        });
+        assert_eq!(
+            host.trash(Path::new("/keep.txt")).unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        assert!(host.exists(Path::new("/keep.txt")));
+        assert_eq!(
+            seen.recv_timeout(Duration::from_secs(1)).unwrap(),
+            ControlRequest::Exists {
+                path: "/keep.txt".into()
+            }
+        );
+        assert!(seen.try_recv().is_err());
+    }
+
+    #[test]
+    fn a_lost_trash_reply_is_unknown_and_is_not_retried() {
+        let mut hello = hello_ok('/');
+        hello.features.push("host-trash".into());
+        let (host, seen) = host_with_hello(hello, |_| None);
+        let error = host.trash(Path::new("/remote/file.txt")).unwrap_err();
+        assert_eq!(error.kind(), io::ErrorKind::ConnectionReset);
+        assert!(error.to_string().contains("outcome unknown"));
+        assert_eq!(
+            seen.recv_timeout(Duration::from_secs(1)).unwrap(),
+            ControlRequest::Trash {
+                path: "/remote/file.txt".into()
+            }
+        );
+        assert!(seen.recv_timeout(Duration::from_millis(50)).is_err());
+    }
+
+    #[test]
+    fn a_remote_trash_request_does_not_touch_a_matching_local_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join("keep.txt");
+        std::fs::write(&file, "local original").unwrap();
+        let mut hello = hello_ok(std::path::MAIN_SEPARATOR);
+        hello.features.push("host-trash".into());
+        let (host, seen) =
+            host_with_hello(hello, |_| Some((ControlReply::Ok(ReplyOk::Unit), vec![])));
+        host.trash(&file).unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "local original");
+        assert_eq!(
+            seen.recv_timeout(Duration::from_secs(1)).unwrap(),
+            ControlRequest::Trash {
+                path: file.to_str().unwrap().into()
+            }
+        );
+    }
+
+    #[test]
+    fn remote_trash_rejects_a_relative_path_without_sending_it() {
+        let mut hello = hello_ok('/');
+        hello.features.push("host-trash".into());
+        let (host, seen) = host_with_hello(hello, |_| None);
+        assert_eq!(
+            host.trash(Path::new("relative/file.txt"))
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::InvalidInput
+        );
+        assert!(seen.try_recv().is_err());
     }
 
     #[test]

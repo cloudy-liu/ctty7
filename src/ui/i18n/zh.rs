@@ -999,13 +999,11 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::FileTreePlaceholderFolderName => "文件夹名",
         L10nKey::FileTreePlaceholderNewName => "新名称",
         L10nKey::FileTreeDeleteTitle => "删除“{name}”？",
-        L10nKey::FileTreeDeleteFolderBody => "该文件夹及其中的所有内容都将被删除。",
-        L10nKey::FileTreeDeleteFileBody => "该文件将被删除。",
-        L10nKey::SftpDeleteFolderBody => {
-            "该文件夹及其中所有内容将在 {host} 上被删除。远端没有回收站。"
-        }
-        L10nKey::SftpDeleteFileBody => "该文件将在 {host} 上被删除。远端没有回收站。",
         L10nKey::FileTreeDeleteFailed => "无法删除 {name}",
+        L10nKey::FileDeleteConfirmTitle => "将 {count} 项移入回收站？",
+        L10nKey::FileDeleteConfirmBody => "所选项目及所选文件夹中的内容将移入回收站。",
+        L10nKey::FileDeleteDontAskAgain => "以后不再提示",
+        L10nKey::FileTreeTrashUnavailable => "无法将 {name} 移入回收站：此位置不支持可恢复删除。",
         L10nKey::FileTreeCreateFailed => "无法创建 {name}",
         L10nKey::FileTreeRenameFailed => "无法重命名 {name}",
         L10nKey::FileTreeContextOpen => "打开",
@@ -1864,6 +1862,8 @@ pub fn translate_variant_zh(key: L10nKey, branch: &'static str) -> Option<&'stat
         (L10nKey::SftpReplaceBody, "other") => "{names} 在这个文件夹里已经存在，上传会覆盖它们。",
         (L10nKey::AppTabsNotRestored, "one") => "上次的 1 个标签页没能重新打开",
         (L10nKey::AppTabsNotRestored, "other") => "上次的 {count} 个标签页没能重新打开",
+        (L10nKey::FileDeleteConfirmTitle, "one") => "将 1 项移入回收站？",
+        (L10nKey::FileDeleteConfirmTitle, "other") => "将 {count} 项移入回收站？",
         (L10nKey::LaunchWorkspacesLeftRunning, "one") => {
             "只恢复了这个窗口——还有 1 个工作区在后台运行，可从侧边栏重新打开。"
         }

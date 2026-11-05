@@ -792,19 +792,38 @@ mod ctrl_c_tests {
 
         let result =
             std::env::temp_dir().join(format!("tty7-pane-ctrl-c-{}.txt", std::process::id()));
-        let _ = std::fs::remove_file(&result);
-        let status = Command::new(std::env::current_exe().expect("locate the test executable"))
-            .args(["--exact", TEST_NAME, "--nocapture"])
-            .env(RESULT_ENV, &result)
-            // Exactly how the daemon used to be created. CREATE_NEW_PROCESS_GROUP
-            // is what leaves the inherited ignore behind.
-            .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .status()
-            .expect("run the arms in a process that inherits the ignore");
-        assert!(status.success(), "the inner test process must finish");
+        // The probe runs a real ConPTY, and on CI runners it occasionally dies
+        // before reaching an arm — upstream main has failed the same way with
+        // no code change behind it. A dead probe says nothing about the fix, so
+        // retry it; a real breakage fails every attempt and is reported below
+        // with the probe's own output.
+        let mut failure = None;
+        for _ in 0..3 {
+            let _ = std::fs::remove_file(&result);
+            let output = Command::new(std::env::current_exe().expect("locate the test executable"))
+                .args(["--exact", TEST_NAME, "--nocapture"])
+                .env(RESULT_ENV, &result)
+                .env("RUST_BACKTRACE", "1")
+                // Exactly how the daemon used to be created. CREATE_NEW_PROCESS_GROUP
+                // is what leaves the inherited ignore behind.
+                .creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
+                .stdin(std::process::Stdio::null())
+                .output()
+                .expect("run the arms in a process that inherits the ignore");
+            if output.status.success() {
+                failure = None;
+                break;
+            }
+            failure = Some(output);
+        }
+        if let Some(output) = failure {
+            panic!(
+                "the inner test process must finish (three attempts): {}\nstdout:\n{}\nstderr:\n{}",
+                output.status,
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr),
+            );
+        }
 
         let verdict = std::fs::read_to_string(&result).unwrap_or_else(|_| "MISSING".into());
         let _ = std::fs::remove_file(&result);

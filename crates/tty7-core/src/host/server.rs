@@ -366,6 +366,7 @@ fn handshake<R: Read>(
     let mut features = vec![
         feature::CONTROL.to_string(),
         feature::HOST_RPC.to_string(),
+        feature::HOST_TRASH.to_string(),
         feature::STDIO_BRIDGE.to_string(),
     ];
     if services.machine.is_some() {
@@ -630,6 +631,16 @@ fn run_request(
         }
         ControlRequest::Remove { path, recursive } => {
             h.remove(&p(&path), recursive)?;
+            (ReplyOk::Unit, Vec::new())
+        }
+        ControlRequest::Trash { path } => {
+            if !h.is_absolute(&p(&path)) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "trash requires an absolute path",
+                ));
+            }
+            h.trash(&p(&path))?;
             (ReplyOk::Unit, Vec::new())
         }
 
@@ -2333,10 +2344,106 @@ mod tests {
         assert_eq!(peer.separator, std::path::MAIN_SEPARATOR);
         assert!(peer.has_feature(feature::CONTROL));
         assert!(peer.has_feature(feature::HOST_RPC));
+        assert!(peer.has_feature(feature::HOST_TRASH));
         assert!(
             !peer.home.is_empty(),
             "the server's $HOME backs `new workspace in ~`"
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn remote_trash_preserves_recoverable_files_and_folders_on_the_server() {
+        const TEST_ROOT: &str = "TTY7_REMOTE_TRASH_TEST_ROOT";
+        let Some(root) = std::env::var_os(TEST_ROOT) else {
+            let root = tempfile::tempdir().unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "host::server::tests::remote_trash_preserves_recoverable_files_and_folders_on_the_server", "--nocapture"])
+                .env(TEST_ROOT, root.path())
+                .env("XDG_DATA_HOME", root.path().join("xdg"))
+                .status().unwrap();
+            assert!(status.success());
+            return;
+        };
+        let root = PathBuf::from(root);
+        let file = root.join("file.txt");
+        let folder = root.join("folder");
+        std::fs::write(&file, "original file").unwrap();
+        std::fs::create_dir(&folder).unwrap();
+        std::fs::write(folder.join("child.txt"), "original child").unwrap();
+        let remote = pair();
+        let relative_error = remote
+            .host
+            .client()
+            .call(ControlRequest::Trash {
+                path: "relative/file.txt".into(),
+            })
+            .unwrap_err();
+        assert_eq!(relative_error.kind(), io::ErrorKind::InvalidInput);
+        // Same environment limit as the local fixture: a runner's /tmp is
+        // often a system-internal mount that gio refuses to trash.
+        if let Err(error) = remote.host.trash(&file) {
+            let refused = error
+                .to_string()
+                .contains("Trashing on system internal mounts");
+            assert!(refused, "the fixture could not be trashed: {error}");
+            eprintln!("skipping: this filesystem has no usable trash ({error})");
+            return;
+        }
+        remote.host.trash(&folder).unwrap();
+        assert!(!remote.host.exists(&file));
+        assert!(!remote.host.exists(&folder));
+        let trash = root.join("xdg/Trash");
+        for (name, original) in [("file.txt", &file), ("folder", &folder)] {
+            let info =
+                std::fs::read_to_string(trash.join("info").join(format!("{name}.trashinfo")))
+                    .unwrap();
+            assert!(info.contains(&format!("Path={}", original.display())));
+            std::fs::rename(trash.join("files").join(name), original).unwrap();
+        }
+        assert_eq!(
+            remote.host.read_file(&file, 1024).unwrap(),
+            b"original file"
+        );
+        assert_eq!(
+            remote
+                .host
+                .read_file(&folder.join("child.txt"), 1024)
+                .unwrap(),
+            b"original child"
+        );
+        assert_eq!(
+            remote.host.trash(&root.join("missing")).unwrap_err().kind(),
+            io::ErrorKind::NotFound
+        );
+        assert_eq!(
+            remote.host.read_file(&file, 1024).unwrap(),
+            b"original file"
+        );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn unavailable_remote_trash_preserves_the_original_and_error_kind() {
+        const TEST_ROOT: &str = "TTY7_REMOTE_UNAVAILABLE_TRASH_TEST_ROOT";
+        let Some(root) = std::env::var_os(TEST_ROOT) else {
+            let root = tempfile::tempdir().unwrap();
+            let status = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", "host::server::tests::unavailable_remote_trash_preserves_the_original_and_error_kind", "--nocapture"])
+                .env(TEST_ROOT, root.path())
+                .env("PATH", root.path())
+                .status().unwrap();
+            assert!(status.success());
+            return;
+        };
+        let file = PathBuf::from(root).join("keep.txt");
+        std::fs::write(&file, "untouched").unwrap();
+        let remote = pair();
+        assert_eq!(
+            remote.host.trash(&file).unwrap_err().kind(),
+            io::ErrorKind::Unsupported
+        );
+        assert_eq!(remote.host.read_file(&file, 1024).unwrap(), b"untouched");
     }
 
     #[test]
@@ -2512,6 +2619,7 @@ mod tests {
             WireErrorKind::FileTooLarge,
             WireErrorKind::TimedOut,
             WireErrorKind::ConnectionReset,
+            WireErrorKind::Unsupported,
             WireErrorKind::Other,
         ] {
             let io_err = io::Error::new(kind.to_io_kind(), "x");

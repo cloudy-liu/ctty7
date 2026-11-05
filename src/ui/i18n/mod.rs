@@ -750,11 +750,11 @@ l10n_keys! {
     FileTreePlaceholderFolderName,
     FileTreePlaceholderNewName,
     FileTreeDeleteTitle,
-    FileTreeDeleteFolderBody,
-    FileTreeDeleteFileBody,
-    SftpDeleteFolderBody,
-    SftpDeleteFileBody,
     FileTreeDeleteFailed,
+    FileTreeTrashUnavailable,
+    FileDeleteConfirmTitle,
+    FileDeleteConfirmBody,
+    FileDeleteDontAskAgain,
     FileTreeCreateFailed,
     FileTreeRenameFailed,
     FileTreeContextOpen,
@@ -1735,6 +1735,7 @@ mod tests {
             L10nKey::HomeTimeDaysAgo,
             L10nKey::HomeTimeWeeksAgo,
             L10nKey::HomeTimeMonthsAgo,
+            L10nKey::FileDeleteConfirmTitle,
         ];
         for key in plural_keys {
             for branch in ["zero", "one", "other"] {

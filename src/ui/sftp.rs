@@ -11,7 +11,7 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::menu::{ContextMenuExt as _, DropdownMenu as _, PopupMenuItem};
 use gpui_component::{
     ActiveTheme as _, Disableable as _, Icon, IconName, InteractiveElementExt as _, Sizable as _,
-    h_flex, v_flex,
+    WindowExt as _, h_flex, v_flex,
 };
 
 use crate::daemon::protocol::{
@@ -97,6 +97,14 @@ impl SftpRoute {
     }
 
     pub(crate) fn op(&self, op: SftpOp) -> SftpOpResult {
+        if matches!(&op, SftpOp::Trash { .. })
+            && self
+                .workspace
+                .as_ref()
+                .is_some_and(|workspace| workspace.spec.is_none())
+        {
+            return SftpOpResult::Error("remote trash route is unavailable".into());
+        }
         let Some(req) =
             self.workspace_op(crate::daemon::protocol::WorkspaceOp::SftpOp { op: op.clone() })
         else {
@@ -178,6 +186,11 @@ impl SftpRoute {
 }
 
 pub(crate) struct SftpPanelState {
+    selected: HashSet<String>,
+    anchor: Option<String>,
+    current: Option<String>,
+    focus: gpui::FocusHandle,
+    deleting: HashSet<String>,
     pub(crate) open_pane_id: Option<u64>,
     pub(crate) open_workspace: Option<crate::terminal::PaneWorkspace>,
     pub(crate) cwd: String,
@@ -223,12 +236,20 @@ impl SftpPanelState {
             InputState::new(window, cx)
                 .placeholder(crate::ui::i18n::t(crate::ui::i18n::L10nKey::SearchFiles))
         });
-        let sub = cx.subscribe_in(&filter_input, window, |_this, _input, ev, _w, cx| {
+        let sub = cx.subscribe_in(&filter_input, window, |this, _input, ev, _w, cx| {
             if matches!(ev, gpui_component::input::InputEvent::Change) {
+                this.sftp_panel.selected.clear();
+                this.sftp_panel.anchor = None;
+                this.sftp_panel.current = None;
                 cx.notify();
             }
         });
         Self {
+            selected: HashSet::new(),
+            anchor: None,
+            current: None,
+            focus: cx.focus_handle(),
+            deleting: HashSet::new(),
             open_pane_id: None,
             open_workspace: None,
             cwd: "/".to_string(),
@@ -459,6 +480,10 @@ impl Tty7App {
     }
 
     fn sftp_open_at(&mut self, pane_id: u64, window: &mut Window, cx: &mut Context<Self>) {
+        self.sftp_panel.selected.clear();
+        self.sftp_panel.anchor = None;
+        self.sftp_panel.current = None;
+        self.sftp_panel.deleting.clear();
         self.sftp_panel.open_pane_id = Some(pane_id);
         self.sftp_panel.open_workspace = self.pane_workspace(pane_id, window, cx);
         self.sftp_panel.entries.clear();
@@ -523,6 +548,12 @@ impl Tty7App {
         let Some(pane_id) = self.sftp_panel.open_pane_id else {
             return;
         };
+        if path != self.sftp_panel.cwd {
+            self.sftp_panel.selected.clear();
+            self.sftp_panel.anchor = None;
+            self.sftp_panel.current = None;
+            self.sftp_panel.deleting.clear();
+        }
         self.sftp_panel.nav_gen = self.sftp_panel.nav_gen.wrapping_add(1);
         let generation = self.sftp_panel.nav_gen;
         self.sftp_panel.loading = true;
@@ -547,6 +578,30 @@ impl Tty7App {
                         this.sftp_panel.cwds.insert(pane_id, path.clone());
                         this.sftp_panel.cwd = path;
                         this.sftp_panel.entries = entries;
+                        this.sftp_panel.deleting.clear();
+                        let names: HashSet<_> = this
+                            .sftp_panel
+                            .entries
+                            .iter()
+                            .map(|entry| entry.name.clone())
+                            .collect();
+                        this.sftp_panel.selected.retain(|name| names.contains(name));
+                        if this
+                            .sftp_panel
+                            .anchor
+                            .as_ref()
+                            .is_some_and(|name| !names.contains(name))
+                        {
+                            this.sftp_panel.anchor = None;
+                        }
+                        if this
+                            .sftp_panel
+                            .current
+                            .as_ref()
+                            .is_some_and(|name| !names.contains(name))
+                        {
+                            this.sftp_panel.current = None;
+                        }
                         this.sftp_panel.error = None;
                         this.sftp_panel.editing_path = None;
                         this.sftp_panel.editing_path_sub.clear();
@@ -710,45 +765,239 @@ impl Tty7App {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Some(pane_id) = self.sftp_panel.open_pane_id else {
-            return;
-        };
-        let path = remote_join(&self.sftp_panel.cwd, &entry.name);
-        let is_dir = matches!(entry.kind, SftpEntryKind::Dir);
-        // The local file tree asks before it deletes. This is the same red
-        // Delete in the same shape of menu, on a machine the user cannot walk
-        // over to, and it used to go straight through.
-        let host = self
-            .remote_files_host(window, cx)
-            .unwrap_or_else(|| t(L10nKey::AppLocalServerName).to_string());
-        let body = t_fmt(
-            match is_dir {
-                true => L10nKey::SftpDeleteFolderBody,
-                false => L10nKey::SftpDeleteFileBody,
-            },
-            &[("host", &host)],
-        );
-        let answer = window.prompt(
-            gpui::PromptLevel::Warning,
-            &t_fmt(L10nKey::FileTreeDeleteTitle, &[("name", &entry.name)]),
-            Some(&body),
-            &crate::ui::confirm_answers(t(L10nKey::Delete), t(L10nKey::Cancel)),
-            cx,
-        );
-        cx.spawn_in(window, async move |this, cx| {
-            let Ok(0) = answer.await else { return };
-            let _ = this.update(cx, |this, cx| {
-                if this.sftp_panel.open_pane_id != Some(pane_id) {
-                    return;
+        if !self.sftp_panel.selected.contains(&entry.name) {
+            self.sftp_panel.selected.clear();
+            self.sftp_panel.selected.insert(entry.name);
+        }
+        self.sftp_delete_selected(window, cx);
+    }
+
+    fn sftp_select(&mut self, name: &str, shift: bool, toggle: bool, cx: &mut Context<Self>) {
+        let filter = self.sftp_panel.filter_input.read(cx).value().to_string();
+        let names: Vec<_> = sorted_filtered_entries(&self.sftp_panel.entries, &filter)
+            .into_iter()
+            .map(|entry| entry.name.clone())
+            .collect();
+        if shift {
+            let anchor = self
+                .sftp_panel
+                .anchor
+                .as_ref()
+                .and_then(|anchor| names.iter().position(|name| name == anchor));
+            let end = names.iter().position(|item| item == name);
+            if let (Some(a), Some(b)) = (anchor, end) {
+                self.sftp_panel.selected = names[a.min(b)..=a.max(b)].iter().cloned().collect();
+            } else {
+                self.sftp_panel.selected = [name.to_owned()].into_iter().collect();
+                self.sftp_panel.anchor = Some(name.to_owned());
+            }
+        } else {
+            if toggle {
+                if !self.sftp_panel.selected.remove(name) {
+                    self.sftp_panel.selected.insert(name.to_owned());
                 }
-                let op = match is_dir {
-                    true => SftpOp::RemoveDir { path },
-                    false => SftpOp::RemoveFile { path },
+            } else {
+                self.sftp_panel.selected = [name.to_owned()].into_iter().collect();
+            }
+            self.sftp_panel.anchor = Some(name.to_owned());
+        }
+        self.sftp_panel.current = Some(name.to_owned());
+        cx.notify();
+    }
+
+    fn sftp_key_down(
+        &mut self,
+        event: &gpui::KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if !self.sftp_panel.focus.is_focused(window) {
+            return;
+        }
+        let filter = self.sftp_panel.filter_input.read(cx).value().to_string();
+        let entries: Vec<_> = sorted_filtered_entries(&self.sftp_panel.entries, &filter)
+            .into_iter()
+            .cloned()
+            .collect();
+        if entries.is_empty() {
+            return;
+        }
+        match event.keystroke.key.as_str() {
+            "up" | "down" => {
+                let index = self
+                    .sftp_panel
+                    .current
+                    .as_ref()
+                    .and_then(|name| entries.iter().position(|entry| &entry.name == name));
+                let next = match (index, event.keystroke.key.as_str()) {
+                    (Some(i), "up") => i.saturating_sub(1),
+                    (Some(i), _) => (i + 1).min(entries.len() - 1),
+                    _ => 0,
                 };
-                this.sftp_run_op(pane_id, op, cx);
-            });
-        })
-        .detach();
+                self.sftp_select(
+                    &entries[next].name,
+                    event.keystroke.modifiers.shift,
+                    false,
+                    cx,
+                );
+                let go_up = self.sftp_panel.cwd != "/" && filter.trim().is_empty();
+                self.sftp_panel
+                    .scroll
+                    .scroll_to_item(next + usize::from(go_up));
+            }
+            "delete" | "backspace" => self.sftp_delete_selected(window, cx),
+            "enter" => {
+                if let Some(entry) = entries
+                    .into_iter()
+                    .find(|entry| Some(&entry.name) == self.sftp_panel.current.as_ref())
+                {
+                    self.sftp_open_entry(entry, window, cx);
+                }
+            }
+            _ => return,
+        }
+        cx.stop_propagation();
+    }
+
+    fn sftp_delete_selected(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.sftp_panel.open_pane_id.is_none() {
+            return;
+        }
+        let feature = crate::daemon::protocol::FEATURE_NATIVE_SSH_TRASH;
+        let supported = if let Some(workspace) = &self.sftp_panel.open_workspace {
+            workspace.spec.is_some()
+                && crate::ui::remote_connect::HostLinks::peer_supports(
+                    cx,
+                    self.spawn_host(cx),
+                    feature,
+                )
+        } else {
+            crate::daemon::spawn::local_daemon_supports(feature)
+        };
+        let targets: Vec<_> = self
+            .sftp_panel
+            .entries
+            .iter()
+            .filter(|entry| {
+                self.sftp_panel.selected.contains(&entry.name)
+                    && !self.sftp_panel.deleting.contains(&entry.name)
+                    && !entry.name.is_empty()
+                    && entry.name != "."
+                    && entry.name != ".."
+                    && !entry.name.contains('/')
+                    && !entry.name.contains('\0')
+            })
+            .cloned()
+            .collect();
+        if targets.is_empty() {
+            return;
+        }
+        if !supported {
+            window.push_notification(
+                t_fmt(
+                    L10nKey::FileTreeTrashUnavailable,
+                    &[("name", &targets[0].name)],
+                ),
+                cx,
+            );
+            return;
+        }
+        let route = self.sftp_route();
+        let connection = route.connection_key();
+        let cwd = self.sftp_panel.cwd.clone();
+        let generation = self.sftp_panel.nav_gen;
+        let host = self.remote_files_host(window, cx).unwrap_or_default();
+        let labels = targets
+            .iter()
+            .map(|entry| format!("{host}:{}", remote_join(&cwd, &entry.name)))
+            .collect();
+        self.confirm_file_delete(labels, window, cx, move |app, window, cx| {
+            let route = route.clone();
+            let cwd = cwd.clone();
+            let connection = connection.clone();
+            let mut targets = targets.clone();
+            if app.sftp_scope_matches(&(connection.clone(), cwd.clone(), generation)) {
+                targets.retain(|entry| !app.sftp_panel.deleting.contains(&entry.name));
+                app.sftp_panel
+                    .deleting
+                    .extend(targets.iter().map(|entry| entry.name.clone()));
+            }
+            if targets.is_empty() {
+                return;
+            }
+            cx.spawn_in(window, async move |app, cx| {
+                let listed = cwd.clone();
+                let result = cx
+                    .background_spawn(async move {
+                        let paths = targets
+                            .iter()
+                            .map(|target| remote_join(&listed, &target.name))
+                            .collect();
+                        let result = route.op(SftpOp::Trash { paths });
+                        let results = match result {
+                            SftpOpResult::Trashed(outcomes) if outcomes.len() == targets.len() => {
+                                outcomes
+                            }
+                            SftpOpResult::Error(error) => {
+                                vec![
+                                    Err(format!("remote trash outcome unknown: {error}"));
+                                    targets.len()
+                                ]
+                            }
+                            _ => vec![
+                                Err("remote trash outcome unknown: invalid batch reply".into());
+                                targets.len()
+                            ],
+                        };
+                        let outcomes: Vec<_> = targets
+                            .into_iter()
+                            .map(|target| target.name)
+                            .zip(results)
+                            .collect();
+                        let entries = route.list(&listed);
+                        (outcomes, entries)
+                    })
+                    .await;
+                let _ = app.update_in(cx, |app, window, cx| {
+                    // One definition of "same scope": the guard also requires
+                    // the panel to still be open.
+                    let same =
+                        app.sftp_scope_matches(&(connection.clone(), cwd.clone(), generation));
+                    for (name, outcome) in result.0 {
+                        let unknown =
+                            matches!(&outcome, Err(error) if error.contains("outcome unknown"));
+                        match outcome {
+                            Ok(()) => {
+                                if same {
+                                    app.sftp_panel.selected.remove(&name);
+                                }
+                            }
+                            Err(error) => window.push_notification(format!("{name}: {error}"), cx),
+                        }
+                        if same && !unknown {
+                            app.sftp_panel.deleting.remove(&name);
+                        }
+                    }
+                    if same {
+                        if let Ok(entries) = result.1 {
+                            app.sftp_panel
+                                .selected
+                                .retain(|name| entries.iter().any(|entry| &entry.name == name));
+                            app.sftp_panel.entries = entries;
+                        }
+                        cx.notify();
+                    }
+                });
+            })
+            .detach();
+        });
+    }
+
+    fn sftp_scope_matches(&self, scope: &(String, String, u64)) -> bool {
+        self.sftp_panel.open_pane_id.is_some()
+            && self.sftp_route().connection_key() == scope.0
+            && self.sftp_panel.cwd == scope.1
+            && self.sftp_panel.nav_gen == scope.2
     }
 
     pub(crate) fn sftp_follow_symlink(&mut self, entry: SftpEntry, cx: &mut Context<Self>) {
@@ -1459,6 +1708,10 @@ impl Tty7App {
         let muted = cx.theme().muted_foreground;
         let container = div()
             .id("sftp-list")
+            .track_focus(&self.sftp_panel.focus)
+            .on_key_down(
+                cx.listener(|this, event, window, cx| this.sftp_key_down(event, window, cx)),
+            )
             .flex_1()
             .min_h_0()
             .overflow_y_scroll()
@@ -1557,9 +1810,18 @@ impl Tty7App {
         let open_entry = entry.clone();
         let menu_entry = entry.clone();
         let app = cx.entity().downgrade();
+        let menu_scope = (
+            self.sftp_route().connection_key(),
+            self.sftp_panel.cwd.clone(),
+            self.sftp_panel.nav_gen,
+        );
 
         h_flex()
             .id(row_id)
+            .debug_selector({
+                let name = entry.name.clone();
+                move || format!("sftp-row-{name}")
+            })
             .items_center()
             .gap_1()
             .pl(px(6.))
@@ -1567,14 +1829,29 @@ impl Tty7App {
             .py_1()
             .rounded(cx.theme().radius)
             .cursor_pointer()
-            .hover(|s| s.bg(list_hover))
+            .when(self.sftp_panel.selected.contains(&entry.name), |row| {
+                row.bg(cx.theme().list_active)
+            })
+            .when(!self.sftp_panel.selected.contains(&entry.name), |row| {
+                row.hover(|s| s.bg(list_hover))
+            })
             // Single click, the same gesture the local file tree answers —
             // this panel used to demand a double click because its open
             // action was a download, and that caution outlived the download.
             .on_mouse_down(
                 gpui::MouseButton::Left,
-                cx.listener(move |this, _, window, cx| {
-                    this.sftp_open_entry(open_entry.clone(), window, cx)
+                cx.listener(move |this, event: &gpui::MouseDownEvent, window, cx| {
+                    this.sftp_panel.focus.focus(window, cx);
+                    let modified = event.modifiers.shift || event.modifiers.secondary();
+                    this.sftp_select(
+                        &open_entry.name,
+                        event.modifiers.shift,
+                        event.modifiers.secondary(),
+                        cx,
+                    );
+                    if !modified && (!is_dir_like(&open_entry) || event.click_count == 2) {
+                        this.sftp_open_entry(open_entry.clone(), window, cx);
+                    }
                 }),
             )
             .child(icon.render(px(ROW_ICON), window))
@@ -1588,9 +1865,39 @@ impl Tty7App {
                     .child(name_label),
             )
             .child(div().flex_none().text_xs().text_color(muted).child(size))
-            .context_menu(move |menu, _window, cx| {
+            .context_menu(move |menu, window, cx| {
                 let danger = cx.theme().danger;
-                Self::sftp_row_context_menu(menu, &menu_entry, dir_like, is_symlink, danger, &app)
+                let multiple = app
+                    .update(cx, |this, cx| {
+                        this.sftp_panel.focus.focus(window, cx);
+                        if !this.sftp_panel.selected.contains(&menu_entry.name) {
+                            this.sftp_select(&menu_entry.name, false, false, cx);
+                        }
+                        this.sftp_panel.selected.len() > 1
+                    })
+                    .unwrap_or(false);
+                if multiple {
+                    let app = app.clone();
+                    let scope = menu_scope.clone();
+                    return menu.item(PopupMenuItem::new(t(L10nKey::Delete)).on_click(
+                        move |_, window, cx| {
+                            let _ = app.update(cx, |this, cx| {
+                                if this.sftp_scope_matches(&scope) {
+                                    this.sftp_delete_selected(window, cx);
+                                }
+                            });
+                        },
+                    ));
+                }
+                Self::sftp_row_context_menu(
+                    menu,
+                    &menu_entry,
+                    dir_like,
+                    is_symlink,
+                    danger,
+                    &app,
+                    &menu_scope,
+                )
             })
             .into_any_element()
     }
@@ -1602,6 +1909,7 @@ impl Tty7App {
         is_symlink: bool,
         danger: gpui::Hsla,
         app: &gpui::WeakEntity<Self>,
+        scope: &(String, String, u64),
     ) -> gpui_component::menu::PopupMenu {
         let mut menu = menu.min_w(px(180.));
 
@@ -1671,9 +1979,14 @@ impl Tty7App {
             .on_click({
                 let app = app.clone();
                 let entry = entry.clone();
+                let scope = scope.clone();
                 move |_, window, cx| {
                     let entry = entry.clone();
-                    let _ = app.update(cx, |this, cx| this.sftp_delete_entry(entry, window, cx));
+                    let _ = app.update(cx, |this, cx| {
+                        if this.sftp_scope_matches(&scope) {
+                            this.sftp_delete_entry(entry, window, cx);
+                        }
+                    });
                 }
             }),
         )
@@ -2224,12 +2537,86 @@ mod tests {
 
 #[cfg(test)]
 mod gpui_tests {
+    use super::*;
     use crate::core::config::{Config, RightPanelTab};
     use crate::core::session::Session;
     use crate::ui::app::Tty7App;
     use gpui::{AppContext, Entity, TestAppContext, VisualTestContext};
 
+    struct ListWindow {
+        app: Entity<Tty7App>,
+    }
+    impl gpui::Render for ListWindow {
+        fn render(
+            &mut self,
+            window: &mut Window,
+            cx: &mut Context<Self>,
+        ) -> impl gpui::IntoElement {
+            self.app
+                .update(cx, |app, cx| app.render_sftp_list(window, cx))
+        }
+    }
+
+    #[gpui::test]
+    fn folder_click_then_shift_selects_the_visible_range(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            cx.set_global(Config::default());
+        });
+        let mut app_entity = None;
+        let window = cx.add_window(|window, cx| {
+            let app =
+                cx.new(|cx| Tty7App::with_session(None, Some(Session::default()), window, cx));
+            app.update(cx, |app, _| {
+                app.sftp_panel.open_pane_id = Some(42);
+                app.sftp_panel.entries = ["a", "b", "c"]
+                    .into_iter()
+                    .map(|name| SftpEntry {
+                        name: name.into(),
+                        kind: SftpEntryKind::Dir,
+                        size: 0,
+                        mtime: 0,
+                        permissions: 0,
+                        target_is_dir: false,
+                    })
+                    .collect();
+            });
+            app_entity = Some(app.clone());
+            let list = cx.new(|_| ListWindow { app });
+            gpui_component::Root::new(list, window, cx)
+        });
+        let app = app_entity.unwrap();
+        let mut vcx = VisualTestContext::from_window(window.into(), cx);
+        vcx.run_until_parked();
+        let first = vcx.debug_bounds("sftp-row-a").unwrap().center();
+        let last = vcx.debug_bounds("sftp-row-c").unwrap().center();
+        vcx.simulate_mouse_down(first, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.simulate_mouse_up(first, gpui::MouseButton::Left, gpui::Modifiers::none());
+        vcx.simulate_mouse_down(
+            last,
+            gpui::MouseButton::Left,
+            gpui::Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+        );
+        vcx.simulate_mouse_up(
+            last,
+            gpui::MouseButton::Left,
+            gpui::Modifiers {
+                shift: true,
+                ..Default::default()
+            },
+        );
+        app.update_in(&mut vcx, |app, _, _| {
+            assert_eq!(app.sftp_panel.cwd, "/");
+            assert_eq!(app.sftp_panel.selected.len(), 3);
+        });
+    }
+
     fn harness(cx: &mut TestAppContext) -> (Entity<Tty7App>, VisualTestContext) {
+        crate::core::config::pin_test_config_dir();
         cx.executor().allow_parking();
         cx.update(|cx| {
             gpui_component::init(cx);
@@ -2259,6 +2646,44 @@ mod gpui_tests {
             let app = app.read(cx);
             (app.right_panel_visible, app.right_panel_tab)
         })
+    }
+
+    #[gpui::test]
+    fn remote_delete_without_trash_reports_the_failure(cx: &mut TestAppContext) {
+        use crate::daemon::protocol::{SftpEntry, SftpEntryKind};
+
+        let (app, mut vcx) = harness(cx);
+        app.update_in(&mut vcx, |app, window, cx| {
+            app.sftp_panel.open_pane_id = Some(42);
+            app.sftp_panel.open_workspace = Some(crate::terminal::PaneWorkspace {
+                workspace: crate::core::session::WorkspaceId::new(),
+                target: crate::core::session::RemoteTarget::Wsl {
+                    distro: "fixture".into(),
+                },
+                spec: None,
+                label: None,
+                resize_echo: false,
+            });
+            let entry = SftpEntry {
+                name: "keep.txt".into(),
+                kind: SftpEntryKind::File,
+                size: 0,
+                mtime: 0,
+                permissions: 0,
+                target_is_dir: false,
+            };
+            app.sftp_panel.entries.push(entry.clone());
+            app.sftp_delete_entry(entry, window, cx);
+            assert_eq!(
+                gpui_component::Root::read(window, cx)
+                    .notification
+                    .read(cx)
+                    .notifications()
+                    .len(),
+                1,
+                "unavailable remote trash must report a failure without deleting"
+            );
+        });
     }
 
     #[gpui::test]
