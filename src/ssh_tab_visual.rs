@@ -35,6 +35,8 @@ struct Options {
     auto_names: bool,
     #[serde(default)]
     attention_badge: bool,
+    sidebar_group_arrows: Option<bool>,
+    sidebar_group_folders: Option<bool>,
 }
 
 struct Fixture {
@@ -76,6 +78,12 @@ pub(crate) fn run(path: &std::ffi::OsStr) {
             config.install_cli_on_path = false;
             config.cursor_blink = false;
             config.sidebar_width = 260.;
+            if let Some(arrows) = options.sidebar_group_arrows {
+                config.sidebar_group_arrows = arrows;
+            }
+            if let Some(folders) = options.sidebar_group_folders {
+                config.sidebar_group_folders = folders;
+            }
             // The sidebar captures exist to show grouping behaviour: local
             // sessions land in Scratch, in-pane SSH hops split out per host.
             config.sidebar_grouping = if options.sidebar {
