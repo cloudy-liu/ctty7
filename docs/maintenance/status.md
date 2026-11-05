@@ -1,26 +1,25 @@
 # Project status
 
-Checked on 2026-11-02 against GitHub, the v0.9.0 release, and registered local worktrees.
+Checked on 2026-11-05 against GitHub, the published v0.10.0 release, and registered local worktrees.
 
 ## Release scope and open work
 
-The latest published custom release is v0.9.0, published on 2026-10-31. The proposed v0.10.0 scope contains:
+The latest published custom release is v0.10.0, published on 2026-11-01. The accepted v0.11.0 scope contains:
 
-- Sidebar icon alignment and 13px tab titles (cloudy-liu/ctty7#236).
-- A single Mermaid toolbar above diagrams (cloudy-liu/ctty7#237).
-- Clearing application-level background attention on workspace activation (cloudy-liu/ctty7#238).
-- Optional names and hover actions for ready agent panes (cloudy-liu/ctty7#239).
-- Claude Code question detection across padded terminal-grid rows (cloudy-liu/ctty7#240).
-- A small blue Windows attention mark with no duplicate overlay (cloudy-liu/ctty7#241).
+- Configurable Windows taskbar and tray attention-dot sizes (cloudy-liu/ctty7#244).
+- Files-panel multiple selection and confirmed recoverable deletion on the owning host (cloudy-liu/ctty7#250).
+- Inset document tabs with rounded tops and active-tab separator handling (cloudy-liu/ctty7#252).
+- Qoder CLI, Qoder CN CLI, and CodeBuddy recognition, icons, resume/fork actions, and optional hooks (cloudy-liu/ctty7#253).
 
-PRs #239 and #241 have passed all fork CI checks and were squash-merged. The release preparation PR must now pass its source CI. Then verify the complete source CI, all twelve program assets, and checksums.txt while the v0.10.0 Release remains a draft; publication is explicit.
+PRs #250, #252, and #253 passed all ten latest-head checks and were squash-merged on explicit maintainer instruction; #250 was converted from draft first. Its missing matching Before screenshot remains an accepted disclosed limitation, not verified visual acceptance. PR #244 was already merged after v0.10.0.
 
-The current native visual records and the known platform and installation limits are summarized in the [English release notes](../releases/v0.10.0.md). The [local-change audit](../testing/local-change-audit-v0.10.0.md) records preserved work and temporary verification material. Independent settings-surface and background-attention work, the document-tabs-radius branch, untracked prototypes and research, and all retained stashes remain outside the release.
+Final source CI and complete draft asset verification remain required before explicit publication. The [English release notes](../releases/v0.11.0.md) retain native, remote-host, downgrade, and installation limits. The [local-change audit](../testing/local-change-audit-v0.11.0.md) records included and preserved work. Independent Herdr-core, settings-surface, background-attention, prototypes, research, and all retained stashes remain outside the release.
 
 ## Completed work
 
 | Work | Completion |
 | --- | --- |
+| v0.10.0 publication | Published on 2026-11-01 and set Latest with twelve program assets and checksums.txt. |
 | v0.9.0 publication | Published on 2026-10-31 and set Latest after all twelve program assets and checksums were verified. |
 | v0.8.2 publication | Published on 2026-10-25 and set Latest, with direct titlebar actions and compact preview/tooltip controls through PRs #204 and #205. |
 | v0.8.1 publication | Published on 2026-10-25 and set Latest. Mermaid reading, compact document headers, menu icons, and Windows attention and HTML navigation corrections are included. |
@@ -61,8 +60,8 @@ these are verification gaps, not additional open GitHub tickets.
 
 ## Source and release state
 
-- Published tag v0.9.0 remains the current release baseline at preparation time. Its [English notes](../releases/v0.9.0.md) record the verified release scope and known limits.
-- Candidate v0.10.0 contains merged PRs #236 through #241; release preparation CI and complete draft asset verification remain before publication.
+- Published tag v0.10.0 is the release baseline; its [English notes](../releases/v0.10.0.md) record the scope and known limits.
+- Candidate v0.11.0 contains merged PRs #244, #250, #252, and #253; final source CI and complete draft asset verification remain before publication.
 
 - Published tag `v0.8.3` remains available with twelve program assets and `checksums.txt`; its [English notes](../releases/v0.8.3.md) and [local-change audit](../testing/local-change-audit-v0.8.3.md) record accepted behavior and verification limits.
 
