@@ -1234,13 +1234,13 @@ impl Tty7App {
                 let cfg = cx.global::<Config>();
                 let show_arrow = cfg.sidebar_group_arrows;
                 let folder_path = group_folder_icon(
-                    section.key.is_some() && !is_ssh_group,
+                    section.key.is_some(),
                     cfg.sidebar_group_folders,
                     show_arrow,
                     effective_collapsed,
                 );
                 let show_chevron = header_shows_chevron(
-                    section.key.is_some() && !is_ssh_group,
+                    section.key.is_some(),
                     show_arrow,
                     cfg.sidebar_group_folders,
                 );
@@ -2597,6 +2597,63 @@ mod tests {
         assert!(header_shows_chevron(false, true, true));
         assert!(header_shows_chevron(false, false, true));
         assert!(!header_shows_chevron(false, false, false));
+    }
+
+    #[gpui::test]
+    fn ssh_group_icons_follow_the_same_settings_as_project_groups(cx: &mut gpui::TestAppContext) {
+        use crate::ui::app::{Tab, test_window::harness};
+        use crate::ui::pane::Pane;
+
+        let (app, mut vcx) = harness(cx);
+        vcx.simulate_resize(size(px(800.), px(600.)));
+        let ssh_key = ssh_hop_group_key("dev-box");
+        app.update(&mut vcx, |app, cx| {
+            cx.global_mut::<Config>().sidebar_grouping = SidebarGrouping::Repo;
+            app.tabs = [p("/w/project"), ssh_key.clone()]
+                .into_iter()
+                .map(|group| {
+                    let tab = Tab::new(Pane::Empty);
+                    *tab.sidebar_group.borrow_mut() = Some(group);
+                    tab
+                })
+                .collect();
+            app.active = 0;
+            cx.notify();
+        });
+
+        for collapsed in [false, true] {
+            for (arrows, folders) in [(false, true), (true, false), (true, true), (false, false)] {
+                app.update(&mut vcx, |_, cx| {
+                    let cfg = cx.global_mut::<Config>();
+                    cfg.sidebar_group_arrows = arrows;
+                    cfg.sidebar_group_folders = folders;
+                    cfg.sidebar_collapsed_groups = if collapsed {
+                        ["/w/project".into(), ssh_key.to_string_lossy().into_owned()]
+                            .into_iter()
+                            .collect()
+                    } else {
+                        Default::default()
+                    };
+                    cx.notify();
+                });
+                vcx.run_until_parked();
+                for (group, chevron, folder) in [
+                    (0, "sidebar-group-chevron-0", "sidebar-group-folder-0"),
+                    (1, "sidebar-group-chevron-1", "sidebar-group-folder-1"),
+                ] {
+                    assert_eq!(
+                        vcx.debug_bounds(chevron).is_some(),
+                        arrows,
+                        "group={group}, collapsed={collapsed}, arrows={arrows}, folders={folders}"
+                    );
+                    assert_eq!(
+                        vcx.debug_bounds(folder).is_some(),
+                        folders,
+                        "group={group}, collapsed={collapsed}, arrows={arrows}, folders={folders}"
+                    );
+                }
+            }
+        }
     }
 
     #[gpui::test]
