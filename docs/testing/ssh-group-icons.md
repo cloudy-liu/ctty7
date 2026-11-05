@@ -34,11 +34,37 @@ Inspect the `prod-web` and `dev-box` group headers. The baseline retains
 arrows; the fixed build shows open folders. This fixture uses production
 GPUI rendering and deterministic daemon messages without a live SSH connection.
 
+## Native evidence
+
+Captured on Windows on 2026-11-05 through LCU, using `Alt+Print` to capture
+the active native application window. The clipboard image was saved as PNG
+and cropped to the same sidebar rectangle in both captures: `(0, 0, 456, 1157)`
+physical pixels. There is no resizing, retouching or compositing. The crop
+excludes an unrelated desktop reminder over the terminal pane.
+
+Both captures use the light theme, 175% display scale, a 1200 x 660 logical
+viewport (2104 x 1157 physical pixels including the native frame), the same
+six-session fixture, expanded groups, and the active `Fix login` session.
+The pointer was moved into the terminal pane, outside the sidebar capture
+region, before each capture. Both saved images were inspected: neither has
+a visible pointer or unrelated reminder.
+
+- Before: the preserved `0e1bbe15` build with the icon-options fixture overlay.
+  Its production `src/ui/tab_sidebar.rs` is byte-identical to PR base
+  `fae21972` (Git blob `f5c7878945b6d7ec20a81568d92d63f151afc4d1`).
+- After: PR code at `0bd50f4a`, built from the isolated PR worktree.
+
+Inspect the leading icons beside `prod-web` and `dev-box`: Before shows
+arrows despite arrows being disabled; After shows open folders. Scratch
+retains its existing fallback arrow and inbox icon.
+
+| Before | After |
+| --- | --- |
+| ![SSH groups incorrectly retain arrows](images/ssh-group-icons/before-sidebar.png) | ![SSH groups follow the folder-only setting](images/ssh-group-icons/after-sidebar.png) |
+
 ## Known limitations
 
-Visual acceptance is **unverified for PR evidence**. LCU displayed the native
-before/after windows during local verification, but its screenshot export
-returned `EPERM: operation not permitted` for both the intended repository
-image path and a temporary output path. No durable before/after screenshots
-are committed or linked. Keep the PR in draft until matching native captures
-are archived and linked, or the limitation is explicitly accepted.
+Manual visual verification covers expanded groups with folder icons enabled
+and arrows disabled on Windows in the light theme. Other icon combinations
+and collapsed states are covered by the rendering regression test. A live
+SSH connection, dark theme, macOS and Linux were not checked manually.
