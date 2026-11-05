@@ -23,10 +23,15 @@ pub enum CLIAgent {
     Qwen,
     OhMyPi,
     Kimi,
+    // Keep new variants at the end: daemon messages serialize this enum and
+    // moving an existing discriminant would break mixed-version clients.
+    QoderCLI,
+    CodeBuddy,
+    QoderCLICn,
 }
 
 impl CLIAgent {
-    pub const ALL: [CLIAgent; 19] = [
+    pub const ALL: [CLIAgent; 22] = [
         CLIAgent::Claude,
         CLIAgent::Codex,
         CLIAgent::Gemini,
@@ -46,6 +51,9 @@ impl CLIAgent {
         CLIAgent::Qwen,
         CLIAgent::OhMyPi,
         CLIAgent::Kimi,
+        CLIAgent::QoderCLI,
+        CLIAgent::QoderCLICn,
+        CLIAgent::CodeBuddy,
     ];
 
     fn aliases(self) -> &'static [&'static str] {
@@ -78,6 +86,29 @@ impl CLIAgent {
             // kimi-cli install a `kimi` — same vendor, same brand, so one
             // detection covers them. Only the standalone one has hooks.
             CLIAgent::Kimi => &["kimi", "kimi-code"],
+            // The npm package installs two binaries and `qoder` is the one the
+            // documentation tells people to run: it dispatches to the CLI for a
+            // bare invocation, a flag, or a prompt, and only hands off to the
+            // IDE for `ide`/`chat`/`serve-web`/`tunnel` or a path that exists.
+            // Detecting only `qodercli` would miss every session started the
+            // documented way, since the dispatcher is what the pty sees. An IDE
+            // launch is the cost: it wears the CLI's avatar for as long as the
+            // launcher takes to exit. `qodercli` leads because an unstarted pane
+            // relaunches the first alias: every install channel ships it, and
+            // the curl installer's Windows `qoder` is a PowerShell dispatcher
+            // that only finds it in turn.
+            CLIAgent::QoderCLI => &["qodercli", "qoder"],
+            // The mainland-China build of Qoder: the same vendor as the global
+            // one, a separate install that keeps its state in `~/.qoder-cn`.
+            // It ships the same dispatcher-plus-CLI pair under `-cn` names, so
+            // `qoder-cn` is detected too. A bare `qoder` still belongs to the
+            // global build.
+            CLIAgent::QoderCLICn => &["qodercn", "qoderclicn", "qoder-cn"],
+            // Tencent's terminal agent. The npm package installs `codebuddy`,
+            // `codebuddy-code` and the short `cbc`, all pointing at one script.
+            // `cbc` also names the COIN-OR solver; a solver run wearing the
+            // avatar until it exits is the cost of catching the short name.
+            CLIAgent::CodeBuddy => &["codebuddy", "codebuddy-code", "cbc"],
         }
     }
 
@@ -102,6 +133,9 @@ impl CLIAgent {
             CLIAgent::Qwen => "qwen",
             CLIAgent::OhMyPi => "omp",
             CLIAgent::Kimi => "kimi",
+            CLIAgent::QoderCLI => "qodercli",
+            CLIAgent::CodeBuddy => "codebuddy",
+            CLIAgent::QoderCLICn => "qoderclicn",
         }
     }
 
@@ -131,6 +165,9 @@ impl CLIAgent {
             CLIAgent::Qwen => "Qwen Code",
             CLIAgent::OhMyPi => "Oh My Pi",
             CLIAgent::Kimi => "Kimi Code",
+            CLIAgent::QoderCLI => "Qoder CLI",
+            CLIAgent::CodeBuddy => "CodeBuddy",
+            CLIAgent::QoderCLICn => "Qoder CN CLI",
         }
     }
 
@@ -186,9 +223,12 @@ impl CLIAgent {
             CLIAgent::Droid => Some(format!("droid{flags} --resume {session_id}")),
             CLIAgent::Copilot => Some(format!("copilot{flags} --resume {session_id}")),
             CLIAgent::Grok => Some(format!("grok{flags} --resume {session_id}")),
+            CLIAgent::QoderCLI => Some(format!("qodercli{flags} --resume {session_id}")),
+            CLIAgent::QoderCLICn => Some(format!("qodercn{flags} --resume {session_id}")),
             CLIAgent::Pi => Some(format!("pi{flags} --session {session_id}")),
             CLIAgent::OhMyPi => Some(format!("omp{flags} --resume {session_id}")),
             CLIAgent::Kimi => Some(format!("kimi{flags} --session {session_id}")),
+            CLIAgent::CodeBuddy => Some(format!("codebuddy{flags} --resume {session_id}")),
             _ => None,
         }
     }
@@ -399,6 +439,11 @@ impl CLIAgent {
             // "If false, chat history is not saved and --continue/--resume
             // will not work" — the yargs negation of `--chat-recording`.
             CLIAgent::Qwen => &["--no-chat-recording"],
+            // Print mode still emits a session id in hooks when persistence
+            // is disabled, but there is no saved conversation to reopen.
+            CLIAgent::QoderCLI | CLIAgent::CodeBuddy | CLIAgent::QoderCLICn => {
+                &["--no-session-persistence"]
+            }
             _ => &[],
         };
         argv.iter().any(|t| ephemeral.contains(&t.as_str()))
@@ -415,6 +460,17 @@ impl CLIAgent {
                 "claude{flags} --resume {session_id} --fork-session"
             )),
             CLIAgent::Grok => Some(format!("grok{flags} --resume {session_id} --fork-session")),
+            CLIAgent::QoderCLI => Some(format!(
+                "qodercli{flags} --resume {session_id} --fork-session"
+            )),
+            // qoder-cn is the same CLI against a different config directory, so
+            // it takes the same switches.
+            CLIAgent::QoderCLICn => Some(format!(
+                "qodercn{flags} --resume {session_id} --fork-session"
+            )),
+            CLIAgent::CodeBuddy => Some(format!(
+                "codebuddy{flags} --resume {session_id} --fork-session"
+            )),
             CLIAgent::OpenCode => Some(format!("opencode{flags} --session {session_id} --fork")),
             CLIAgent::OhMyPi => Some(format!("omp{flags} --fork {session_id}")),
             // Droid forks with a standalone flag rather than resume-plus-a-switch.
@@ -441,7 +497,10 @@ impl CLIAgent {
             | CLIAgent::Droid
             | CLIAgent::Amp
             | CLIAgent::Qwen
-            | CLIAgent::Goose => Some("Fork Session"),
+            | CLIAgent::Goose
+            | CLIAgent::QoderCLI
+            | CLIAgent::QoderCLICn
+            | CLIAgent::CodeBuddy => Some("Fork Session"),
             _ => None,
         }
     }
@@ -613,6 +672,37 @@ impl CLIAgent {
                 "--worktree-ref",
                 "--ref",
             ],
+            // `--resume`/`-r` restores a past session and `--continue`/`-c` the
+            // most recent one; `--session-id` is a third spelling of the same
+            // thing. All three clash with the `--resume {id}` this command
+            // appends, and `--fork-session` is the flag the fork variant
+            // appends itself. `--worktree` would create or switch trees again;
+            // Qoder's `-w` means `--cwd` and must survive.
+            CLIAgent::QoderCLI | CLIAgent::QoderCLICn => &[
+                "--resume",
+                "-r",
+                "--continue",
+                "-c",
+                "--session-id",
+                "--fork-session",
+                "--worktree",
+            ],
+            // CodeBuddy keeps Claude Code's session flags. `--resume-session-at`
+            // cuts a resumed conversation short and only makes sense next to
+            // the resume it came with. Unlike Qoder, `-w` *is* `--worktree`
+            // here, and replaying either would branch off a fresh tree.
+            CLIAgent::CodeBuddy => &[
+                "--resume",
+                "-r",
+                "--continue",
+                "-c",
+                "--session-id",
+                "--fork-session",
+                "--resume-session-at",
+                "--worktree",
+                "-w",
+                "--worktree-branch",
+            ],
             _ => &[],
         };
         let mut i = 0;
@@ -674,6 +764,14 @@ impl CLIAgent {
             // The blue of the flame in Kimi's brand mark; the glyph itself is
             // black, which Codex and Grok already have covered.
             CLIAgent::Kimi => 0x027AFF,
+            // The near-black field of Qoder's own dark app icon. The tray draws
+            // every mark in white on its accent, so a white field would erase
+            // the glyph.
+            CLIAgent::QoderCLI => 0x0F0D0C,
+            // qoder-cn ships the same mark on the same black field.
+            CLIAgent::QoderCLICn => 0x0F0D0C,
+            // The near-black field CodeBuddy's own app icon sits on.
+            CLIAgent::CodeBuddy => 0x1F1F1F,
         }
     }
 
@@ -694,6 +792,9 @@ impl CLIAgent {
             CLIAgent::Qwen => "icons/agents/qwen.svg",
             CLIAgent::Kimi => "icons/agents/kimi.svg",
             CLIAgent::Antigravity => "icons/agents/antigravity.svg",
+            CLIAgent::QoderCLI => "icons/agents/qodercli.svg",
+            CLIAgent::QoderCLICn => "icons/agents/qoderclicn.svg",
+            CLIAgent::CodeBuddy => "icons/agents/codebuddy.svg",
             CLIAgent::Aider | CLIAgent::Auggie | CLIAgent::Hermes | CLIAgent::Vibe => {
                 "icons/bot.svg"
             }
@@ -1306,6 +1407,90 @@ mod tests {
         );
     }
 
+    /// The npm package installs `qoder` and `qodercli`, and the documentation
+    /// tells people to run the first one. Both are `#!/usr/bin/env node`
+    /// scripts, so what the pty carries is node plus the path to the shim —
+    /// the dispatcher's own child, which is where the name `qodercli` appears
+    /// on that path, is not the process group leader and is never read.
+    #[test]
+    fn qoder_is_detected_through_either_of_its_binaries() {
+        for launcher in [
+            "qoder",
+            "qodercli",
+            "/opt/homebrew/bin/qoder",
+            "/opt/homebrew/bin/qodercli",
+        ] {
+            assert_eq!(
+                CLIAgent::detect_from_argv(&argv(&["node", launcher])),
+                Some(CLIAgent::QoderCLI),
+                "on {launcher}"
+            );
+            assert_eq!(
+                CLIAgent::detect_from_argv(&argv(&[launcher])),
+                Some(CLIAgent::QoderCLI),
+                "on {launcher}"
+            );
+        }
+    }
+
+    /// The China build installs the same dispatcher-plus-CLI pair under `-cn`
+    /// names, so a bare `qoder` has to stay with the global one.
+    #[test]
+    fn qoder_cn_is_detected_through_either_of_its_binaries() {
+        for launcher in [
+            "qodercn",
+            "qoderclicn",
+            "qoder-cn",
+            "/c/Users/me/.qoder-cn/entry/qodercn.cmd",
+        ] {
+            assert_eq!(
+                CLIAgent::detect_from_argv(&argv(&[launcher])),
+                Some(CLIAgent::QoderCLICn),
+                "on {launcher}"
+            );
+        }
+        for other in ["qoder", "qodercli"] {
+            assert_eq!(
+                CLIAgent::detect_from_argv(&argv(&[other])),
+                Some(CLIAgent::QoderCLI),
+                "the global build keeps {other}"
+            );
+        }
+        assert_eq!(
+            CLIAgent::from_slug("qoderclicn"),
+            Some(CLIAgent::QoderCLICn)
+        );
+    }
+
+    /// All three of CodeBuddy's npm bins are node scripts pointing at one file,
+    /// so the pty sees node plus whichever shim name was typed.
+    #[test]
+    fn codebuddy_is_detected_through_each_of_its_binaries() {
+        for launcher in [
+            "codebuddy",
+            "codebuddy-code",
+            "cbc",
+            "/opt/homebrew/bin/codebuddy",
+            "/usr/local/bin/cbc",
+        ] {
+            assert_eq!(
+                CLIAgent::detect_from_argv(&argv(&["node", launcher])),
+                Some(CLIAgent::CodeBuddy),
+                "on {launcher}"
+            );
+            assert_eq!(
+                CLIAgent::detect_from_argv(&argv(&[launcher])),
+                Some(CLIAgent::CodeBuddy),
+                "on {launcher}"
+            );
+        }
+        assert_eq!(
+            CLIAgent::from_slug("codebuddy"),
+            Some(CLIAgent::CodeBuddy),
+            "hook events name the agent by this slug"
+        );
+    }
+
     #[test]
     fn detects_npx_package_form() {
         assert_eq!(
@@ -1366,6 +1551,9 @@ mod tests {
     fn black_branded_avatars_keep_their_brand_field() {
         assert_eq!(CLIAgent::Codex.accent_rgb(), 0x000000);
         assert_eq!(CLIAgent::Grok.accent_rgb(), 0x000000);
+        assert_eq!(CLIAgent::QoderCLI.accent_rgb(), 0x0F0D0C);
+        assert_eq!(CLIAgent::QoderCLICn.accent_rgb(), 0x0F0D0C);
+        assert_eq!(CLIAgent::CodeBuddy.accent_rgb(), 0x1F1F1F);
     }
 
     #[test]
@@ -2258,6 +2446,144 @@ mod tests {
                 )
                 .as_deref(),
             Some("grok --yolo --resume g-3")
+        );
+        assert_eq!(
+            CLIAgent::QoderCLI
+                .resume_command("q-1", Some(&argv(&["qodercli", "--model", "qoder-1"])))
+                .as_deref(),
+            Some("qodercli --model qoder-1 --resume q-1")
+        );
+        assert_eq!(
+            CLIAgent::QoderCLI
+                .resume_command(
+                    "q-2",
+                    Some(&argv(&["qodercli", "--resume", "q-1", "--fork-session"]))
+                )
+                .as_deref(),
+            Some("qodercli --resume q-2"),
+            "a stale --resume id and --fork-session come off before the new one goes on"
+        );
+        assert_eq!(
+            CLIAgent::QoderCLI
+                .resume_command(
+                    "q-3",
+                    Some(&argv(&["qodercli", "--session-id", "old", "--yolo"]))
+                )
+                .as_deref(),
+            Some("qodercli --yolo --resume q-3"),
+            "`--session-id` names a new session and is rejected next to `--resume`"
+        );
+    }
+
+    #[test]
+    fn qoder_resume_and_fork_do_not_recreate_worktrees() {
+        for worktree in [
+            vec!["--worktree"],
+            vec!["--worktree", "old-tree"],
+            vec!["--worktree=old-tree"],
+        ] {
+            for cwd_flag in ["-w", "--cwd"] {
+                let mut launch = argv(&["qodercli", "--model", "qoder-1"]);
+                launch.extend(argv(&worktree));
+                launch.extend(argv(&[cwd_flag, "/repo/current-tree"]));
+                assert_eq!(
+                    CLIAgent::QoderCLI.resume_command("q-1", Some(&launch)),
+                    Some(format!(
+                        "qodercli --model qoder-1 {cwd_flag} /repo/current-tree --resume q-1"
+                    )),
+                    "launch argv: {launch:?}"
+                );
+                assert_eq!(
+                    CLIAgent::QoderCLI.fork_command("q-1", Some(&launch)),
+                    Some(format!(
+                        "qodercli --model qoder-1 {cwd_flag} /repo/current-tree --resume q-1 --fork-session"
+                    )),
+                    "launch argv: {launch:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn qoder_session_commands_require_persistence() {
+        let ephemeral = argv(&["qodercli", "--print", "--no-session-persistence"]);
+        assert_eq!(
+            CLIAgent::QoderCLI.resume_command("q-1", Some(&ephemeral)),
+            None
+        );
+        assert_eq!(
+            CLIAgent::QoderCLI.fork_command("q-1", Some(&ephemeral)),
+            None
+        );
+
+        let persistent = argv(&["qodercli", "--model", "qoder-1"]);
+        assert_eq!(
+            CLIAgent::QoderCLI
+                .resume_command("q-1", Some(&persistent))
+                .as_deref(),
+            Some("qodercli --model qoder-1 --resume q-1")
+        );
+        assert_eq!(
+            CLIAgent::QoderCLI
+                .fork_command("q-1", Some(&persistent))
+                .as_deref(),
+            Some("qodercli --model qoder-1 --resume q-1 --fork-session")
+        );
+    }
+
+    #[test]
+    fn codebuddy_resume_and_fork_drop_stale_session_and_worktree_flags() {
+        assert_eq!(
+            CLIAgent::CodeBuddy.resume_command("cb-1", None).as_deref(),
+            Some("codebuddy --resume cb-1")
+        );
+        assert_eq!(
+            CLIAgent::CodeBuddy.fork_command("cb-1", None).as_deref(),
+            Some("codebuddy --resume cb-1 --fork-session")
+        );
+        for stale in [
+            vec!["--resume", "cb-0"],
+            vec!["-r", "cb-0"],
+            vec!["--continue"],
+            vec!["-c"],
+            vec!["--session-id", "cb-0"],
+            vec!["--resume", "cb-0", "--resume-session-at", "m-9"],
+            vec!["--worktree"],
+            vec!["--worktree", "old-tree", "--worktree-branch", "main"],
+            vec!["-w", "old-tree"],
+            vec!["--worktree=old-tree"],
+            vec!["--resume", "cb-0", "--fork-session"],
+        ] {
+            let mut launch = argv(&["codebuddy", "--model", "m-1"]);
+            launch.extend(argv(&stale));
+            launch.extend(argv(&["--permission-mode", "acceptEdits"]));
+            assert_eq!(
+                CLIAgent::CodeBuddy
+                    .resume_command("cb-2", Some(&launch))
+                    .as_deref(),
+                Some("codebuddy --model m-1 --permission-mode acceptEdits --resume cb-2"),
+                "launch argv: {launch:?}"
+            );
+            assert_eq!(
+                CLIAgent::CodeBuddy
+                    .fork_command("cb-2", Some(&launch))
+                    .as_deref(),
+                Some(
+                    "codebuddy --model m-1 --permission-mode acceptEdits --resume cb-2 --fork-session"
+                ),
+                "launch argv: {launch:?}"
+            );
+        }
+
+        let ephemeral = argv(&["codebuddy", "-p", "--no-session-persistence"]);
+        assert_eq!(
+            CLIAgent::CodeBuddy.resume_command("cb-1", Some(&ephemeral)),
+            None,
+            "nothing was saved, so there is nothing to reopen"
+        );
+        assert_eq!(
+            CLIAgent::CodeBuddy.fork_command("cb-1", Some(&ephemeral)),
+            None
         );
     }
 

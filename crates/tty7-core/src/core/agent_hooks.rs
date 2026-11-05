@@ -61,6 +61,16 @@ fn effective_agent(agent: &str, ran_by_grok: bool) -> &str {
 }
 
 fn effective_event<'a>(agent: &str, event: &'a str, stdin_json: &str) -> Option<&'a str> {
+    // Qoder, its China build and CodeBuddy also emit SessionStart after
+    // compacting the active turn. Preserve its status until a real turn or
+    // session boundary arrives.
+    if matches!(agent, "qodercli" | "qoderclicn" | "codebuddy")
+        && event == "session-start"
+        && let Ok(payload) = serde_json::from_str::<serde_json::Value>(stdin_json)
+        && payload.get("source").and_then(|value| value.as_str()) == Some("compact")
+    {
+        return None;
+    }
     if matches!(agent, "copilot" | "grok" | "droid" | "gemini") && event == "notification" {
         let blocks = stdin_json.contains("elicitation_dialog")
             || (matches!(agent, "copilot" | "droid") && stdin_json.contains("permission_prompt"))
@@ -334,10 +344,13 @@ pub enum HookAgent {
     Qwen,
     Goose,
     Kimi,
+    QoderCLI,
+    CodeBuddy,
+    QoderCLICn,
 }
 
 impl HookAgent {
-    pub const ALL: [HookAgent; 12] = [
+    pub const ALL: [HookAgent; 15] = [
         HookAgent::Claude,
         HookAgent::Codex,
         HookAgent::Copilot,
@@ -350,6 +363,9 @@ impl HookAgent {
         HookAgent::Qwen,
         HookAgent::Goose,
         HookAgent::Kimi,
+        HookAgent::QoderCLI,
+        HookAgent::QoderCLICn,
+        HookAgent::CodeBuddy,
     ];
 
     /// The hooks behind a detected agent process, if it has any.
@@ -371,6 +387,9 @@ impl HookAgent {
             CLIAgent::Qwen => Some(HookAgent::Qwen),
             CLIAgent::Goose => Some(HookAgent::Goose),
             CLIAgent::Kimi => Some(HookAgent::Kimi),
+            CLIAgent::QoderCLI => Some(HookAgent::QoderCLI),
+            CLIAgent::QoderCLICn => Some(HookAgent::QoderCLICn),
+            CLIAgent::CodeBuddy => Some(HookAgent::CodeBuddy),
             CLIAgent::Aider
             | CLIAgent::Amp
             | CLIAgent::Cursor
@@ -391,6 +410,8 @@ impl HookAgent {
             HookAgent::Gemini => Some(GEMINI_HOOK_EVENTS),
             HookAgent::Droid => Some(DROID_HOOK_EVENTS),
             HookAgent::Qwen => Some(QWEN_HOOK_EVENTS),
+            HookAgent::QoderCLI | HookAgent::QoderCLICn => Some(QODER_HOOK_EVENTS),
+            HookAgent::CodeBuddy => Some(CODEBUDDY_HOOK_EVENTS),
             HookAgent::Copilot
             | HookAgent::OpenCode
             | HookAgent::Pi
@@ -425,6 +446,9 @@ impl HookAgent {
             HookAgent::Qwen => "qwen",
             HookAgent::Goose => "goose",
             HookAgent::Kimi => "kimi",
+            HookAgent::QoderCLI => "qodercli",
+            HookAgent::CodeBuddy => "codebuddy",
+            HookAgent::QoderCLICn => "qoderclicn",
         }
     }
 
@@ -442,6 +466,9 @@ impl HookAgent {
             HookAgent::Qwen => "Qwen Code",
             HookAgent::Goose => "Goose",
             HookAgent::Kimi => "Kimi Code",
+            HookAgent::QoderCLI => "Qoder CLI",
+            HookAgent::CodeBuddy => "CodeBuddy",
+            HookAgent::QoderCLICn => "Qoder CN CLI",
         }
     }
 
@@ -473,6 +500,9 @@ impl HookAgent {
                 target.under_home(&[".agents", "plugins", "tty7", "hooks", "hooks.json"])
             }
             HookAgent::Kimi => target.kimi_config_path(),
+            HookAgent::QoderCLI => target.qoder_settings_path(),
+            HookAgent::QoderCLICn => target.qoder_cn_settings_path(),
+            HookAgent::CodeBuddy => target.codebuddy_settings_path(),
         }
     }
 
@@ -563,6 +593,44 @@ impl<'a> HookTarget<'a> {
             return PathBuf::from(dir).join("config.toml");
         }
         self.under_home(&[".kimi-code", "config.toml"])
+    }
+
+    fn qoder_settings_path(&self) -> PathBuf {
+        if self.is_local()
+            && let Some(dir) = std::env::var_os("QODER_CONFIG_DIR").filter(|d| !d.is_empty())
+        {
+            return PathBuf::from(dir).join("settings.json");
+        }
+        self.under_home(&[".qoder", "settings.json"])
+    }
+
+    /// The China build keeps its settings in `~/.qoder-cn`. It resolves the
+    /// directory the same way the global build does, under a `-cn` name:
+    /// `QODERCN_CONFIG_DIR` wins, otherwise the home falls back through
+    /// `QODERCN_CLI_HOME` and `GEMINI_CLI_HOME` before the user's own, with
+    /// `.qoder-cn` as the directory name. Only the first is honoured here —
+    /// local-only, like every other override, so a local env var must not
+    /// redirect a remote machine's hooks.
+    fn qoder_cn_settings_path(&self) -> PathBuf {
+        if self.is_local()
+            && let Some(dir) = std::env::var_os("QODERCN_CONFIG_DIR").filter(|d| !d.is_empty())
+        {
+            return PathBuf::from(dir).join("settings.json");
+        }
+        self.under_home(&[".qoder-cn", "settings.json"])
+    }
+
+    /// CodeBuddy moves its whole home, `settings.json` included, to
+    /// `CODEBUDDY_CONFIG_DIR` when that is set and not blank. Local-only, like
+    /// the other overrides.
+    fn codebuddy_settings_path(&self) -> PathBuf {
+        if self.is_local()
+            && let Some(dir) = std::env::var_os("CODEBUDDY_CONFIG_DIR")
+                .filter(|d| !d.to_string_lossy().trim().is_empty())
+        {
+            return PathBuf::from(dir).join("settings.json");
+        }
+        self.under_home(&[".codebuddy", "settings.json"])
     }
 
     fn hook_command(&self, agent: HookAgent, event: &str) -> String {
@@ -842,6 +910,35 @@ const GROK_HOOK_EVENTS: &[(&str, &str, Option<&str>)] = &[
     ("PostToolUse", "tool-complete", None),
     ("Stop", "stop", None),
     ("SessionEnd", "session-end", None),
+];
+
+const QODER_HOOK_EVENTS: &[(&str, &str)] = &[
+    ("SessionStart", "session-start"),
+    ("UserPromptSubmit", "prompt-submit"),
+    ("PermissionRequest", "permission-request"),
+    // An authorized MCP tool can still pause for user input mid-call.
+    ("Elicitation", "question-asked"),
+    ("PostToolUse", "tool-complete"),
+    ("Stop", "stop"),
+    ("StopFailure", "stop"),
+    ("SessionEnd", "session-end"),
+];
+
+/// CodeBuddy's hooks are Claude Code's, file layout and event names alike, but
+/// like Qoder it has a first-class `PermissionRequest`, so it takes Qoder's
+/// table rather than Claude's `Notification` sniffing. A turn that dies on an
+/// API error reports `StopFailure` instead of `Stop`; without it the pane
+/// would stay on working.
+const CODEBUDDY_HOOK_EVENTS: &[(&str, &str)] = &[
+    ("SessionStart", "session-start"),
+    ("UserPromptSubmit", "prompt-submit"),
+    ("PermissionRequest", "permission-request"),
+    // An authorized MCP tool can still pause for user input mid-call.
+    ("Elicitation", "question-asked"),
+    ("PostToolUse", "tool-complete"),
+    ("Stop", "stop"),
+    ("StopFailure", "stop"),
+    ("SessionEnd", "session-end"),
 ];
 
 fn hook_map_state(
@@ -1187,6 +1284,9 @@ fn owned_file_content(target: &HookTarget, agent: HookAgent) -> Option<String> {
         | HookAgent::Gemini
         | HookAgent::Droid
         | HookAgent::Qwen
+        | HookAgent::QoderCLI
+        | HookAgent::QoderCLICn
+        | HookAgent::CodeBuddy
         | HookAgent::Kimi => None,
     }
 }
@@ -1618,9 +1718,11 @@ mod tests {
             .chain(CODEX_HOOK_EVENTS)
             .chain(GEMINI_HOOK_EVENTS)
             .chain(DROID_HOOK_EVENTS)
+            .chain(QODER_HOOK_EVENTS)
             .chain(QWEN_HOOK_EVENTS)
             .chain(GOOSE_HOOK_EVENTS)
             .chain(KIMI_HOOK_EVENTS)
+            .chain(CODEBUDDY_HOOK_EVENTS)
             .map(|(_, e)| *e)
             .chain(GROK_HOOK_EVENTS.iter().map(|(_, e, _)| *e))
             .collect();
@@ -1654,6 +1756,9 @@ mod tests {
                 "/home/me/.agents/plugins/tty7/hooks/hooks.json",
             ),
             (HookAgent::Kimi, "/home/me/.kimi-code/config.toml"),
+            (HookAgent::QoderCLI, "/home/me/.qoder/settings.json"),
+            (HookAgent::QoderCLICn, "/home/me/.qoder-cn/settings.json"),
+            (HookAgent::CodeBuddy, "/home/me/.codebuddy/settings.json"),
         ] {
             assert_eq!(
                 agent.target_path(&t),
@@ -1674,6 +1779,9 @@ mod tests {
             HookAgent::Qwen,
             HookAgent::Goose,
             HookAgent::Kimi,
+            HookAgent::QoderCLI,
+            HookAgent::QoderCLICn,
+            HookAgent::CodeBuddy,
         ] {
             assert_eq!(hooks_state(&real, agent), HooksState::NotInstalled);
             install_hooks(&real, agent).unwrap_or_else(|e| panic!("{}: {e}", agent.slug()));
@@ -1694,6 +1802,178 @@ mod tests {
         }
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn qoder_compaction_preserves_the_active_turn() {
+        use crate::core::cli_agent::{AgentSessionState, AgentStatus};
+
+        let mut state = AgentSessionState::default();
+        state.apply_event(&round_trip(
+            "qodercli",
+            "prompt-submit",
+            r#"{"session_id":"q-1","cwd":"/repo","prompt":"Continue the task"}"#,
+        ));
+        let before = state.clone();
+        let compact = r#"{"session_id":"q-1","cwd":"/repo","source":"compact"}"#;
+        if let Some(event) = effective_event("qodercli", "session-start", compact) {
+            state.apply_event(&round_trip("qodercli", event, compact));
+        }
+        assert_eq!(state, before, "compaction must preserve the active turn");
+
+        state.apply_event(&round_trip("qodercli", "tool-complete", "{}"));
+        assert_eq!(state.status, AgentStatus::Working);
+        state.apply_event(&round_trip("qodercli", "stop", "{}"));
+        assert_eq!(state.status, AgentStatus::Done);
+
+        for input in [
+            r#"{"source":"startup","message":"compact"}"#,
+            r#"{"source":"resume"}"#,
+            r#"{"source":"clear"}"#,
+            "{}",
+            "not JSON",
+        ] {
+            let event = effective_event("qodercli", "session-start", input)
+                .expect("ordinary session starts still reach the state machine");
+            let mut session = before.clone();
+            session.apply_event(&round_trip("qodercli", event, input));
+            assert_eq!(session.status, AgentStatus::Idle, "{input}");
+        }
+        assert_eq!(
+            effective_event("claude", "session-start", compact),
+            Some("session-start"),
+            "the filter is specific to Qoder"
+        );
+        assert_eq!(
+            effective_event("qodercli", "prompt-submit", compact),
+            Some("prompt-submit")
+        );
+    }
+
+    #[test]
+    fn qoder_mcp_elicitation_waits_for_user_input() {
+        use crate::core::cli_agent::{AgentSessionState, AgentStatus};
+
+        let apply_hook = |state: &mut AgentSessionState, hook: &str, input: &str| {
+            let event = HookAgent::QoderCLI
+                .hook_map_events()
+                .unwrap()
+                .iter()
+                .find_map(|(name, event)| (*name == hook).then_some(*event))
+                .and_then(|event| effective_event("qodercli", event, input));
+            if let Some(event) = event {
+                state.apply_event(&round_trip("qodercli", event, input));
+            }
+        };
+        let mut state = AgentSessionState::default();
+        apply_hook(
+            &mut state,
+            "UserPromptSubmit",
+            r#"{"session_id":"q-1","prompt":"Look up my tickets"}"#,
+        );
+        assert_eq!(state.status, AgentStatus::Working);
+        // Qoder says outright when it is blocked — `PermissionRequest` and
+        // `Elicitation` — so it must not also carry `Notification`, which
+        // fires for non-blocking alerts and would strand the pane on
+        // "waiting". Asserting the map has no seat for it is the check; a
+        // `Notification` payload put through `apply_hook` would be dropped
+        // for want of one and prove nothing.
+        assert!(
+            !HookAgent::QoderCLI
+                .hook_map_events()
+                .unwrap()
+                .iter()
+                .any(|(hook, _)| *hook == "Notification"),
+            "an unblocking alert must not read as a question"
+        );
+
+        // The MCP tool is already authorized, so no PermissionRequest precedes
+        // its request for more information from the user.
+        apply_hook(
+            &mut state,
+            "Elicitation",
+            r#"{
+                "session_id":"q-1",
+                "hook_event_name":"Elicitation",
+                "mcp_server_name":"tickets",
+                "message":"Choose a project",
+                "mode":"form"
+            }"#,
+        );
+        assert_eq!(state.status, AgentStatus::Waiting);
+        assert_eq!(state.message.as_deref(), Some("Choose a project"));
+        assert_eq!(state.session_id.as_deref(), Some("q-1"));
+
+        apply_hook(&mut state, "PostToolUse", r#"{"session_id":"q-1"}"#);
+        assert_eq!(state.status, AgentStatus::Working);
+        assert_eq!(state.message, None);
+        apply_hook(&mut state, "Stop", r#"{"session_id":"q-1"}"#);
+        assert_eq!(state.status, AgentStatus::Done);
+    }
+
+    /// CodeBuddy reuses Claude Code's hook shape and payload, so a turn walks
+    /// the same way — but it fires `SessionStart` with `source: "compact"`
+    /// in the middle of a turn, which must not reset the pane to idle.
+    #[test]
+    fn codebuddy_turns_survive_compaction_and_record_the_session() {
+        use crate::core::cli_agent::{AgentSessionState, AgentStatus, CLIAgent};
+
+        let apply_hook = |state: &mut AgentSessionState, hook: &str, input: &str| {
+            let event = HookAgent::CodeBuddy
+                .hook_map_events()
+                .unwrap()
+                .iter()
+                .find_map(|(name, event)| (*name == hook).then_some(*event))
+                .unwrap_or_else(|| panic!("CodeBuddy installs no {hook} hook"));
+            if let Some(event) = effective_event("codebuddy", event, input) {
+                let ev = round_trip("codebuddy", event, input);
+                assert_eq!(ev.agent, Some(CLIAgent::CodeBuddy));
+                state.apply_event(&ev);
+            }
+        };
+        let mut state = AgentSessionState::default();
+        apply_hook(
+            &mut state,
+            "SessionStart",
+            r#"{"session_id":"cb-1","cwd":"/repo","source":"startup"}"#,
+        );
+        assert_eq!(state.status, AgentStatus::Idle);
+        apply_hook(
+            &mut state,
+            "UserPromptSubmit",
+            r#"{"session_id":"cb-1","cwd":"/repo","prompt":"Fix the build"}"#,
+        );
+        assert_eq!(state.status, AgentStatus::Working);
+
+        let before = state.clone();
+        apply_hook(
+            &mut state,
+            "SessionStart",
+            r#"{"session_id":"cb-1","cwd":"/repo","source":"compact"}"#,
+        );
+        assert_eq!(state, before, "compaction must preserve the active turn");
+
+        apply_hook(
+            &mut state,
+            "PermissionRequest",
+            r#"{"session_id":"cb-1","tool_name":"Bash"}"#,
+        );
+        assert_eq!(state.status, AgentStatus::Waiting);
+        apply_hook(&mut state, "PostToolUse", r#"{"session_id":"cb-1"}"#);
+        assert_eq!(state.status, AgentStatus::Working);
+        apply_hook(&mut state, "StopFailure", r#"{"session_id":"cb-1"}"#);
+        assert_eq!(state.status, AgentStatus::Done, "a failed turn still ends");
+        assert_eq!(state.session_id.as_deref(), Some("cb-1"));
+        assert_eq!(state.cwd.as_deref(), Some(Path::new("/repo")));
+
+        assert!(
+            !HookAgent::CodeBuddy
+                .hook_map_events()
+                .unwrap()
+                .iter()
+                .any(|(hook, _)| *hook == "Notification"),
+            "PermissionRequest reports the block; Notification would only muddy it"
+        );
     }
 
     /// Qwen is the one agent that reports a blocked turn outright, so it must
@@ -1952,6 +2232,9 @@ mod tests {
                 "/home/me/.omp/agent/extensions/tty7/index.ts",
             ),
             (HookAgent::Kimi, "/home/me/.kimi-code/config.toml"),
+            (HookAgent::QoderCLI, "/home/me/.qoder/settings.json"),
+            (HookAgent::QoderCLICn, "/home/me/.qoder-cn/settings.json"),
+            (HookAgent::CodeBuddy, "/home/me/.codebuddy/settings.json"),
         ] {
             assert_eq!(
                 agent.target_path(&target),
@@ -2175,6 +2458,299 @@ mod tests {
         owned_file_uninstall(&t, &path, marker).expect("uninstall is idempotent");
 
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn qoder_config_dir_controls_local_hook_lifecycle() {
+        const CASE_ENV: &str = "TTY7_TEST_QODER_CONFIG_CASE";
+        const ROOT_ENV: &str = "TTY7_TEST_QODER_CONFIG_ROOT";
+        let Ok(case) = std::env::var(CASE_ENV) else {
+            // Each case gets its own environment, without changing the one
+            // shared by the other tests or touching the user's settings.
+            for case in ["override", "empty", "unset"] {
+                let sandbox = tempfile::tempdir().unwrap();
+                let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+                child
+                    .args([
+                        "--exact",
+                        "core::agent_hooks::tests::qoder_config_dir_controls_local_hook_lifecycle",
+                        "--nocapture",
+                    ])
+                    .env(CASE_ENV, case)
+                    .env(ROOT_ENV, sandbox.path());
+                match case {
+                    "override" => {
+                        child.env("QODER_CONFIG_DIR", sandbox.path().join("custom config"))
+                    }
+                    "empty" => child.env("QODER_CONFIG_DIR", ""),
+                    _ => child.env_remove("QODER_CONFIG_DIR"),
+                };
+                let output = crate::core::proc::output_within(
+                    crate::core::proc::hide_console(&mut child),
+                    std::time::Duration::from_secs(30),
+                )
+                .expect("run the isolated Qoder hook test");
+                assert!(
+                    output.status.success(),
+                    "{case}:\n{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                );
+            }
+            return;
+        };
+
+        let root = PathBuf::from(std::env::var_os(ROOT_ENV).unwrap());
+        let host = local_host();
+        let target = HookTarget {
+            host: &*host,
+            home: root.join("home"),
+            exe: std::env::current_exe().unwrap(),
+        };
+        let default_settings = target.home.join(".qoder").join("settings.json");
+        let custom_settings = root.join("custom config").join("settings.json");
+        let (settings, untouched) = if case == "override" {
+            (&custom_settings, &default_settings)
+        } else {
+            (&default_settings, &custom_settings)
+        };
+        let user_config = serde_json::json!({
+            "model": "qoder-test",
+            "hooks": {
+                "Stop": [{ "hooks": [{ "type": "command", "command": "echo user-hook" }] }]
+            }
+        });
+        for path in [settings, untouched] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, user_config.to_string()).unwrap();
+        }
+
+        let agent = HookAgent::QoderCLI;
+        assert_eq!(agent.target_path(&target), *settings);
+        let remote_host = FakeRemote::shared();
+        let remote = HookTarget::remote(&*remote_host, PathBuf::from("/home/me"));
+        assert_eq!(
+            agent.target_path(&remote),
+            PathBuf::from("/home/me/.qoder/settings.json"),
+            "a local override must not redirect remote hooks"
+        );
+
+        assert_eq!(hooks_state(&target, agent), HooksState::NotInstalled);
+        assert_eq!(
+            install_hooks(&target, agent).unwrap(),
+            HookOutcome::Installed
+        );
+        assert_eq!(hooks_state(&target, agent), HooksState::Installed);
+        assert!(
+            std::fs::read_to_string(settings)
+                .unwrap()
+                .contains("agent-hook qodercli")
+        );
+        assert_eq!(
+            uninstall_hooks(&target, agent).unwrap(),
+            HookOutcome::Removed
+        );
+        assert_eq!(hooks_state(&target, agent), HooksState::NotInstalled);
+        for path in [settings, untouched] {
+            let actual: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            assert_eq!(actual, user_config, "{}", path.display());
+        }
+    }
+
+    #[test]
+    fn qoder_cn_config_dir_controls_local_hook_lifecycle() {
+        const CASE_ENV: &str = "TTY7_TEST_QODER_CN_CONFIG_CASE";
+        const ROOT_ENV: &str = "TTY7_TEST_QODER_CN_CONFIG_ROOT";
+        let Ok(case) = std::env::var(CASE_ENV) else {
+            for case in ["override", "empty", "unset"] {
+                let sandbox = tempfile::tempdir().unwrap();
+                let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+                child
+                    .args([
+                        "--exact",
+                        "core::agent_hooks::tests::qoder_cn_config_dir_controls_local_hook_lifecycle",
+                        "--nocapture",
+                    ])
+                    .env(CASE_ENV, case)
+                    .env(ROOT_ENV, sandbox.path());
+                match case {
+                    "override" => {
+                        child.env("QODERCN_CONFIG_DIR", sandbox.path().join("custom config"))
+                    }
+                    "empty" => child.env("QODERCN_CONFIG_DIR", ""),
+                    _ => child.env_remove("QODERCN_CONFIG_DIR"),
+                };
+                let output = crate::core::proc::output_within(
+                    crate::core::proc::hide_console(&mut child),
+                    std::time::Duration::from_secs(30),
+                )
+                .expect("run the isolated Qoder CN hook test");
+                assert!(
+                    output.status.success(),
+                    "{case}:\n{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                );
+            }
+            return;
+        };
+
+        let root = PathBuf::from(std::env::var_os(ROOT_ENV).unwrap());
+        let host = local_host();
+        let target = HookTarget {
+            host: &*host,
+            home: root.join("home"),
+            exe: std::env::current_exe().unwrap(),
+        };
+        let default_settings = target.home.join(".qoder-cn").join("settings.json");
+        let custom_settings = root.join("custom config").join("settings.json");
+        let (settings, untouched) = if case == "override" {
+            (&custom_settings, &default_settings)
+        } else {
+            (&default_settings, &custom_settings)
+        };
+        let user_config = serde_json::json!({
+            "model": "qoder-cn-test",
+            "hooks": {
+                "Stop": [{ "hooks": [{ "type": "command", "command": "echo user-hook" }] }]
+            }
+        });
+        for path in [settings, untouched] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, user_config.to_string()).unwrap();
+        }
+
+        let agent = HookAgent::QoderCLICn;
+        assert_eq!(agent.target_path(&target), *settings);
+        let remote_host = FakeRemote::shared();
+        let remote = HookTarget::remote(&*remote_host, PathBuf::from("/home/me"));
+        assert_eq!(
+            agent.target_path(&remote),
+            PathBuf::from("/home/me/.qoder-cn/settings.json"),
+            "a local override must not redirect remote hooks"
+        );
+
+        assert_eq!(hooks_state(&target, agent), HooksState::NotInstalled);
+        assert_eq!(
+            install_hooks(&target, agent).unwrap(),
+            HookOutcome::Installed
+        );
+        assert_eq!(hooks_state(&target, agent), HooksState::Installed);
+        assert!(
+            std::fs::read_to_string(settings)
+                .unwrap()
+                .contains("agent-hook qoderclicn")
+        );
+        assert_eq!(
+            uninstall_hooks(&target, agent).unwrap(),
+            HookOutcome::Removed
+        );
+        assert_eq!(hooks_state(&target, agent), HooksState::NotInstalled);
+        for path in [settings, untouched] {
+            let actual: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            assert_eq!(actual, user_config, "{}", path.display());
+        }
+    }
+
+    #[test]
+    fn codebuddy_config_dir_controls_local_hook_lifecycle() {
+        const CASE_ENV: &str = "TTY7_TEST_CODEBUDDY_CONFIG_CASE";
+        const ROOT_ENV: &str = "TTY7_TEST_CODEBUDDY_CONFIG_ROOT";
+        let Ok(case) = std::env::var(CASE_ENV) else {
+            // Each case gets its own environment, without changing the one
+            // shared by the other tests or touching the user's settings.
+            for case in ["override", "blank", "unset"] {
+                let sandbox = tempfile::tempdir().unwrap();
+                let mut child = std::process::Command::new(std::env::current_exe().unwrap());
+                child
+                    .args([
+                        "--exact",
+                        "core::agent_hooks::tests::codebuddy_config_dir_controls_local_hook_lifecycle",
+                        "--nocapture",
+                    ])
+                    .env(CASE_ENV, case)
+                    .env(ROOT_ENV, sandbox.path());
+                match case {
+                    "override" => {
+                        child.env("CODEBUDDY_CONFIG_DIR", sandbox.path().join("custom config"))
+                    }
+                    // CodeBuddy trims the value, so whitespace is as unset as empty.
+                    "blank" => child.env("CODEBUDDY_CONFIG_DIR", "  "),
+                    _ => child.env_remove("CODEBUDDY_CONFIG_DIR"),
+                };
+                let output = crate::core::proc::output_within(
+                    crate::core::proc::hide_console(&mut child),
+                    std::time::Duration::from_secs(30),
+                )
+                .expect("run the isolated CodeBuddy hook test");
+                assert!(
+                    output.status.success(),
+                    "{case}:\n{}\n{}",
+                    String::from_utf8_lossy(&output.stdout),
+                    String::from_utf8_lossy(&output.stderr),
+                );
+            }
+            return;
+        };
+
+        let root = PathBuf::from(std::env::var_os(ROOT_ENV).unwrap());
+        let host = local_host();
+        let target = HookTarget {
+            host: &*host,
+            home: root.join("home"),
+            exe: std::env::current_exe().unwrap(),
+        };
+        let default_settings = target.home.join(".codebuddy").join("settings.json");
+        let custom_settings = root.join("custom config").join("settings.json");
+        let (settings, untouched) = if case == "override" {
+            (&custom_settings, &default_settings)
+        } else {
+            (&default_settings, &custom_settings)
+        };
+        let user_config = serde_json::json!({
+            "model": "codebuddy-test",
+            "hooks": {
+                "Stop": [{ "hooks": [{ "type": "command", "command": "echo user-hook" }] }]
+            }
+        });
+        for path in [settings, untouched] {
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, user_config.to_string()).unwrap();
+        }
+
+        let agent = HookAgent::CodeBuddy;
+        assert_eq!(agent.target_path(&target), *settings);
+        let remote_host = FakeRemote::shared();
+        let remote = HookTarget::remote(&*remote_host, PathBuf::from("/home/me"));
+        assert_eq!(
+            agent.target_path(&remote),
+            PathBuf::from("/home/me/.codebuddy/settings.json"),
+            "a local override must not redirect remote hooks"
+        );
+
+        assert_eq!(hooks_state(&target, agent), HooksState::NotInstalled);
+        assert_eq!(
+            install_hooks(&target, agent).unwrap(),
+            HookOutcome::Installed
+        );
+        assert_eq!(hooks_state(&target, agent), HooksState::Installed);
+        assert!(
+            std::fs::read_to_string(settings)
+                .unwrap()
+                .contains("agent-hook codebuddy")
+        );
+        assert_eq!(
+            uninstall_hooks(&target, agent).unwrap(),
+            HookOutcome::Removed
+        );
+        assert_eq!(hooks_state(&target, agent), HooksState::NotInstalled);
+        for path in [settings, untouched] {
+            let actual: serde_json::Value =
+                serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap();
+            assert_eq!(actual, user_config, "{}", path.display());
+        }
     }
 
     #[test]

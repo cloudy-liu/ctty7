@@ -1061,6 +1061,24 @@ mod tests {
         );
     }
 
+    /// The curl installer's `qoder` is a `qoder.cmd` that hands off to a
+    /// PowerShell dispatcher, which starts the native CLI; the CLI's own shell
+    /// tool runs below it.
+    #[test]
+    fn qoder_is_found_below_its_powershell_dispatcher() {
+        let procs = vec![
+            p(100, 1, "cmd.exe"),
+            p(200, 100, "powershell.exe"),
+            p(300, 200, "qodercli.exe"),
+            p(400, 300, "bash.exe"),
+        ];
+        assert_eq!(
+            detect_foreground_agent_with(&procs, 100, |_| None, &Default::default())
+                .map(|(agent, _)| agent),
+            Some(CLIAgent::QoderCLI)
+        );
+    }
+
     #[test]
     fn cmder_codex_native_child_is_detected() {
         use std::collections::HashMap;
