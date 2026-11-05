@@ -713,6 +713,17 @@ const EXIT_CODE_PROBE_WINDOW: Duration = Duration::from_millis(500);
 
 const EXIT_CODE_PROBE_INTERVAL: Duration = Duration::from_millis(10);
 
+/// Tracks hook activity and a pending user interrupt for inferred agent state.
+#[derive(Default)]
+struct AgentClock {
+    generation: u64,
+    last_event: Option<std::time::Instant>,
+    interrupt_pending: bool,
+}
+
+const INTERRUPT_SETTLE: Duration = Duration::from_millis(1000);
+const AGENT_STALE_AFTER: Duration = Duration::from_secs(30 * 60);
+
 struct Observer {
     id: u64,
     tx: Sender<DaemonMsg>,
@@ -746,6 +757,7 @@ struct PaneState {
     agent_input_suspended: bool,
     agent_argv: Option<Vec<String>>,
     agent_session: Option<crate::core::cli_agent::AgentSessionState>,
+    agent_clock: AgentClock,
     command_input: CommandInput,
     /// Process probes may still see an invocation after its shutdown hook.
     /// Keep it suppressed until a new command/hook or a different process.
@@ -1479,6 +1491,7 @@ impl DaemonPane {
                 foreground_app: None,
                 agent_input_suspended: false,
                 agent_session: None,
+                agent_clock: AgentClock::default(),
                 agent_argv: None,
                 ended_agent: None,
                 command_input: CommandInput::default(),
@@ -1715,6 +1728,7 @@ impl DaemonPane {
                 foreground_app: carried.foreground_app,
                 agent_input_suspended: false,
                 agent_session: carried.agent_session,
+                agent_clock: AgentClock::default(),
                 agent_argv: carried.agent_argv,
                 ended_agent: carried.ended_agent,
                 command_input: CommandInput::default(),
@@ -1771,6 +1785,7 @@ impl DaemonPane {
             foreground_app: None,
             agent_input_suspended: false,
             agent_session: None,
+            agent_clock: AgentClock::default(),
             agent_argv: None,
             ended_agent: None,
             command_input: CommandInput::default(),
@@ -2171,6 +2186,10 @@ impl DaemonPane {
         agent_state_snapshot(&self.state.lock().unwrap())
     }
 
+    pub(crate) fn expire_stale_agent(&self) {
+        expire_stale_agent(&mut self.state.lock().unwrap(), std::time::Instant::now());
+    }
+
     pub(crate) fn refresh_agent_session(&self) {
         let Some(pty) = self.pty() else { return };
         let Some(shell_pid) = pty.shell_pid else {
@@ -2256,6 +2275,9 @@ impl DaemonPane {
     pub fn write_input(&self, bytes: &[u8]) {
         if bytes.is_empty() {
             return;
+        }
+        if is_interrupt_key(bytes) {
+            arm_interrupt(&self.state);
         }
         dismiss_pending_restore_on_submit(self.id, bytes);
         {
@@ -2981,6 +3003,7 @@ fn apply_signals(st: &mut PaneState, signals: SniffSignals) -> (bool, bool) {
 
 fn end_agent(st: &mut PaneState) {
     apply_agent_input_suspended(st, false);
+    reset_agent_clock(st);
     if let Some(agent) = st.agent {
         let argv = st.agent_argv.take().or_else(|| {
             st.agent_session
@@ -2995,6 +3018,109 @@ fn end_agent(st: &mut PaneState) {
     // Even if process detection stayed at None, a client may have seeded a
     // queued resume. A completed shell command invalidates that seed too.
     notify(st, DaemonMsg::Agent(None));
+}
+
+fn reset_agent_clock(st: &mut PaneState) {
+    st.agent_clock.generation = st.agent_clock.generation.wrapping_add(1);
+    st.agent_clock.last_event = None;
+}
+
+/// Recognize a standalone Esc or Ctrl+C keypress, including the terminal key
+/// protocols that encode those keys as CSI sequences.
+fn is_interrupt_key(bytes: &[u8]) -> bool {
+    match bytes {
+        b"\x1b" | b"\x03" | b"\x1b[27;5;99~" => return true,
+        _ => {}
+    }
+    let Some(body) = bytes
+        .strip_prefix(b"\x1b[")
+        .and_then(|bytes| bytes.strip_suffix(b"u"))
+        .and_then(|bytes| std::str::from_utf8(bytes).ok())
+    else {
+        return false;
+    };
+    let mut fields = body.split(';');
+    let Some(code) = fields
+        .next()
+        .and_then(|field| field.split(':').next())
+        .and_then(|code| code.parse::<u32>().ok())
+    else {
+        return false;
+    };
+    let mut modifiers = fields.next().unwrap_or("1").split(':');
+    let mods = modifiers
+        .next()
+        .and_then(|mods| mods.parse::<u32>().ok())
+        .unwrap_or(1);
+    let event = modifiers
+        .next()
+        .map_or(Some(1), |event| event.parse::<u32>().ok());
+    if event != Some(1) {
+        return false;
+    }
+    const LOCKS: u32 = 64 | 128;
+    let mods = mods.saturating_sub(1) & !LOCKS;
+    (code == 27 && mods == 0) || (code == 99 && mods == 4)
+}
+
+fn arm_interrupt(state: &Arc<Mutex<PaneState>>) {
+    let generation = {
+        let mut st = state.lock().unwrap();
+        let armable = st
+            .agent_session
+            .as_ref()
+            .is_some_and(|session| session.rich && session.mid_turn());
+        if !armable || st.agent_clock.interrupt_pending {
+            return;
+        }
+        st.agent_clock.interrupt_pending = true;
+        st.agent_clock.generation
+    };
+    let waiter = state.clone();
+    let spawned = std::thread::Builder::new()
+        .name("tty7-agent-interrupt".into())
+        .spawn(move || {
+            std::thread::sleep(INTERRUPT_SETTLE);
+            let mut st = waiter.lock().unwrap();
+            settle_interrupt(&mut st, generation);
+        });
+    if spawned.is_err() {
+        state.lock().unwrap().agent_clock.interrupt_pending = false;
+    }
+}
+
+fn settle_interrupt(st: &mut PaneState, armed_at: u64) {
+    st.agent_clock.interrupt_pending = false;
+    if st.agent_clock.generation != armed_at || !st.alive {
+        return;
+    }
+    let Some(session) = st
+        .agent_session
+        .as_mut()
+        .filter(|session| session.mid_turn())
+    else {
+        return;
+    };
+    session.assume_interrupted();
+    notify(st, DaemonMsg::AgentStatus(st.agent_session.clone()));
+}
+
+fn expire_stale_agent(st: &mut PaneState, now: std::time::Instant) {
+    let working = st
+        .agent_session
+        .as_ref()
+        .is_some_and(|session| session.status == crate::core::cli_agent::AgentStatus::Working);
+    if !working {
+        return;
+    }
+    let since = *st.agent_clock.last_event.get_or_insert(now);
+    if now.saturating_duration_since(since) < AGENT_STALE_AFTER {
+        return;
+    }
+    if let Some(session) = st.agent_session.as_mut() {
+        session.assume_stale();
+    }
+    notify(st, DaemonMsg::AgentStatus(st.agent_session.clone()));
 }
 
 #[cfg_attr(not(windows), allow(dead_code))]
@@ -3076,11 +3202,14 @@ fn apply_agent_signals(
             // Hook identity is stronger than a stale pane value. Reset the
             // old session before applying this event so the two agents cannot
             // share an id/status/launch argv.
+            reset_agent_clock(st);
             st.agent_session = None;
             st.agent_argv = None;
             st.agent = Some(agent);
             notify(st, DaemonMsg::Agent(Some(agent)));
         }
+        st.agent_clock.generation = st.agent_clock.generation.wrapping_add(1);
+        st.agent_clock.last_event = Some(std::time::Instant::now());
         st.agent_session
             .get_or_insert_with(AgentSessionState::default)
             .apply_event(event);
@@ -3253,6 +3382,7 @@ fn apply_agent(
     }
     // Identity changed — including A → B, not just A → none. A leftover
     // Claude session must not sit under a process-detected Cursor icon.
+    reset_agent_clock(st);
     if st.agent_session.is_some() {
         st.agent_session = None;
         notify(st, DaemonMsg::AgentStatus(None));
@@ -3324,6 +3454,7 @@ fn remember_agent_resume(
         ));
     }
     st.ended_agent = None;
+    reset_agent_clock(st);
     st.agent = Some(resume.agent);
     st.agent_argv = Some(resume.launch_argv.clone());
     st.agent_session = Some(AgentSessionState {
@@ -3346,6 +3477,7 @@ fn stamp_launch_argv(st: &mut PaneState, argv: Option<Vec<String>>) {
     if st.agent_argv.as_ref() == Some(&argv) {
         return;
     }
+    reset_agent_clock(st);
     let before = st.agent_session.clone();
     let resumed_id = st
         .agent
@@ -6110,6 +6242,7 @@ mod tests {
             foreground_app: None,
             agent_input_suspended: false,
             agent_session: None,
+            agent_clock: AgentClock::default(),
             agent_argv: None,
             ended_agent: None,
             command_input: CommandInput::default(),
@@ -7578,6 +7711,7 @@ mod tests {
             rich: true,
             cwd: None,
             activity: 0,
+            inferred: false,
         });
         apply_signals(&mut st, sniffer.feed(b"\x1b]9;noise\x07"));
         assert_eq!(

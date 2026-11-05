@@ -10762,6 +10762,7 @@ mod run_badge_gpui_tests {
             rich: true,
             cwd: None,
             activity: 0,
+            inferred: false,
         }))
         .encode(stream)
         .unwrap();

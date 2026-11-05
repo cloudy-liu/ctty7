@@ -2,10 +2,10 @@
 //!
 //! The hooks only report what an agent chooses to announce, and some agents
 //! announce nothing. Antigravity and Cursor have no hooks tty7 can install,
-//! and Codex's hooks say nothing about a permission prompt. Herdr reads all of
-//! them from the screen instead: each agent has a manifest of rules, a rule is
-//! a set of text matches over one region of the live bottom of the pane, and
-//! the highest-priority rule that matches names the state.
+//! and Codex can miss a permission prompt. Herdr reads all of them from the
+//! screen instead: each agent has a manifest of rules, a rule is a set of text
+//! matches over one region of the live bottom of the pane, and the
+//! highest-priority rule that matches names the state.
 //!
 //! The manifests in `assets/agent-detection/` are herdr's own, with tty7's
 //! additions kept in `extensions/` (Apache-2.0; see the README there).
@@ -156,6 +156,9 @@ pub(crate) fn merge(
     screen: Option<ScreenStatus>,
 ) -> Option<AgentStatus> {
     let hooked = hook.filter(|s| s.rich).map(|s| s.status);
+    if let Some(session) = hook.filter(|session| session.rich && session.inferred) {
+        return Some(session.status);
+    }
     if hooked.is_some() && hooks_are_authority(agent) {
         return hooked;
     }
@@ -1330,7 +1333,7 @@ mod tests {
                 evidenced(AgentStatus::Waiting)
             ),
             Some(AgentStatus::Waiting),
-            "codex's hooks never report a permission prompt"
+            "Codex hooks can miss a permission prompt"
         );
         assert_eq!(
             merge(

@@ -61,6 +61,16 @@ fn effective_agent(agent: &str, ran_by_grok: bool) -> &str {
 }
 
 fn effective_event<'a>(agent: &str, event: &'a str, stdin_json: &str) -> Option<&'a str> {
+    // `tool-start` fires before every tool call. Only question tools mean the
+    // agent is waiting on the user rather than continuing its work.
+    if event == "tool-start" {
+        const QUESTION_TOOLS: &[&str] = &["AskUserQuestion", "request_user_input"];
+        let payload =
+            serde_json::from_str::<serde_json::Value>(crate::core::config::strip_bom(stdin_json))
+                .ok()?;
+        let tool = payload.get("tool_name").and_then(|value| value.as_str())?;
+        return QUESTION_TOOLS.contains(&tool).then_some("question-asked");
+    }
     // Qoder, its China build and CodeBuddy also emit SessionStart after
     // compacting the active turn. Preserve its status until a real turn or
     // session boundary arrives.
@@ -831,6 +841,8 @@ const OWNED_FILE_STEM_JS: &str = "tty7.js";
 const CLAUDE_HOOK_EVENTS: &[(&str, &str)] = &[
     ("SessionStart", "session-start"),
     ("UserPromptSubmit", "prompt-submit"),
+    ("PermissionRequest", "permission-request"),
+    ("PreToolUse", "tool-start"),
     ("Notification", "notification"),
     ("PostToolUse", "tool-complete"),
     ("Stop", "stop"),
@@ -840,6 +852,9 @@ const CLAUDE_HOOK_EVENTS: &[(&str, &str)] = &[
 const CODEX_HOOK_EVENTS: &[(&str, &str)] = &[
     ("SessionStart", "session-start"),
     ("UserPromptSubmit", "prompt-submit"),
+    ("PermissionRequest", "permission-request"),
+    ("PreToolUse", "tool-start"),
+    ("PostToolUse", "tool-complete"),
     ("Stop", "stop"),
 ];
 
@@ -1725,6 +1740,7 @@ mod tests {
             .chain(CODEBUDDY_HOOK_EVENTS)
             .map(|(_, e)| *e)
             .chain(GROK_HOOK_EVENTS.iter().map(|(_, e, _)| *e))
+            .filter(|event| *event != "tool-start")
             .collect();
         events.extend([
             "prompt-submit",

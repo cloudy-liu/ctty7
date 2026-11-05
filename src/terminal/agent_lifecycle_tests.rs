@@ -99,6 +99,7 @@ fn report(
             message: None,
             cwd: None,
             activity: 0,
+            inferred: false,
         }),
         daemon,
         window,
@@ -329,6 +330,7 @@ fn agent_lifecycle_new_session_does_not_finish_previous_work(cx: &mut TestAppCon
         message: None,
         cwd: None,
         activity: 0,
+        inferred: false,
     };
     report_session(Some(snapshot.clone()), &mut daemon, window, &view, cx);
     cx.update(|cx| assert!(cx.global::<RecordingDelivery>().desktops.is_empty()));

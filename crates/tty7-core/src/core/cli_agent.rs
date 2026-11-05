@@ -1068,11 +1068,42 @@ pub struct AgentSessionState {
     pub cwd: Option<std::path::PathBuf>,
     #[serde(default)]
     pub activity: u64,
+    /// The status was inferred locally after an interrupt or a silent turn,
+    /// rather than reported by an agent hook.
+    #[serde(default)]
+    pub inferred: bool,
 }
 
 impl AgentSessionState {
     fn default_status() -> AgentStatus {
         AgentStatus::Idle
+    }
+
+    /// Whether a turn is in flight and can be ended by a user interrupt.
+    pub fn mid_turn(&self) -> bool {
+        matches!(self.status, AgentStatus::Working | AgentStatus::Waiting)
+    }
+
+    /// Treat a user interrupt as the end of the current turn unless a real
+    /// hook event arrives during the settle window.
+    pub fn assume_interrupted(&mut self) {
+        if !self.mid_turn() {
+            return;
+        }
+        self.status = AgentStatus::Done;
+        self.message = None;
+        self.inferred = true;
+    }
+
+    /// Clear a working status after an unusually long period with no hook
+    /// event. Silence is not proof that the agent completed its turn.
+    pub fn assume_stale(&mut self) {
+        if self.status != AgentStatus::Working {
+            return;
+        }
+        self.status = AgentStatus::Idle;
+        self.message = None;
+        self.inferred = true;
     }
 
     pub fn apply_event(&mut self, ev: &AgentEvent) {
@@ -1082,6 +1113,7 @@ impl AgentSessionState {
             self.unstarted = false;
         }
         self.rich = true;
+        let guessed = std::mem::take(&mut self.inferred);
         if let Some(id) = &ev.session_id {
             self.session_id = Some(id.clone());
         }
@@ -1109,7 +1141,7 @@ impl AgentSessionState {
             }
             AgentEventKind::ToolComplete => {
                 self.activity = self.activity.wrapping_add(1);
-                if self.status == AgentStatus::Waiting {
+                if self.status == AgentStatus::Waiting || guessed {
                     self.status = AgentStatus::Working;
                     self.message = None;
                 }

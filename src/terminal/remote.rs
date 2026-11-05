@@ -5120,6 +5120,7 @@ mod tests {
             rich: true,
             cwd: None,
             activity: 0,
+            inferred: false,
         }))
         .encode(&mut daemon_side)
         .unwrap();

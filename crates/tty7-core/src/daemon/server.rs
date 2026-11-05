@@ -224,6 +224,7 @@ fn spawn_snapshot_keeper(registry: Arc<Registry>) {
                 let panes = registry.all();
                 for pane in &panes {
                     pane.refresh_agent_session();
+                    pane.expire_stale_agent();
                 }
                 if std::time::Instant::now() < next_snapshot {
                     continue;

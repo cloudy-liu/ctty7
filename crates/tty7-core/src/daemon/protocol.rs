@@ -1809,6 +1809,7 @@ mod tests {
                 rich: true,
                 cwd: Some("/repo/.claude/worktrees/fix-x".into()),
                 activity: 12,
+                inferred: false,
                 unstarted: false,
             })),
             DaemonMsg::AgentStatus(None),

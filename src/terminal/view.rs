@@ -6,7 +6,7 @@ use alacritty_terminal::term::TermMode;
 use gpui::{
     App, ClipboardEntry, ClipboardItem, Context, EntityId, ExternalPaths, FocusHandle, Focusable,
     Font, KeyDownEvent, Modifiers, MouseButton, MouseDownEvent, Pixels, ScrollDelta,
-    ScrollWheelEvent, WeakEntity, Window, actions, div, prelude::*, px,
+    ScrollWheelEvent, Task, WeakEntity, Window, actions, div, prelude::*, px,
 };
 use gpui_component::kbd::Kbd;
 use gpui_component::menu::{ContextMenuExt, PopupMenuItem};
@@ -328,6 +328,7 @@ pub struct TerminalView {
     last_agent_status: Option<crate::core::cli_agent::AgentStatus>,
     last_agent_session: (Option<String>, Option<Vec<String>>),
     agent_turn_started: Option<std::time::Instant>,
+    pending_finish_notice: Option<Task<()>>,
     agent_notifications_initialized: bool,
     agent_waiting_notified: bool,
     last_notification_agent: Option<crate::core::cli_agent::CLIAgent>,
@@ -512,6 +513,8 @@ const GIT_RETRY_GAP: std::time::Duration = std::time::Duration::from_secs(10);
 /// reaches the label, short enough that one still running is named while the
 /// wait for it is still what the reader is doing.
 const TITLE_SETTLE: std::time::Duration = std::time::Duration::from_millis(400);
+
+const AGENT_DONE_SETTLE: std::time::Duration = std::time::Duration::from_millis(1500);
 
 /// What a pane does with a title the program just set — see
 /// `TerminalView::set_title_when_settled`.
@@ -1403,6 +1406,7 @@ impl TerminalView {
             last_agent_status: None,
             last_agent_session: (None, None),
             agent_turn_started: None,
+            pending_finish_notice: None,
             agent_notifications_initialized: false,
             agent_waiting_notified: false,
             last_notification_agent: None,
@@ -3803,6 +3807,7 @@ impl TerminalView {
         let session = self.terminal.agent_session();
         if agent != self.last_notification_agent {
             self.last_notification_agent = agent;
+            self.pending_finish_notice = None;
             self.agent_notifications_initialized = false;
             self.agent_waiting_notified = false;
             self.agent_turn_started = None;
@@ -3815,6 +3820,7 @@ impl TerminalView {
         );
         if session.is_some() && identity != self.last_agent_session {
             self.last_agent_session = identity;
+            self.pending_finish_notice = None;
             self.agent_notifications_initialized = false;
             self.agent_waiting_notified = false;
             self.agent_turn_started = None;
@@ -3831,6 +3837,8 @@ impl TerminalView {
             return false;
         }
         let prev = std::mem::replace(&mut self.last_agent_status, status);
+        self.pending_finish_notice = None;
+        let inferred = session.as_ref().is_some_and(|session| session.inferred);
         let turn_finished = status == Some(AgentStatus::Done) && prev != Some(AgentStatus::Done);
 
         match status {
@@ -3841,8 +3849,8 @@ impl TerminalView {
                 // built, before its leaf was attached, never gets the blur that
                 // would clear `self.focused` — trusting the cached flag there
                 // drops the badge on the one pane the reader is not looking at.
-                self.agent_result_unread =
-                    !window.is_window_active() || !self.focus_handle.is_focused(window);
+                self.agent_result_unread = !inferred
+                    && (!window.is_window_active() || !self.focus_handle.is_focused(window));
                 self.keep_unread_on_focus = false;
             }
             Some(AgentStatus::Done) => {}
@@ -3873,6 +3881,9 @@ impl TerminalView {
                     self.notify_agent_event(agent_name, &body, window, cx);
                 }
             }
+            Some(AgentStatus::Done) if inferred => {
+                self.agent_turn_started = None;
+            }
             Some(AgentStatus::Done) if self.agent_turn_started.is_some() => {
                 let body = match self.agent_turn_started.take() {
                     Some(start) => {
@@ -3881,7 +3892,14 @@ impl TerminalView {
                     }
                     None => t(L10nKey::NotifyTurnFinished).to_string(),
                 };
-                self.notify_agent_event(agent_name, &body, window, cx);
+                let agent_name = agent_name.to_string();
+                self.pending_finish_notice = Some(cx.spawn(async move |this, cx| {
+                    cx.background_executor().timer(AGENT_DONE_SETTLE).await;
+                    let _ = this.update_in(cx, |view, window, cx| {
+                        view.pending_finish_notice = None;
+                        view.notify_agent_event(&agent_name, &body, window, cx);
+                    });
+                }));
             }
             _ => {}
         }
@@ -9245,6 +9263,7 @@ mod gpui_tests {
                 rich: true,
                 cwd: None,
                 activity: 0,
+                inferred: false,
             }))
             .encode(daemon)
             .unwrap();
@@ -9301,6 +9320,7 @@ mod gpui_tests {
             rich: true,
             cwd: None,
             activity: 0,
+            inferred: false,
         }))
         .encode(&mut daemon)
         .unwrap();
@@ -9357,6 +9377,7 @@ mod gpui_tests {
             rich: true,
             cwd: None,
             activity: 0,
+            inferred: false,
         }))
         .encode(daemon)
         .unwrap();
@@ -9473,6 +9494,7 @@ mod gpui_tests {
             rich: true,
             cwd: Some(working_in.clone()),
             activity: 0,
+            inferred: false,
         }))
         .encode(&mut daemon)
         .unwrap();
@@ -14874,6 +14896,7 @@ mod agent_notification_tests {
             message: None,
             cwd: None,
             activity: 0,
+            inferred: false,
         }))
         .encode(daemon)
         .unwrap();

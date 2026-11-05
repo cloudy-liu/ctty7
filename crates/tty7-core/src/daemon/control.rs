@@ -1567,6 +1567,7 @@ mod tests {
                     rich: true,
                     cwd: Some("/work/api".into()),
                     activity: 3,
+                    inferred: false,
                     unstarted: false,
                 },
             }])),
