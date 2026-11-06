@@ -2568,7 +2568,8 @@ mod tests {
         });
         // Hit the heading itself, independently of reading-card padding.
         let position = text.read_with(&vcx, |text, _| {
-            text.anchor_bounds("selection-test").unwrap().origin + point(px(15.), px(12.))
+            let heading = text.anchor_bounds("selection-test").unwrap();
+            point(heading.left() + px(15.), heading.center().y)
         });
         vcx.simulate_mouse_move(position, None, gpui::Modifiers::default());
         vcx.simulate_event(gpui::MouseDownEvent {
