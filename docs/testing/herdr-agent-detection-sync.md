@@ -3,7 +3,7 @@
 ## Scope
 
 The accepted change synchronizes all 14 agents already registered in ctty7's
-screen detector at Herdr commit `2ecf19a92fc3a7fff75b6ce3655ef04f4625ec01`.
+screen detector at Herdr commit `ee5bfb5041bb3e4a49d591c72308aae3c81ecdde`.
 The initial sync at `241b99cd397bb642eaabcfee1647bcecffb26be1` updated
 AGY, Grok, Pi and Codex. The 2026-10-18 follow-up updates Claude to manifest
 version `2026.10.11.1`; the other thirteen files retain their existing bytes.

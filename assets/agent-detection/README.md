@@ -1,7 +1,7 @@
 # Agent screen-detection manifests
 
 These TOML files come from [herdr](https://github.com/herdrdev/herdr)
-(`src/detect/manifests/`, commit `2ecf19a92fc3a7fff75b6ce3655ef04f4625ec01`),
+(`src/detect/manifests/`, commit `ee5bfb5041bb3e4a49d591c72308aae3c81ecdde`),
 licensed under the Apache License 2.0. All 15 upstream files are copied
 byte-for-byte. `upstream.json` records each source path, version and SHA-256.
 Versions belong to individual manifests, not to the entire directory.

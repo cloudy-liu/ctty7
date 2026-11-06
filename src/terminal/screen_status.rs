@@ -637,7 +637,15 @@ fn after_last_prompt_marker(content: &str) -> &str {
 fn before_current_prompt_marker(content: &str) -> &str {
     let lines: Vec<&str> = content.lines().collect();
     match current_codex_prompt_index(&lines) {
-        Some(i) => &content[..line_start(content, &lines, i)],
+        Some(mut i) => {
+            // The input box's top border is not agent output. Leaving it at
+            // the end of this region hides a live status line from Codex's
+            // anchored working rule.
+            while i > 0 && (lines[i - 1].trim().is_empty() || is_horizontal_rule(lines[i - 1])) {
+                i -= 1;
+            }
+            &content[..line_start(content, &lines, i)]
+        }
         None => content,
     }
 }
@@ -867,6 +875,20 @@ mod tests {
             .state,
             ScreenState::Blocked
         );
+    }
+
+    #[test]
+    fn codex_tool_timeout_stays_working_above_prompt_border() {
+        let reading = read(
+            CLIAgent::Codex,
+            &Input {
+                screen: "• Calling chrome-devtools.take_screenshot\n  + Show details\n\nWaiting for tool timeout (23m 54s • esc to interrupt)\n──────────────────\n› Ask Codex to do anything\n──────────────────\n  ? for shortcuts\n",
+                osc_title: "OpenAI Codex (v0.162.1)",
+                osc_progress: "",
+            },
+        )
+        .unwrap();
+        assert_eq!(reading.state, ScreenState::Working);
     }
 
     #[test]
