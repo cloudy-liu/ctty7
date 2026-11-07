@@ -2736,6 +2736,27 @@ mod tests {
                 cx,
             );
         });
+        // The real background probe must finish before this test installs its
+        // own snapshots; parking the GPUI executor alone does not wait for its
+        // Git process, and a late probe would overwrite them.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            vcx.run_until_parked();
+            if app.update_in(&mut vcx, |app, _, _| {
+                !app.tabs[app.active]
+                    .diff_overlay
+                    .as_ref()
+                    .expect("the commit overlay is open")
+                    .loading
+            }) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "diff probe did not finish"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
         vcx.run_until_parked();
         let commit_tab = vcx
             .debug_bounds("editor-commit-tab")
