@@ -1585,6 +1585,12 @@ mod tests {
     }
 
     #[test]
+    fn qoder_hook_names_drop_the_cli_suffix() {
+        assert_eq!(HookAgent::QoderCLI.display_name(), "Qoder");
+        assert_eq!(HookAgent::QoderCLICn.display_name(), "Qoder CN");
+    }
+
+    #[test]
     fn every_tty7_daemon_host_takes_the_console_fast_path() {
         for name in ["tty7-app.exe", "tty7-server.exe", "tty7.exe"] {
             assert!(is_tty7_host_exe(name), "{name} hosts tty7 shells");

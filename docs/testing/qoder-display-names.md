@@ -17,9 +17,11 @@ untouched. The sidebar scene opens three tabs: the startup shell, a stand-in
 process named `codebuddy.exe` (a copy of `timeout.exe`) and a real Qoder CLI
 1.1.84 pane started in a directory Qoder already trusts. No prompt is sent to
 Qoder. The settings scene opens **Settings → Agents** and scrolls to the last
-hook rows. Every scene is a fresh process and config directory, so Before and
-After differ only in the binary. Captures are `PrintWindow` renders with no
-pointer and no overlapping windows.
+hook rows. Every scene is a fresh process and config directory, so the tty7
+chrome differs only in the binary; Qoder's own status line is not fixed by the
+harness (it read `DeepSeek-Flash` before and `Auto` after). Captures are
+`PrintWindow` renders — the same capture path as the pane-title and
+Qoder/CodeBuddy acceptances — with no pointer and no overlapping windows.
 
 ## Matched Before and After
 
@@ -42,12 +44,17 @@ terminal banner is Qoder's own content too.
 ## Automated checks
 
 ```sh
-cargo test -p tty7-core qoder_display_names_drop_the_cli_suffix
+cargo test -p tty7-core qoder
 cargo test -p tty7 agent_rows_are_in_the_search_index
 cargo fmt --all -- --check
 ```
 
 ## Known limitations
 
-Only the dark theme was captured. The labels are theme-independent; the light
-scenes were not repeated.
+- Only the dark theme was captured. The labels are theme-independent; the
+  light scenes were not repeated.
+- The tray menu and CLI output were not captured separately. They read the
+  same `CLIAgent::display_name` and `HookAgent::display_name` values as the
+  captured pane title and settings rows.
+- Qoder's own status line varied between runs (`DeepSeek-Flash` before, `Auto`
+  after). It belongs to the agent, not to tty7 chrome.
