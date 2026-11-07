@@ -731,9 +731,9 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsAgentQwenCode => "Qwen Code",
         L10nKey::SettingsAgentGoose => "Goose",
         L10nKey::SettingsAgentKimiCode => "Kimi Code",
-        L10nKey::SettingsAgentQoderCLI => "Qoder CLI",
+        L10nKey::SettingsAgentQoderCLI => "Qoder",
         L10nKey::SettingsAgentCodeBuddy => "CodeBuddy",
-        L10nKey::SettingsAgentQoderCn => "Qoder CN CLI",
+        L10nKey::SettingsAgentQoderCn => "Qoder CN",
         L10nKey::SettingsSearchAboutKeywords => {
             "关于 版本 许可证 致谢 构建 更新 检查 github about version license credits update"
         }
@@ -869,12 +869,12 @@ pub fn translate_zh(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsSearchKimiCodeKeywords => {
             "Kimi Code 月之暗面 agent 集成 钩子 安装 kimi code moonshot agent integration hooks install"
         }
-        L10nKey::SettingsSearchQoderCLIKeywords => "Qoder CLI agent 集成 钩子 安装 qoder qodercli",
+        L10nKey::SettingsSearchQoderCLIKeywords => "Qoder agent 集成 钩子 安装 qoder qodercli",
         L10nKey::SettingsSearchCodeBuddyKeywords => {
             "CodeBuddy 腾讯云代码助手 agent 集成 钩子 安装 codebuddy cbc tencent"
         }
         L10nKey::SettingsSearchQoderCnKeywords => {
-            "Qoder CN CLI 国内版 agent 集成 钩子 安装 qodercn qoderclicn qoder-cn qoder"
+            "Qoder CN 国内版 agent 集成 钩子 安装 qodercn qoderclicn qoder-cn qoder"
         }
         L10nKey::SettingsSearchPiKeywords => {
             "Pi agent 集成 扩展 安装 pi agent integration extension install"

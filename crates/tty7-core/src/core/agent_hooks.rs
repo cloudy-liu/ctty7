@@ -466,9 +466,9 @@ impl HookAgent {
             HookAgent::Qwen => "Qwen Code",
             HookAgent::Goose => "Goose",
             HookAgent::Kimi => "Kimi Code",
-            HookAgent::QoderCLI => "Qoder CLI",
+            HookAgent::QoderCLI => "Qoder",
             HookAgent::CodeBuddy => "CodeBuddy",
-            HookAgent::QoderCLICn => "Qoder CN CLI",
+            HookAgent::QoderCLICn => "Qoder CN",
         }
     }
 
@@ -1582,6 +1582,12 @@ mod tests {
                 "{hooked:?} has hooks but no detected agent maps to it"
             );
         }
+    }
+
+    #[test]
+    fn qoder_hook_names_drop_the_cli_suffix() {
+        assert_eq!(HookAgent::QoderCLI.display_name(), "Qoder");
+        assert_eq!(HookAgent::QoderCLICn.display_name(), "Qoder CN");
     }
 
     #[test]
