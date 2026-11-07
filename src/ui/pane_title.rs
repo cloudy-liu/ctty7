@@ -324,7 +324,7 @@ mod gpui_tests {
             cx.notify();
             (ids, vec![agent_stream, shell_stream])
         });
-        settle(&mut vcx);
+        settle_until(&mut vcx, |vcx| drawn(vcx, "agent-pane-title", ids[0]));
         (app, vcx, ids, streams)
     }
 
@@ -334,6 +334,27 @@ mod gpui_tests {
             vcx.update(|window, cx| {
                 let _ = window.draw(cx);
             });
+        }
+    }
+
+    fn settle_until(
+        vcx: &mut VisualTestContext,
+        mut ready: impl FnMut(&mut VisualTestContext) -> bool,
+    ) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            vcx.run_until_parked();
+            vcx.update(|window, cx| {
+                let _ = window.draw(cx);
+            });
+            if ready(vcx) {
+                break;
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "pane title operation did not settle"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(5));
         }
     }
 
@@ -469,7 +490,7 @@ mod gpui_tests {
         assert!(drawn(&mut vcx, "agent-pane-title", agent));
 
         DaemonMsg::Agent(None).encode(&mut streams[0]).unwrap();
-        settle(&mut vcx);
+        settle_until(&mut vcx, |vcx| !drawn(vcx, "agent-pane-title", agent));
         hover_top_edge(&mut vcx, agent);
         assert!(
             !drawn(&mut vcx, "agent-pane-title", agent),
