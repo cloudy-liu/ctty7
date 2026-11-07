@@ -1,24 +1,24 @@
 # Project status
 
-Checked on 2026-11-05 against GitHub, the published v0.10.0 release, and registered local worktrees.
+Checked on 2026-11-06 against GitHub, the published v0.11.0 release, and registered local worktrees.
 
 ## Release scope and open work
 
-The latest published custom release is v0.10.0, published on 2026-11-01. The accepted v0.11.0 scope contains:
+The latest published custom release is v0.11.0, published on 2026-11-05. The accepted v0.11.1 scope contains:
 
-- Configurable Windows taskbar and tray attention-dot sizes (cloudy-liu/ctty7#244).
-- Files-panel multiple selection and confirmed recoverable deletion on the owning host (cloudy-liu/ctty7#250).
-- Inset document tabs with rounded tops and active-tab separator handling (cloudy-liu/ctty7#252).
-- Qoder CLI, Qoder CN CLI, and CodeBuddy recognition, icons, resume/fork actions, and optional hooks (cloudy-liu/ctty7#253).
+- Consistent SSH group folder and arrow settings (cloudy-liu/ctty7#255).
+- Working detection for live Codex tool-timeout lines above input borders (cloudy-liu/ctty7#257).
+- Hidden host pane chrome while Herdr owns the foreground (cloudy-liu/ctty7#258).
 
-PRs #250, #252, and #253 passed all ten latest-head checks and were squash-merged on explicit maintainer instruction; #250 was converted from draft first. Its missing matching Before screenshot remains an accepted disclosed limitation, not verified visual acceptance. PR #244 was already merged after v0.10.0.
+PRs #257 and #258 passed all ten latest-head checks and were squash-merged on explicit maintainer instruction; #258 was converted from draft first. Herdr pane visual acceptance remains unverified, as disclosed in its PR and the release notes.
 
-Final source CI and complete draft asset verification remain required before explicit publication. The [English release notes](../releases/v0.11.0.md) retain native, remote-host, downgrade, and installation limits. The [local-change audit](../testing/local-change-audit-v0.11.0.md) records included and preserved work. Independent Herdr-core, settings-surface, background-attention, prototypes, research, and all retained stashes remain outside the release.
+Final source CI and complete draft asset verification remain required before explicit publication. The [English release notes](../releases/v0.11.1.md) retain live-session, visual, signing, and installation limits. The [local-change audit](../testing/local-change-audit-v0.11.1.md) records included and preserved work. Independent Herdr-core, settings-surface, background-attention, prototypes, research, and all retained stashes remain outside the release.
 
 ## Completed work
 
 | Work | Completion |
 | --- | --- |
+| v0.11.0 publication | Published on 2026-11-05 and set Latest with twelve program assets and checksums.txt. |
 | v0.10.0 publication | Published on 2026-11-01 and set Latest with twelve program assets and checksums.txt. |
 | v0.9.0 publication | Published on 2026-10-31 and set Latest after all twelve program assets and checksums were verified. |
 | v0.8.2 publication | Published on 2026-10-25 and set Latest, with direct titlebar actions and compact preview/tooltip controls through PRs #204 and #205. |
