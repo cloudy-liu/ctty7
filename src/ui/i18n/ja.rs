@@ -822,9 +822,9 @@ pub fn translate_ja(key: L10nKey) -> Option<&'static str> {
         L10nKey::SettingsAgentQwenCode => "Qwen Code",
         L10nKey::SettingsAgentGoose => "Goose",
         L10nKey::SettingsAgentKimiCode => "Kimi Code",
-        L10nKey::SettingsAgentQoderCLI => "Qoder CLI",
+        L10nKey::SettingsAgentQoderCLI => "Qoder",
         L10nKey::SettingsAgentCodeBuddy => "CodeBuddy",
-        L10nKey::SettingsAgentQoderCn => "Qoder CN CLI",
+        L10nKey::SettingsAgentQoderCn => "Qoder CN",
         L10nKey::SettingsSearchAboutKeywords => {
             "バージョン ライセンス クレジット ビルド 更新 確認 github about version license credits update check"
         }

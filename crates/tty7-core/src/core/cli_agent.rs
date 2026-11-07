@@ -165,9 +165,9 @@ impl CLIAgent {
             CLIAgent::Qwen => "Qwen Code",
             CLIAgent::OhMyPi => "Oh My Pi",
             CLIAgent::Kimi => "Kimi Code",
-            CLIAgent::QoderCLI => "Qoder CLI",
+            CLIAgent::QoderCLI => "Qoder",
             CLIAgent::CodeBuddy => "CodeBuddy",
-            CLIAgent::QoderCLICn => "Qoder CN CLI",
+            CLIAgent::QoderCLICn => "Qoder CN",
         }
     }
 
@@ -1545,6 +1545,12 @@ mod tests {
             assert!(a.accent_rgb() <= 0xFFFFFF);
             assert_eq!(CLIAgent::from_slug(a.slug()), Some(a));
         }
+    }
+
+    #[test]
+    fn qoder_display_names_drop_the_cli_suffix() {
+        assert_eq!(CLIAgent::QoderCLI.display_name(), "Qoder");
+        assert_eq!(CLIAgent::QoderCLICn.display_name(), "Qoder CN");
     }
 
     #[test]

@@ -812,9 +812,9 @@ pub fn translate_en(key: L10nKey) -> &'static str {
         L10nKey::SettingsAgentQwenCode => "Qwen Code",
         L10nKey::SettingsAgentGoose => "Goose",
         L10nKey::SettingsAgentKimiCode => "Kimi Code",
-        L10nKey::SettingsAgentQoderCLI => "Qoder CLI",
+        L10nKey::SettingsAgentQoderCLI => "Qoder",
         L10nKey::SettingsAgentCodeBuddy => "CodeBuddy",
-        L10nKey::SettingsAgentQoderCn => "Qoder CN CLI",
+        L10nKey::SettingsAgentQoderCn => "Qoder CN",
         L10nKey::SettingsSearchAboutKeywords => "version license credits build update check github",
         L10nKey::SettingsSearchAppHttpProxyKeywords => {
             "proxy http https socks socks5 clash v2ray network download update"
